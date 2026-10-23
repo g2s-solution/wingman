@@ -2,23 +2,30 @@
 set -euo pipefail
 
 usage() {
-  echo "usage: $(basename "$0") [--force] [config-dir]" >&2
+  echo "usage: $(basename "$0") [--force] [--method claudeai|console|api_key] [config-dir]" >&2
   exit 2
 }
 
 SRC="$(realpath -m "${CLAUDE_DEFAULT_DIR:-$HOME/.claude}")"
 SHARED=(CLAUDE.md settings.json skills agents commands rules plugins)
+KEY_FILE=api-key.env
 
 force=0
+method=""
 dir=""
-for arg in "$@"; do
-  case "$arg" in
+while [ $# -gt 0 ]; do
+  case "$1" in
     --force) force=1 ;;
+    --method) shift; [ $# -gt 0 ] || usage; method="$1" ;;
+    --method=*) method="${1#--method=}" ;;
     -h|--help) usage ;;
     -*) usage ;;
-    *) [ -z "$dir" ] && dir="$arg" || usage ;;
+    *) [ -z "$dir" ] && dir="$1" || usage ;;
   esac
+  shift
 done
+
+case "$method" in claudeai|console|api_key|"") ;; *) usage ;; esac
 
 command -v claude >/dev/null || { echo "claude is not on PATH" >&2; exit 1; }
 
@@ -30,6 +37,21 @@ fi
 dir="${dir/#\~/$HOME}"
 dir="$(realpath -m "$dir")"
 
+if [ -z "$method" ]; then
+  [ -t 0 ] || { echo "no --method given and stdin is not a terminal" >&2; exit 1; }
+  echo "Authentication method:"
+  echo "  1) claudeai  - Claude subscription (browser login)"
+  echo "  2) console   - Anthropic Console account (browser login, API billing)"
+  echo "  3) api_key   - API key (ANTHROPIC_API_KEY), no browser login"
+  read -r -p "Choose [1]: " choice
+  case "${choice:-1}" in
+    1) method=claudeai ;;
+    2) method=console ;;
+    3) method=api_key ;;
+    *) echo "invalid choice: $choice" >&2; exit 2 ;;
+  esac
+fi
+
 # CLAUDE_CONFIG_DIR=$HOME would make Claude Code use $HOME/.claude.json, the default profile's global config.
 is_within() { local parent="${2%/}"; [[ "${1%/}/" == "$parent/"* ]]; }
 if is_within "$dir" "$SRC" || is_within "$SRC" "$dir"; then
@@ -37,10 +59,17 @@ if is_within "$dir" "$SRC" || is_within "$SRC" "$dir"; then
   exit 1
 fi
 
-if [ "$force" -eq 0 ] && { [ -e "$dir/.claude.json" ] || [ -e "$dir/.credentials.json" ]; }; then
+if [ "$force" -eq 0 ] && { [ -e "$dir/.claude.json" ] || [ -e "$dir/.credentials.json" ] || [ -e "$dir/$KEY_FILE" ]; }; then
   echo "refusing: $dir already holds a login; pass --force to reuse it (login replaces the stored account)" >&2
   exit 1
 fi
+
+# Prints "true" or "false"; used to tell the Human if this script changed the default profile's login.
+default_logged_in() {
+  CLAUDE_CONFIG_DIR="$SRC" claude auth status --json 2>/dev/null \
+    | grep -oE '"loggedIn": *(true|false)' | grep -oE '(true|false)' || echo unknown
+}
+before="$(default_logged_in)"
 
 mkdir -p "$dir"
 
@@ -55,10 +84,34 @@ for f in "${SHARED[@]}"; do
 done
 
 echo
-echo "Signing in with CLAUDE_CONFIG_DIR=$dir"
+echo "Signing in ($method) with CLAUDE_CONFIG_DIR=$dir"
 echo "Use the account that this profile should serve, not the default profile's account."
-CLAUDE_CONFIG_DIR="$dir" claude auth login
+
+case "$method" in
+  claudeai) CLAUDE_CONFIG_DIR="$dir" claude auth login --claudeai ;;
+  console)  CLAUDE_CONFIG_DIR="$dir" claude auth login --console ;;
+  api_key)
+    [ -t 0 ] || { echo "api_key needs a terminal to read the key" >&2; exit 1; }
+    read -r -s -p "ANTHROPIC_API_KEY (input hidden): " key; echo
+    [[ "$key" == sk-ant-* && "$key" != *[[:space:]]* ]] || { echo "that does not look like an Anthropic API key" >&2; exit 1; }
+    # settings.json is shared with the default profile, so apiKeyHelper cannot be set per profile; the key lives in a 0600 env file instead.
+    ( umask 077; printf 'ANTHROPIC_API_KEY=%s\n' "$key" > "$dir/$KEY_FILE" )
+    unset key
+    echo "stored the key in $dir/$KEY_FILE (0600); load it with: set -a; . $dir/$KEY_FILE; set +a"
+    ;;
+esac
 
 echo
 echo "Account now signed in under $dir:"
-CLAUDE_CONFIG_DIR="$dir" claude auth status --text
+if [ "$method" = api_key ]; then
+  ( set -a; . "$dir/$KEY_FILE"; set +a; CLAUDE_CONFIG_DIR="$dir" claude auth status --text )
+else
+  CLAUDE_CONFIG_DIR="$dir" claude auth status --text
+fi
+
+after="$(default_logged_in)"
+if [ "$before" = true ] && [ "$after" != true ]; then
+  echo >&2
+  echo "WARNING: the default profile ($SRC) was signed in before and is not now. Sign it in again with: claude auth login" >&2
+  echo "If you used the same account for both profiles, prefer --method api_key for this one." >&2
+fi
