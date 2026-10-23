@@ -109,6 +109,25 @@ else
   CLAUDE_CONFIG_DIR="$dir" claude auth status --text
 fi
 
+bin_dir="${LAUNCHER_DIR:-$HOME/.local/bin}"
+name="$(basename "$dir")"; name="${name#.}"
+launcher="$bin_dir/$name"
+if [ -e "$launcher" ] && ! grep -q "^# another-login launcher" "$launcher" 2>/dev/null; then
+  echo "skip launcher: $launcher exists and was not made by this script"
+else
+  mkdir -p "$bin_dir"
+  cat > "$launcher" <<LAUNCH
+#!/usr/bin/env bash
+# another-login launcher
+export CLAUDE_CONFIG_DIR='$dir'
+if [ -f '$dir/$KEY_FILE' ]; then set -a; . '$dir/$KEY_FILE'; set +a; fi
+exec claude "\$@"
+LAUNCH
+  chmod +x "$launcher"
+  echo "launcher: $launcher  (run \`$name\` to use this profile)"
+  case ":$PATH:" in *":$bin_dir:"*) ;; *) echo "note: $bin_dir is not on PATH" ;; esac
+fi
+
 after="$(default_logged_in)"
 if [ "$before" = true ] && [ "$after" != true ]; then
   echo >&2
