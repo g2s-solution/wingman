@@ -28987,6 +28987,8 @@ var metaSchema = external_exports.object({
   preset: external_exports.string().optional(),
   prompt_chars: external_exports.number()
 });
+var RESULT_PAGE_CHARS = 4e3;
+var RESULT_PAGE_MAX_CHARS = 8e3;
 var RUN_ID = /^[A-Za-z0-9_-]{1,64}$/;
 function newRunId() {
   return randomBytes(6).toString("hex");
@@ -29117,18 +29119,29 @@ function listRuns() {
   }
   return runs.sort((a, b) => b.created_at.localeCompare(a.created_at));
 }
-function runSummary(id) {
+function runSummary(id, page = {}) {
   const meta3 = readMeta(id);
   const resultPath = join2(dirOf(id), "result.md");
-  const result = existsSync(resultPath) ? safeSummary(readFileSync(resultPath, "utf8")) : null;
+  const masked = existsSync(resultPath) ? maskSecrets(readFileSync(resultPath, "utf8")) : null;
   const summary = {
     id: meta3.id,
     account: meta3.account,
     status: meta3.status,
     created_at: meta3.created_at,
     permission_denials: meta3.permission_denials.map((d) => safeSummary(d, 200)),
-    result
+    result: null
   };
+  if (masked !== null) {
+    const limit = Math.min(Math.max(page.limit ?? RESULT_PAGE_CHARS, 1), RESULT_PAGE_MAX_CHARS);
+    const start = Math.min(Math.max(page.offset ?? 0, 0), masked.length);
+    let end = Math.min(start + limit, masked.length);
+    const last = masked.charCodeAt(end - 1);
+    if (end < masked.length && end > start && last >= 55296 && last <= 56319) end -= 1;
+    summary.result = masked.slice(start, end);
+    summary.result_total_chars = masked.length;
+    summary.result_offset = start;
+    if (end < masked.length) summary.result_next_offset = end;
+  }
   if (meta3.branch !== void 0) summary.branch = meta3.branch;
   if (meta3.run_branch !== void 0) summary.run_branch = meta3.run_branch;
   if (meta3.finished_at !== void 0) summary.finished_at = meta3.finished_at;
@@ -38324,7 +38337,12 @@ function createHandlers(deps = {}) {
       if (!TERMINAL_STATUSES.includes(meta3.status)) {
         return { id: meta3.id, status: meta3.status, message: "still running" };
       }
-      return { ...runSummary(input2.run_id) };
+      return {
+        ...runSummary(input2.run_id, {
+          ...input2.offset !== void 0 ? { offset: input2.offset } : {},
+          ...input2.limit !== void 0 ? { limit: input2.limit } : {}
+        })
+      };
     },
     async cancel(input2) {
       loadMeta(input2.run_id);
@@ -38396,8 +38414,14 @@ function buildServer(deps = {}) {
   server.registerTool(
     "wingman_result",
     {
-      description: `Masked, capped final report of a finished run, or "still running". ${LOGS_WARNING}`,
-      inputSchema: runIdInput
+      description: `Masked final report of a finished run, or "still running". Long reports come in pages: when the answer has result_next_offset, call again with offset set to it until it is absent (result_total_chars is the full length). ${LOGS_WARNING}`,
+      inputSchema: {
+        ...runIdInput,
+        offset: external_exports.number().int().min(0).optional().describe("Start of the page, in characters; default 0."),
+        limit: external_exports.number().int().min(1).max(RESULT_PAGE_MAX_CHARS).optional().describe(
+          `Page size in characters; default ${RESULT_PAGE_CHARS}, max ${RESULT_PAGE_MAX_CHARS}.`
+        )
+      }
     },
     wrap(h.result)
   );

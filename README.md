@@ -43,12 +43,13 @@ A bare name such as `claude-thinh` becomes `~/.claude-thinh`. The script signs i
 
 ## Use
 
-In a session: `/new-agent <task>`. The skill chooses a preset, calls `wingman_start` (leave `account` out to get a random eligible target), runs `bin/wingman-wait` in the background and reads the masked, capped report.
+In a session: `/new-agent <task>`. The skill chooses a preset, calls `wingman_start` (leave `account` out to get a random eligible target), runs `bin/wingman-wait` in the background and reads the masked report.
 
 | Tool | Purpose |
 |---|---|
 | `wingman_start` | start a run; `preset` is `readonly` (default) or `edit`; in a git repo it gets a worktree cut from the caller's HEAD, also on the base branch; `edit` runs commit on `<branch>-wm-<runid>` (or `wingman/<runid>` from a base branch), `readonly` runs get a detached worktree with no branch (`branch` overrides) |
-| `wingman_status`, `wingman_result` | state and the final report, masked and capped |
+| `wingman_status` | state of a run, no report text |
+| `wingman_result` | the final report, masked, in pages: `offset` and `limit` (default 4000, max 8000 characters); keep calling with `result_next_offset` until it is absent |
 | `wingman_cancel` | stop a run |
 | `wingman_list` | recent runs |
 | `wingman_cleanup` | remove a run's worktree (`accept` refuses uncommitted changes); the run branch, when there is one, is kept |

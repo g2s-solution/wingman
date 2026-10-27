@@ -173,14 +173,67 @@ describe('runs', () => {
     expect(JSON.stringify(s)).not.toContain('/secret/cwd');
   });
 
-  it('masks and caps result.md in the summary', () => {
+  it('masks result.md and returns the first page with the paging fields', () => {
     const meta = createRun(base);
     writeResult(meta.id, `done\npassword=hunter2x\n${'y'.repeat(5000)}`);
-    const r = runSummary(meta.id).result ?? '';
+    const s = runSummary(meta.id);
+    const r = s.result ?? '';
     expect(r).toContain('password=[MASKED]');
     expect(r).not.toContain('hunter2x');
-    expect(r).toContain('[truncated');
-    expect(r.length).toBeLessThan(4100);
+    expect(r.length).toBe(4000);
+    expect(s.result_offset).toBe(0);
+    expect(s.result_next_offset).toBe(4000);
+    expect(s.result_total_chars).toBeGreaterThan(5000);
+  });
+
+  it('pages through the whole report and the pages join back to the masked text', () => {
+    const meta = createRun(base);
+    const text = `start\n${'abcdefghij'.repeat(1500)}\nend-marker`;
+    writeResult(meta.id, text);
+    let joined = '';
+    let offset: number | undefined = 0;
+    let pages = 0;
+    while (offset !== undefined) {
+      const s = runSummary(meta.id, { offset, limit: 3000 });
+      joined += s.result ?? '';
+      offset = s.result_next_offset;
+      pages += 1;
+      expect(pages).toBeLessThan(20);
+    }
+    expect(joined).toBe(text);
+    expect(pages).toBe(Math.ceil(text.length / 3000));
+  });
+
+  it('masks before slicing: a secret across a page boundary never shows', () => {
+    const meta = createRun(base);
+    const secret = ['sk', 'ant', 'oat01', 'A'.repeat(40)].join('-');
+    const head = `${'x'.repeat(989)} `;
+    writeResult(meta.id, `${head}${secret}${'z'.repeat(100)}`);
+    const first = runSummary(meta.id, { offset: 0, limit: 1000 });
+    const second = runSummary(meta.id, { offset: first.result_next_offset ?? 0, limit: 1000 });
+    for (const page of [first, second]) {
+      expect(page.result).not.toContain('AAAAAAAA');
+      expect(page.result).not.toContain('oat01');
+    }
+  });
+
+  it('clamps limit and offset and omits next_offset on the last page', () => {
+    const meta = createRun(base);
+    writeResult(meta.id, 'q'.repeat(100));
+    const huge = runSummary(meta.id, { limit: 10_000_000 });
+    expect(huge.result?.length).toBe(100);
+    expect(huge.result_next_offset).toBeUndefined();
+    const past = runSummary(meta.id, { offset: 5000 });
+    expect(past.result).toBe('');
+    expect(past.result_offset).toBe(100);
+    expect(past.result_next_offset).toBeUndefined();
+  });
+
+  it('a run without result.md has no result and no paging fields', () => {
+    const meta = createRun(base);
+    const s = runSummary(meta.id);
+    expect(s.result).toBeNull();
+    expect(s.result_total_chars).toBeUndefined();
   });
 });
 

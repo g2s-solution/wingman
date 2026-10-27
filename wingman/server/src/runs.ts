@@ -17,7 +17,7 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
-import { safeSummary } from './mask.js';
+import { maskSecrets, safeSummary } from './mask.js';
 import { runDir, runsDir } from './paths.js';
 import { TERMINAL_STATUSES, type RateLimitInfo, type RunMeta, type RunStatus } from './types.js';
 
@@ -84,7 +84,21 @@ export interface RunSummary {
   finished_at?: string;
   permission_denials: string[];
   rate_limit?: RateLimitInfo;
+  /** One page of the masked report, or null when the run wrote none. */
   result: string | null;
+  /** Length of the whole masked report; the offsets below count into it. */
+  result_total_chars?: number;
+  result_offset?: number;
+  /** Absent on the last page. */
+  result_next_offset?: number;
+}
+
+export const RESULT_PAGE_CHARS = 4000;
+export const RESULT_PAGE_MAX_CHARS = 8000;
+
+export interface ResultPage {
+  offset?: number;
+  limit?: number;
 }
 
 const RUN_ID = /^[A-Za-z0-9_-]{1,64}$/;
@@ -243,18 +257,30 @@ export function listRuns(): RunMeta[] {
   return runs.sort((a, b) => b.created_at.localeCompare(a.created_at));
 }
 
-export function runSummary(id: string): RunSummary {
+export function runSummary(id: string, page: ResultPage = {}): RunSummary {
   const meta = readMeta(id);
   const resultPath = join(dirOf(id), 'result.md');
-  const result = existsSync(resultPath) ? safeSummary(readFileSync(resultPath, 'utf8')) : null;
+  const masked = existsSync(resultPath) ? maskSecrets(readFileSync(resultPath, 'utf8')) : null;
   const summary: RunSummary = {
     id: meta.id,
     account: meta.account,
     status: meta.status,
     created_at: meta.created_at,
     permission_denials: meta.permission_denials.map((d) => safeSummary(d, 200)),
-    result,
+    result: null,
   };
+  if (masked !== null) {
+    // Mask the whole report first, then slice: a secret split by a page boundary would escape the mask.
+    const limit = Math.min(Math.max(page.limit ?? RESULT_PAGE_CHARS, 1), RESULT_PAGE_MAX_CHARS);
+    const start = Math.min(Math.max(page.offset ?? 0, 0), masked.length);
+    let end = Math.min(start + limit, masked.length);
+    const last = masked.charCodeAt(end - 1);
+    if (end < masked.length && end > start && last >= 0xd800 && last <= 0xdbff) end -= 1;
+    summary.result = masked.slice(start, end);
+    summary.result_total_chars = masked.length;
+    summary.result_offset = start;
+    if (end < masked.length) summary.result_next_offset = end;
+  }
   if (meta.branch !== undefined) summary.branch = meta.branch;
   if (meta.run_branch !== undefined) summary.run_branch = meta.run_branch;
   if (meta.finished_at !== undefined) summary.finished_at = meta.finished_at;

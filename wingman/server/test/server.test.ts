@@ -304,8 +304,20 @@ describe('output safety', () => {
     outputs.push((await call(client, 'wingman_list', {})).text);
     const result = await call(client, 'wingman_result', { run_id: id });
     expect(result.data.status).toBe('done');
-    expect(result.data.result as string).toMatch(/truncated/);
-    expect((result.data.result as string).length).toBeLessThan(4200);
+    expect((result.data.result as string).length).toBeLessThanOrEqual(4000);
+    expect(result.data.result_next_offset).toBe(4000);
+    expect(result.data.result_total_chars as number).toBeGreaterThan(4000);
+    const second = await call(client, 'wingman_result', {
+      run_id: id,
+      offset: result.data.result_next_offset,
+    });
+    outputs.push(second.text);
+    expect(second.data.result_offset).toBe(4000);
+    const bad = await client.callTool({
+      name: 'wingman_result',
+      arguments: { run_id: id, limit: 100000 },
+    });
+    expect(JSON.stringify(bad)).toMatch(/limit|too_big|Too big|less than|8000/i);
     for (const out of outputs) {
       expect(out).not.toContain(secret);
       expect(out).not.toContain('EVENTS-ONLY-MARKER');
