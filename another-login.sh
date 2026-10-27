@@ -122,6 +122,7 @@ default_logged_in() {
 before="$(default_logged_in)"
 
 mkdir -p "$dir"
+chmod 700 "$dir"
 
 for f in "${SHARED[@]}"; do
   [ -e "$SRC/$f" ] || continue
@@ -174,7 +175,9 @@ case "$method" in
       drop=CLAUDE_CODE_OAUTH_TOKEN
     fi
     # settings.json is shared with the default profile, so apiKeyHelper cannot be set per profile; the credential lives in a 0600 env file instead.
-    ( umask 077; printf 'unset %s\n%s=%s\n' "$drop" "$var" "$key" > "$dir/$KEY_FILE" )
+    # %q because the file is sourced; chmod because the mode of a file that already exists is not changed by umask
+    ( umask 077; printf 'unset %s\n%s=%q\n' "$drop" "$var" "$key" > "$dir/$KEY_FILE" )
+    chmod 600 "$dir/$KEY_FILE"
     unset key
     echo "stored $var in $dir/$KEY_FILE (0600); load it with: set -a; . $dir/$KEY_FILE; set +a"
     if [ "$var" = CLAUDE_CODE_OAUTH_TOKEN ]; then
