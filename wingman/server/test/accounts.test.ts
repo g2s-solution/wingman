@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -99,11 +99,20 @@ describe('wingman accounts add', () => {
     });
   });
 
-  it('refuses the caller profile, also through a different spelling', async () => {
-    expect(await cli('add', '--id', 'me', '--config-dir', callerDir)).toBe(2);
-    expect(await cli('add', '--id', 'me', '--config-dir', `${callerDir}/sub/..`)).toBe(2);
-    expect(stderr()).toMatch(/caller's own profile/);
-    expect(existsSync(registryFile())).toBe(false);
+  it('registers the caller profile with a note, also through a different spelling', async () => {
+    expect(await cli('add', '--id', 'me', '--config-dir', callerDir)).toBe(0);
+    expect(stdout()).toMatch(
+      /registered me\nnote: me is the profile you are running in; it is skipped/,
+    );
+    out.length = 0;
+    expect(await cli('add', '--id', 'me2', '--config-dir', `${callerDir}/sub/..`)).toBe(0);
+    expect(stdout()).toMatch(/^note: me2 is the profile you are running in/m);
+    expect(registry().accounts.map((a) => a.id)).toEqual(['me', 'me2']);
+  });
+
+  it('prints no note for another profile', async () => {
+    await addAccount('other', join(home, 'o'));
+    expect(stdout()).not.toMatch(/note:/);
   });
 
   it.each([

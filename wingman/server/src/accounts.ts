@@ -150,9 +150,7 @@ async function add(args: string[]): Promise<number> {
       throw new AccountsUsageError(`${flag} must not be empty`);
     }
   }
-  if (canonical(configDir) === callerProfile()) {
-    throw new AccountsUsageError(`${configDir} is the caller's own profile; it is never a target`);
-  }
+  const isCaller = canonical(configDir) === callerProfile();
 
   const registry = await loadAccounts();
   const i = registry.accounts.findIndex((a) => a.id === id);
@@ -177,6 +175,11 @@ async function add(args: string[]): Promise<number> {
   }
   await saveAccounts(registry);
   write(`${i >= 0 ? 'updated' : 'registered'} ${id}`);
+  if (isCaller) {
+    write(
+      `note: ${id} is the profile you are running in; it is skipped when you delegate from it and used when you delegate from another profile`,
+    );
+  }
   return 0;
 }
 
