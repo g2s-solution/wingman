@@ -62,6 +62,7 @@ describe('wingman-wait', () => {
     let out = '';
     child.stdout.on('data', (d) => (out += d));
     const exited = new Promise<number | null>((res) => child.on('exit', res));
+    // negative check: the script shows no sign of having polled, so observe briefly
     await new Promise((r) => setTimeout(r, 300));
     expect(out).toBe('');
     writeMeta('r2', { status: 'done', pid: process.pid });
@@ -134,6 +135,7 @@ describe('wingman-wait', () => {
     let out = '';
     child.stdout.on('data', (d) => (out += d));
     const exited = new Promise<number | null>((res) => child.on('exit', res));
+    // lets the script enter its grace period; nothing observable marks that, and writing late still passes
     await new Promise((r) => setTimeout(r, 200));
     writeMeta('r5', { status: 'partial', pid: 1 });
     expect(await exited).toBe(0);

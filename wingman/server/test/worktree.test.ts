@@ -17,7 +17,7 @@ import {
   setLockOwner,
   type ExecFn,
 } from '../src/worktree.js';
-import { git, makeRepo, tmp } from './helpers.js';
+import { git, makeRepo, tmp, waitUntil } from './helpers.js';
 
 let home: string;
 let saved: string | undefined;
@@ -349,9 +349,9 @@ describe('pruneOrphans keep and remove rules', () => {
     } finally {
       process.kill(agent, 'SIGKILL');
     }
-    for (let i = 0; i < 50 && groupMembers(leader.pid as number).length > 0; i++) {
-      await new Promise((r) => setTimeout(r, 50));
-    }
+    await waitUntil(() => groupMembers(leader.pid as number).length === 0, {
+      what: 'the killed agent to leave the group',
+    });
     expect(await pruneOrphans()).toEqual([run.id]);
   });
 });
