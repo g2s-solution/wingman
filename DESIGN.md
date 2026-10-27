@@ -55,7 +55,7 @@ A run ends in one of: `done`, `partial`, `blocked`, `needs_input`, `needs_caller
 
 ## Tools (MCP server `wingman`)
 
-v0.1: `wingman_start`, `wingman_status`, `wingman_result`, `wingman_send`, `wingman_cancel`, `wingman_list`. Later: `wingman_accounts`. Start takes `account`, `prompt`, `cwd`, `model`, `preset` or `allowed_tools`, `max_turns`, `worktree`.
+v0.1: `wingman_start`, `wingman_status`, `wingman_result`, `wingman_send`, `wingman_cancel`, `wingman_list`, `wingman_cleanup` (accept or discard: removes the worktree and lock, always keeps the run branch). Later: `wingman_accounts`. Start takes `account`, `prompt`, `cwd`, `model`, `preset` or `allowed_tools`, `max_turns`, `worktree`.
 
 ## Guardrails (in the server, not left to each brief)
 
