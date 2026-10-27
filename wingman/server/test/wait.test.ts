@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { tmp } from './helpers.js';
@@ -34,6 +34,61 @@ function deadPid(): number {
   const r = spawnSync(process.execPath, ['-e', '']);
   return r.pid;
 }
+
+describe('wingman-wait launcher', () => {
+  const BUNDLE = resolve(__dirname, '../dist/index.js');
+  const cli = (args: string[]) => {
+    const r = spawnSync(process.execPath, [BUNDLE, 'wait', ...args], {
+      env: { ...process.env, WINGMAN_HOME: home },
+      encoding: 'utf8',
+      timeout: 20000,
+    });
+    return { code: r.status, out: r.stdout, err: r.stderr };
+  };
+
+  it.each([
+    ['a terminal run', ['t1', '--poll-ms', '20']],
+    ['an unknown run', ['nope']],
+    ['a bad id', ['../etc']],
+    ['a timeout', ['t2', '--timeout-ms', '100', '--poll-ms', '20']],
+  ])('behaves like `node dist/index.js wait` for %s', (_name, args) => {
+    writeMeta('t1', { status: 'partial' });
+    writeMeta('t2', { status: 'running', pid: process.pid });
+    const viaBin = run(args);
+    const direct = cli(args);
+    expect(viaBin.code).toBe(direct.code);
+    expect(viaBin.out).toBe(direct.out);
+    expect(viaBin.err).toBe(direct.err);
+  });
+
+  it('prints an Error line and exits 2 when the bundle is missing', () => {
+    const dir = tmp('launcher');
+    try {
+      mkdirSync(join(dir, 'bin'));
+      copyFileSync(SCRIPT, join(dir, 'bin', 'wingman-wait'));
+      const r = spawnSync(process.execPath, [join(dir, 'bin', 'wingman-wait'), 'x'], {
+        encoding: 'utf8',
+      });
+      expect(r.status).toBe(2);
+      expect(r.stdout).toBe('');
+      expect(r.stderr).toMatch(/^Error: /);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('forwards the stop signal to the waiting process', async () => {
+    writeMeta('t3', { status: 'running', pid: process.pid });
+    const child = spawn(process.execPath, [SCRIPT, 't3', '--poll-ms', '20'], {
+      env: { ...process.env, WINGMAN_HOME: home },
+    });
+    const exited = new Promise<number | null>((res) => child.on('exit', (code) => res(code)));
+    await new Promise((r) => setTimeout(r, 300));
+    child.kill('SIGTERM');
+    // the launcher survives the signal long enough to relay it and to report the child's death
+    expect(await exited).toBe(1);
+  });
+});
 
 describe('wingman-wait', () => {
   const cases: [string, number][] = [

@@ -24,6 +24,13 @@ function graceMs(opts: ReconcileOptions): number {
   return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_NO_PID_GRACE_MS;
 }
 
+/** True when a `running` run's supervisor is gone: dead or reused pid, or no pid long after creation. */
+export function supervisorGone(meta: RunMeta, opts: ReconcileOptions = {}): boolean {
+  if (meta.pid !== undefined) return !isSameProcess(meta.pid, meta.pid_start_time);
+  const age = (opts.now ?? Date.now()) - Date.parse(meta.created_at);
+  return age > graceMs(opts);
+}
+
 /**
  * Ends a `running` run whose supervisor is gone (dead pid, pid reused by another process, or no
  * pid recorded long after creation) as `failed_no_report` and persists that. Every tool path
@@ -31,14 +38,9 @@ function graceMs(opts: ReconcileOptions): number {
  */
 export function reconcile(meta: RunMeta, opts: ReconcileOptions = {}): RunMeta {
   if (meta.status !== 'running') return meta;
-  if (meta.pid !== undefined) {
-    if (isSameProcess(meta.pid, meta.pid_start_time)) return meta;
-    // the agent shares the supervisor's process group and can outlive it
-    terminateOrphanedGroup(meta.pid);
-  } else {
-    const age = (opts.now ?? Date.now()) - Date.parse(meta.created_at);
-    if (!(age > graceMs(opts))) return meta;
-  }
+  if (!supervisorGone(meta, opts)) return meta;
+  // the agent shares the supervisor's process group and can outlive it
+  if (meta.pid !== undefined) terminateOrphanedGroup(meta.pid);
   // the supervisor may have finalized between the caller's read and the liveness check
   const again = readMeta(meta.id);
   if (TERMINAL_STATUSES.includes(again.status)) return again;
