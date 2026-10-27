@@ -13,7 +13,10 @@ Out (later phases): selection policy and `pick-account`, tags, scope, priority, 
 ## Layout
 
 ```
-wingman/                      plugin root (this dir, to be renamed)
+.claude-plugin/marketplace.json   repo root is a marketplace; its one plugin has source ./wingman
+.mcp.json, .claude/, CLAUDE.md    repo tooling (context7, hooks), not part of the plugin
+another-login.sh, DESIGN.md ROADMAP.md PLAN.md   repo root
+wingman/                      plugin root (the repo-root .mcp.json stays separate)
   .claude-plugin/plugin.json
   .mcp.json                   points at ${CLAUDE_PLUGIN_ROOT}/server/dist/index.js
   server/                     TypeScript, Node 22, bundled with esbuild
@@ -30,8 +33,6 @@ wingman/                      plugin root (this dir, to be renamed)
     dist/index.js             committed bundle
   bin/wingman-wait            blocks until a run ends
   skills/delegate-apply/SKILL.md
-  another-login.sh            first-time login helper
-  DESIGN.md ROADMAP.md PLAN.md
 ```
 
 ## Steps

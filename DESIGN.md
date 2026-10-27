@@ -20,6 +20,7 @@ Swapping roles needs no feature: start `claude` under another profile and that p
 | `id`, `label` | short name used by tools and skills |
 | `config_dir` | profile directory |
 | `provider` | agent backend, default `claude` |
+| `command` | executable that starts the agent for this profile, default `claude`; for a profile made by `another-login.sh` it is the launcher (for example `~/.local/bin/claude-thinh`), which sets `CLAUDE_CONFIG_DIR` and loads that profile's credential |
 | `scope` | data boundary (for example `company`); a run only goes to an account whose scope matches the work (v0.2) |
 | `tags`, `priority` | selection hints (v0.2) |
 | `status` | `active`, `disabled`, `rate_limited` (v0.3) |
@@ -36,7 +37,7 @@ Quota: every run records the `rate_limit_event` data the CLI emits (`status`, `r
 
 ## Child process environment
 
-The runner builds the child's environment from an allowlist, never from the caller's environment: `PATH`, `HOME`, `USER`, `LANG`/`LC_*`, `TERM`, `SHELL`, the proxy variables, `CLAUDE_CONFIG_DIR=<target>`, `WINGMAN_DEPTH`. Every `CLAUDE_CODE_*`, `CLAUDECODE` and `ANTHROPIC_*` variable is dropped, because a desktop session sets identity, auth-refresh and messaging variables that would make the child behave as the caller's account or as a desktop child. The child keeps the proxy variables (DLP). The runner's own `git fetch` and `git worktree add` run with the proxy variables removed (`env -u HTTPS_PROXY -u https_proxy -u HTTP_PROXY -u http_proxy`), with up to 4 retries on a 503, because the internal git host rejects the proxy.
+The runner builds the child's environment from an allowlist, never from the caller's environment: `PATH`, `HOME`, `USER`, `LANG`/`LC_*`, `TERM`, `SHELL`, the proxy variables, `CLAUDE_CONFIG_DIR=<target>`, `WINGMAN_DEPTH`. Every `CLAUDE_CODE_*`, `CLAUDECODE` and `ANTHROPIC_*` variable is dropped, because a desktop session sets identity, auth-refresh and messaging variables that would make the child behave as the caller's account or as a desktop child. The child keeps the proxy variables (DLP). **Credentials**: a profile signed in with a token (`another-login.sh`, `authMethod: oauth_token`) authenticates only because its launcher exports `CLAUDE_CODE_OAUTH_TOKEN` from the profile's `api-key.env`; with the credential variables dropped and `CLAUDE_CONFIG_DIR` alone, the child reports "Not logged in" (observed in Gate 0). So the runner execs the account's `command` (the launcher) with the allowlisted env and never reads, stores or forwards a credential itself; the launcher adds it. A profile signed in with `claude auth login` (credentials file in its config dir) works with `command: claude`. Tests: the credential variable is absent from the caller env handed to the runner and appears in the child only through the launcher. The runner's own `git fetch` and `git worktree add` run with the proxy variables removed (`env -u HTTPS_PROXY -u https_proxy -u HTTP_PROXY -u http_proxy`), with up to 4 retries on a 503, because the internal git host rejects the proxy.
 
 ## Run lifecycle
 
@@ -77,6 +78,13 @@ v0.1 supports Claude Code only, but the runner is written against a small adapte
 ## Engine
 
 Candidates, to be decided in Gate 0 by testing under a real second profile: the Agent SDK (`query()`; leave `settingSources` unset so user, project and local settings load; `env` replaces the whole environment; `systemPrompt` preset with `append`); `claude -p --output-format stream-json --verbose`; and Claude Code's built-in background sessions (`--bg`, `claude agents --json`, `claude logs`, `claude stop`), which could replace much of the detach, list and cancel code. `--max-turns` works but is hidden from `--help`. `--bare` is not usable (it never reads OAuth). Default if equal: `claude -p` stream-json.
+
+### Gate 0 outcome
+
+- **Engine: `claude -p --output-format stream-json --verbose`** (default, nothing argued for another). Permission mode `acceptEdits`; the `auto` comparison is deferred.
+- Verified under the second profile through its launcher, started with `env -i PATH HOME`: `-p` runs, `/ailab-agent:os-onboard` expands as a skill under `-p`, and this command line is accepted: `-p <prompt> --session-id <uuid> --append-system-prompt <text> --disallowedTools <names...> --permission-mode acceptEdits --permission-prompts none --max-turns <n> --output-format stream-json --verbose`. `--strict-mcp-config` and `--plugin-dir` exist; `--max-turns` is hidden from `--help` but works.
+- Event contract (keys): `system/init`, `system/hook_started`, `system/hook_response`, `assistant` (`message`, `session_id`, `uuid`), `rate_limit_event` (`rate_limit_info`: `status`, `resetsAt`, `rateLimitType`, `isUsingOverage`, `overageStatus`, `unifiedWindows`; no `utilization` key seen on an idle account), `result/success` (`result`, `is_error`, `num_turns`, `permission_denials`, `stop_reason`, `session_id`, `duration_ms`). The final message is `result.result`.
+- **Open (not run in Gate 0)**: spawn from inside a real MCP server (covered by verification step 8.1), `installed_plugins.json` before/after comparison, settings-symlink survival, `--bg`, detached survival after the desktop session ends, `Agent` allow under `-p`.
 
 ## Decisions
 
