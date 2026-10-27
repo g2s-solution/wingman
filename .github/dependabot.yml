@@ -1,0 +1,23 @@
+# Plugin version bumps are done by hand (see docs/RELEASING.md); Dependabot only updates dependencies.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: chore(deps)
+
+  - package-ecosystem: npm
+    directory: /wingman/server
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: chore(deps)
+    groups:
+      dev-dependencies:
+        dependency-type: development
+        update-types:
+          - minor
+          - patch
