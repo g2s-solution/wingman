@@ -43,7 +43,15 @@ export function makeAccount(command: string, configDir: string): Account {
   return { id: 'target', label: 'Target', config_dir: configDir, provider: 'claude', command };
 }
 
-export function readLog(log: string): { argv: string[]; env_names: string[]; cwd: string }[] {
+export interface FakeRecord {
+  argv: string[];
+  prompt_length: number;
+  prompt_sha256: string;
+  env_names: string[];
+  cwd: string;
+}
+
+export function readLog(log: string): FakeRecord[] {
   return readFileSync(log, 'utf8')
     .trim()
     .split('\n')

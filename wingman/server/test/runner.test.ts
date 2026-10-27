@@ -1,5 +1,6 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, readdirSync, readlinkSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { runDir, worktreesDir } from '../src/paths.js';
@@ -304,13 +305,58 @@ describe('guards', () => {
     expect(existsSync(join(home, 'runs')) ? readdirSync(join(home, 'runs')) : []).toEqual([]);
   });
 
-  it('delivers a prompt that looks like a flag as the prompt, after `--`', async () => {
-    const prompt = '--dangerously-skip-permissions';
+  const sha = (text: string): string => createHash('sha256').update(text).digest('hex');
+
+  it('delivers the prompt over stdin, not in argv', async () => {
+    const prompt = '--dangerously-skip-permissions\nsecond line ünïcode MARKER-91c2';
     const { opts, log } = ctx('ok', { prompt });
     await finish(await startRun(opts));
-    const argv = readLog(log)[0]!.argv;
-    expect(argv.slice(-2)).toEqual(['--', prompt]);
-    expect(argv.slice(0, -2)).not.toContain(prompt);
+    const rec = readLog(log)[0]!;
+    expect(rec.prompt_sha256).toBe(sha(prompt));
+    expect(rec.prompt_length).toBe(Buffer.byteLength(prompt));
+    expect(rec.argv.join('\n')).not.toContain('MARKER-91c2');
+    expect(rec.argv).not.toContain('--dangerously-skip-permissions');
+  });
+
+  it('delivers a very long prompt intact', async () => {
+    const prompt = 'x'.repeat(500_000) + '\nend';
+    const { opts, log } = ctx('ok', { prompt });
+    const meta = await finish(await startRun(opts), 30000);
+    expect(meta.status).toBe('done');
+    const rec = readLog(log)[0]!;
+    expect(rec.prompt_length).toBe(prompt.length);
+    expect(rec.prompt_sha256).toBe(sha(prompt));
+  });
+
+  it('never writes the prompt into meta.json', async () => {
+    const { opts } = ctx('ok', { prompt: 'MARKER-5d1e do the thing' });
+    const meta = await finish(await startRun(opts));
+    expect(readFileSync(join(runDir(meta.id), 'meta.json'), 'utf8')).not.toContain('MARKER-5d1e');
+  });
+
+  it.skipIf(process.platform !== 'linux')(
+    'keeps the prompt out of the agent and supervisor command lines',
+    async () => {
+      const { opts } = ctx('hang', { prompt: 'do it MARKER-c0ffee-4242' });
+      const started = await startRun(opts);
+      await eventsContain(started.id, 'working');
+      const supervisor = readMeta(started.id).pid!;
+      const pids = [supervisor, ...groupMembers(supervisor)];
+      expect(pids.length).toBeGreaterThan(1);
+      for (const pid of pids) {
+        const cmdline = readFileSync(`/proc/${pid}/cmdline`, 'utf8');
+        expect(cmdline).not.toContain('MARKER-c0ffee-4242');
+      }
+      await cancelRun(started.id);
+    },
+  );
+
+  it('an agent that exits without reading stdin does not crash the supervisor', async () => {
+    const prompt = 'y'.repeat(500_000);
+    const { opts, log } = ctx('no_stdin', { prompt });
+    const meta = await finish(await startRun(opts), 30000);
+    expect(meta.status).toBe('done');
+    expect(readLog(log)[0]!.prompt_length).toBe(0);
   });
 
   it('passes depth+1 and the base deny list to the child', async () => {

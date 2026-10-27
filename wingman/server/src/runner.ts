@@ -18,7 +18,13 @@ import { createInterface } from 'node:readline';
 import { relative, join, isAbsolute } from 'node:path';
 import { claudeAdapter, getAdapter, isRateLimitRejected } from './adapters/claude.js';
 import { maskSecrets } from './mask.js';
-import { DEFAULT_PRESET, guardPrompt, parseStatusLine, resolveTools } from './guard.js';
+import {
+  DEFAULT_PRESET,
+  guardPrompt,
+  parseStatusLine,
+  presetMayCommit,
+  resolveTools,
+} from './guard.js';
 import { runDir, wingmanHome } from './paths.js';
 import {
   appendEvent,
@@ -110,6 +116,7 @@ interface SupervisorPayload {
   provider: string;
   command: string;
   args: string[];
+  prompt: string;
   cwd: string;
   timeout_ms: number;
   wingman_home: string;
@@ -211,8 +218,12 @@ export async function runSupervisor(runId: string): Promise<void> {
   const child: ChildProcess = spawn(payload.command, payload.args, {
     cwd: payload.cwd,
     env: childEnv,
-    stdio: ['ignore', 'pipe', 'pipe'],
+    stdio: ['pipe', 'pipe', 'pipe'],
   });
+  // the prompt travels over stdin so it never shows in the process list; an agent that exits
+  // without reading it surfaces as EPIPE
+  child.stdin?.on('error', () => undefined);
+  child.stdin?.end(payload.prompt);
 
   const terminateGroup = (): void => {
     try {
@@ -429,7 +440,7 @@ export async function startRun(opts: StartRunOptions): Promise<RunMeta> {
     }
   }
   const mayCommit =
-    (opts.preset ?? DEFAULT_PRESET) !== 'readonly' || opts.allowed_tools !== undefined;
+    opts.allowed_tools !== undefined || presetMayCommit(opts.preset ?? DEFAULT_PRESET);
   if (opts.create_branch === false && mayCommit && opts.worktree) {
     throw new Error(
       'branch:false is only for runs that cannot commit: commits in a detached worktree would be lost on cleanup',
@@ -588,6 +599,7 @@ function spawnRun(
     provider: adapter.provider,
     command,
     args,
+    prompt: spec.prompt,
     cwd: spec.cwd,
     timeout_ms: opts.timeout_ms ?? DEFAULT_TIMEOUT_MS,
     wingman_home: wingmanHome(),

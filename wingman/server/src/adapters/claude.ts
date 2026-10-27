@@ -51,8 +51,6 @@ export const claudeAdapter: Adapter = {
     args.push('--output-format', 'stream-json', '--verbose', '--strict-mcp-config');
     if (spec.allowed_tools.length > 0) args.push('--allowedTools', ...spec.allowed_tools);
     if (spec.model) args.push('--model', spec.model);
-    // options first, then `--`: a prompt that starts with `-` must not parse as an option
-    args.push('--', spec.prompt);
     return { command: account.command, args };
   },
 

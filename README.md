@@ -91,11 +91,12 @@ Claude is told to prefer wingman over its built-in Agent tool when you ask for a
 
 ## Presets, worktrees and branches
 
-| | `readonly` (default) | `edit` |
-|---|---|---|
-| Tools | Read, Glob, Grep, read-only git | plus Edit, Write, Skill, Agent, selected git commands, `node`, `npm` |
-| Worktree | detached, no branch | run branch: `<your-branch>-wm-<run id>`, or `wingman/<run id>` when you are on `main` or another base branch |
-| Your checkout | never touched | never touched |
+| | `readonly` (default) | `edit-files` | `edit` |
+|---|---|---|---|
+| Tools | Read, Glob, Grep, read-only git | plus Edit, Write, selected git commands; no `node`, `npm`, Agent or Skill | plus Skill, Agent, `node`, `npm` |
+| Runs commands | no | no (only git and `date`) | yes, arbitrary code |
+| Worktree | detached, no branch | run branch: `<your-branch>-wm-<run id>`, or `wingman/<run id>` when you are on `main` or another base branch | same as `edit-files` |
+| Your checkout | never touched | never touched | never touched |
 
 Every run in a git repository gets its own worktree cut from your current HEAD, so commit what the run needs first. Starting from a base branch is fine because the run works elsewhere. A detached HEAD is refused. Outside a git repository the run uses the directory as it is.
 
@@ -143,9 +144,9 @@ Run state lives in `~/.wingman/runs/<id>/`. Do not read `events.jsonl`: it holds
 
 ## Limits
 
-- The deny rules are advisory: the `edit` preset allows `node` and `npm`, which run arbitrary code. `setup` is an arbitrary shell command run as your user, outside the presets. Neither is a sandbox.
+- The deny rules are advisory: the `edit` preset allows `node` and `npm`, which run arbitrary code; `edit-files` allows no command except git and `date`, but it still commits and edits files, so it is not a sandbox either. `setup` is an arbitrary shell command run as your user, outside the presets. Neither is a sandbox.
 - A run that changes your base branch, your branch ref, the repository's local git config or its git hooks ends as `needs_caller`. This is an after-the-fact check, not prevention.
-- The prompt reaches the agent as command-line arguments, so other local users of the machine can see it in the process list.
+- The prompt reaches the agent over stdin, so it does not show in the process list. The appended system prompt (the guard text) is still a command-line argument; it is static and not secret.
 - Run supervision is Linux-only (see Requirements).
 - A run cannot be resumed; start a new one. There is no automatic failover when an account is rate limited.
 - Wingman relies on `--strict-mcp-config` and the stream-json output of Claude Code; other Claude Code versions than the tested one may behave differently.

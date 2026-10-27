@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 import { execFileSync } from 'node:child_process';
 import { spawn } from 'node:child_process';
-import { appendFileSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { setInterval } from 'node:timers';
 
@@ -9,9 +10,14 @@ const mode = process.env.FAKE_CLAUDE_MODE ?? 'ok';
 const log = process.env.FAKE_CLAUDE_LOG;
 const sid = '00000000-0000-4000-8000-000000000001';
 
+// 'no_stdin' exits without reading the prompt; every other mode reads it all first
+const promptBytes = mode === 'no_stdin' ? new Uint8Array(0) : readFileSync(0);
+
 if (log) {
   const record = {
     argv: process.argv.slice(2),
+    prompt_length: promptBytes.length,
+    prompt_sha256: createHash('sha256').update(promptBytes).digest('hex'),
     env_names: Object.keys(process.env).sort(),
     cwd: process.cwd(),
   };
@@ -59,6 +65,11 @@ const rate = (status) =>
 init();
 hook();
 switch (mode) {
+  case 'no_stdin':
+    assistant();
+    result('Done without reading.\nWINGMAN_STATUS: done');
+    process.exit(0);
+    break;
   case 'hang':
     assistant();
     setInterval(() => undefined, 1000);
