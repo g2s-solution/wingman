@@ -2,6 +2,13 @@
 
 Versions are the plugin version in `wingman/.claude-plugin/plugin.json`. Claude Code only updates an installed plugin when this number changes.
 
+## 0.2.0
+
+- Safer: the prompt is sent to the agent over stdin, so it no longer shows in the process list (the static guard text is still an argument).
+- New preset `edit-files` for runs that only change files: no `node`, `npm`, `Agent` or `Skill`. The skill picks `readonly`, `edit-files` or `edit`.
+- macOS: process checks (pid reuse, orphan-group kill) use `ps` where `/proc` does not exist; CI runs the tests on macOS too.
+- New CLI inside the bundle: `wingman wait <run_id>` (what `wingman-wait` now runs) and `wingman gc [--older-than-days N] [--dry-run]`, which removes old finished run directories, stale locks and orphan worktrees (never branches).
+
 ## 0.1.5
 
 - The plugin adds a `SessionStart` hook that injects a short instruction into each session: when you ask for a subagent, delegation or an independent review, Claude calls `wingman:new-agent` before the built-in Agent tool. The hook only prints a static file (`hooks/session-start.json`); it runs no other code.

@@ -38488,7 +38488,7 @@ var EMPTY_COMPLETION_RESULT = {
 // package.json
 var package_default = {
   name: "wingman-server",
-  version: "0.1.5",
+  version: "0.2.0",
   private: true,
   type: "module",
   engines: {

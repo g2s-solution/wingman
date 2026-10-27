@@ -19,7 +19,7 @@ you:    get the findings; nothing in your checkout changed
 - Claude Code with plugin support (tested with 2.1.311) on the machine of the session that delegates (the *caller*).
 - Node.js 22 or newer (runs the bundled MCP server; CI tests on 22 and 26), `git`, `bash`.
 - A second Claude login: a claude.ai plan, a Console account or an API key. It must be different from the account of your caller session.
-- Linux. On macOS the login script works (it falls back to `python3` where `realpath -m` is missing), but run supervision, the pid-reuse check and the orphan-process kill use `ps` there instead of `/proc` (unit-tested with canned `ps` output, not yet run on a real Mac).
+- Linux or macOS. Run supervision (the pid-reuse check and the orphan-process kill) reads `/proc` on Linux and uses `ps` on macOS; the `ps` path is unit-tested with canned output and exercised by the macOS CI job, but has had little real-world use. The login script falls back to `python3` where `realpath -m` is missing (macOS).
 
 Terms used in these docs: the **caller** is the session you type in, the **target** is the account that runs the task, a **profile** is a Claude config directory (`CLAUDE_CONFIG_DIR`), and a **run** is one delegated task.
 
@@ -154,7 +154,7 @@ Run state lives in `~/.wingman/runs/<id>/`. Do not read `events.jsonl`: it holds
 - The deny rules are advisory: the `edit` preset allows `node` and `npm`, which run arbitrary code; `edit-files` allows no command except git and `date`, but it still commits and edits files, so it is not a sandbox either. `setup` is an arbitrary shell command run as your user, outside the presets. Neither is a sandbox.
 - A run that changes your base branch, your branch ref, the repository's local git config or its git hooks ends as `needs_caller`. This is an after-the-fact check, not prevention.
 - The prompt reaches the agent over stdin, so it does not show in the process list. The appended system prompt (the guard text) is still a command-line argument; it is static and not secret.
-- Run supervision is Linux-only (see Requirements).
+- On macOS the process checks use `ps` and have had little real-world use (see Requirements).
 - A run cannot be resumed; start a new one. There is no automatic failover when an account is rate limited.
 - Wingman relies on `--strict-mcp-config` and the stream-json output of Claude Code; other Claude Code versions than the tested one may behave differently.
 
