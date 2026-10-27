@@ -19,7 +19,7 @@ you:    get the findings; nothing in your checkout changed
 - Claude Code with plugin support (tested with 2.1.311) on the machine of the session that delegates (the *caller*).
 - Node.js 22 or newer (runs the bundled MCP server; CI tests on 22 and 26), `git`, `bash`.
 - A second Claude login: a claude.ai plan, a Console account or an API key. It must be different from the account of your caller session.
-- Linux. On macOS the login script works (it falls back to `python3` where `realpath -m` is missing), but run supervision, the pid-reuse check and the orphan-process kill read `/proc` and are not available or tested there.
+- Linux or macOS. Run supervision (the pid-reuse check and the orphan-process kill) reads `/proc` on Linux and uses `ps` on macOS; the `ps` path is unit-tested with canned output and exercised by the macOS CI job, but has had little real-world use. The login script falls back to `python3` where `realpath -m` is missing (macOS).
 
 Terms used in these docs: the **caller** is the session you type in, the **target** is the account that runs the task, a **profile** is a Claude config directory (`CLAUDE_CONFIG_DIR`), and a **run** is one delegated task.
 
@@ -91,11 +91,12 @@ Claude is told to prefer wingman over its built-in Agent tool when you ask for a
 
 ## Presets, worktrees and branches
 
-| | `readonly` (default) | `edit` |
-|---|---|---|
-| Tools | Read, Glob, Grep, read-only git | plus Edit, Write, Skill, Agent, selected git commands, `node`, `npm` |
-| Worktree | detached, no branch | run branch: `<your-branch>-wm-<run id>`, or `wingman/<run id>` when you are on `main` or another base branch |
-| Your checkout | never touched | never touched |
+| | `readonly` (default) | `edit-files` | `edit` |
+|---|---|---|---|
+| Tools | Read, Glob, Grep, read-only git | plus Edit, Write, selected git commands; no `node`, `npm`, Agent or Skill | plus Skill, Agent, `node`, `npm` |
+| Runs commands | no | no (only git and `date`) | yes, arbitrary code |
+| Worktree | detached, no branch | run branch: `<your-branch>-wm-<run id>`, or `wingman/<run id>` when you are on `main` or another base branch | same as `edit-files` |
+| Your checkout | never touched | never touched | never touched |
 
 Every run in a git repository gets its own worktree cut from your current HEAD, so commit what the run needs first. Starting from a base branch is fine because the run works elsewhere. A detached HEAD is refused. Outside a git repository the run uses the directory as it is.
 
@@ -137,16 +138,23 @@ Run state lives in `~/.wingman/runs/<id>/`. Do not read `events.jsonl`: it holds
   - when a run finishes, `events.jsonl` is cut to its last 20 MiB (whole lines only);
   - when a top-level wingman server starts, `events.jsonl` of runs that ended more than 14 days ago is deleted;
   - when a top-level wingman server starts, the worktree of a run is removed if the run is over (finished more than a day ago, or found dead), its worktree has no uncommitted changes and no process of the run is still alive.
-- Run directories, `meta.json` and `result.md` are **not** deleted automatically, and wingman has no command for it yet (a `wingman gc` is planned, see `ROADMAP.md`). To remove old runs by hand, delete `~/.wingman/runs/<id>` of runs that are finished and no longer needed.
+- Run directories, `meta.json` and `result.md` are **not** deleted automatically. `wingman gc` removes them on demand; it is manual for now, nothing runs it for you:
+
+  ```sh
+  node <plugin dir>/wingman/bin/wingman gc --older-than-days 30
+  node <plugin dir>/wingman/bin/wingman gc --dry-run   # same counts, changes nothing
+  ```
+
+  It deletes the whole directory of runs that are over and finished more than N days ago (default 30), never a run that is still running (a dead one is first ended as `failed_no_report`), and keeps a run whose worktree still exists. It also prunes orphan worktrees as the server does at start and removes lock files whose owner process is gone or whose run no longer exists. It never deletes git branches. It prints counts only and exits 0 (2 on bad arguments).
 - `worktrees/` holds one git worktree per run. `wingman_cleanup` (`accept` or `discard`) removes the worktree and releases its lock. It keeps the `wingman/<runid>` branch in your repository: delete it yourself with `git branch -D` when you no longer need it.
 - `locks/` holds one small lock file per `lock_key` in use. It is removed when the run is cleaned up, and a lock left by a dead process is reclaimed the next time the same key is used.
 
 ## Limits
 
-- The deny rules are advisory: the `edit` preset allows `node` and `npm`, which run arbitrary code. `setup` is an arbitrary shell command run as your user, outside the presets. Neither is a sandbox.
+- The deny rules are advisory: the `edit` preset allows `node` and `npm`, which run arbitrary code; `edit-files` allows no command except git and `date`, but it still commits and edits files, so it is not a sandbox either. `setup` is an arbitrary shell command run as your user, outside the presets. Neither is a sandbox.
 - A run that changes your base branch, your branch ref, the repository's local git config or its git hooks ends as `needs_caller`. This is an after-the-fact check, not prevention.
-- The prompt reaches the agent as command-line arguments, so other local users of the machine can see it in the process list.
-- Run supervision is Linux-only (see Requirements).
+- The prompt reaches the agent over stdin, so it does not show in the process list. The appended system prompt (the guard text) is still a command-line argument; it is static and not secret.
+- On macOS the process checks use `ps` and have had little real-world use (see Requirements).
 - A run cannot be resumed; start a new one. There is no automatic failover when an account is rate limited.
 - Wingman relies on `--strict-mcp-config` and the stream-json output of Claude Code; other Claude Code versions than the tested one may behave differently.
 

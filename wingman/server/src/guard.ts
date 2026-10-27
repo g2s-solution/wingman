@@ -1,10 +1,10 @@
-export type Preset = 'readonly' | 'edit';
+export type Preset = 'readonly' | 'edit-files' | 'edit';
 export const DEFAULT_PRESET: Preset = 'readonly';
 
 export const STATUS_VALUES = ['done', 'partial', 'blocked', 'needs_input'] as const;
 export type ReportedStatus = (typeof STATUS_VALUES)[number];
 
-export const PRESETS: Record<Preset, { allowed: readonly string[] }> = {
+export const PRESETS: Record<Preset, { allowed: readonly string[]; mayCommit: boolean }> = {
   readonly: {
     allowed: [
       'Read',
@@ -16,6 +16,30 @@ export const PRESETS: Record<Preset, { allowed: readonly string[] }> = {
       'Bash(git show:*)',
       'Bash(date:*)',
     ],
+    mayCommit: false,
+  },
+  'edit-files': {
+    allowed: [
+      'Read',
+      'Glob',
+      'Grep',
+      'Edit',
+      'Write',
+      'Bash(git status:*)',
+      'Bash(git add:*)',
+      'Bash(git commit:*)',
+      'Bash(git diff:*)',
+      'Bash(git log:*)',
+      'Bash(git show:*)',
+      'Bash(git rev-parse:*)',
+      'Bash(git branch --show-current)',
+      'Bash(git ls-files:*)',
+      'Bash(git mv:*)',
+      'Bash(git rm:*)',
+      'Bash(git restore:*)',
+      'Bash(date:*)',
+    ],
+    mayCommit: true,
   },
   edit: {
     allowed: [
@@ -42,8 +66,13 @@ export const PRESETS: Record<Preset, { allowed: readonly string[] }> = {
       'Bash(npm:*)',
       'Bash(date:*)',
     ],
+    mayCommit: true,
   },
 };
+
+export function presetMayCommit(name: string): boolean {
+  return Object.hasOwn(PRESETS, name) ? PRESETS[name as Preset].mayCommit : true;
+}
 
 export function guardPrompt(): string {
   return [

@@ -1,0 +1,27 @@
+#!/usr/bin/env node
+// usage: wingman wait <run_id> [--timeout-ms N] [--poll-ms N] [--grace-ms N]
+//        wingman gc [--older-than-days N] [--dry-run]
+// Thin launcher: the commands live in the server bundle.
+'use strict';
+const { spawn } = require('node:child_process');
+const { existsSync } = require('node:fs');
+const { join } = require('node:path');
+
+const bundle = join(__dirname, '..', 'server', 'dist', 'index.js');
+if (!existsSync(bundle)) {
+  process.stderr.write(`Error: ${bundle} not found; the plugin is not built\n`);
+  process.exit(2);
+}
+const args = process.argv.slice(2);
+// anything else would start the MCP server
+if (!['wait', 'gc'].includes(args[0])) {
+  process.stderr.write('usage: wingman <wait|gc> [options]\n');
+  process.exit(2);
+}
+const child = spawn(process.execPath, [bundle, ...args], { stdio: 'inherit' });
+for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => child.kill(sig));
+child.on('error', (err) => {
+  process.stderr.write(`Error: ${err.message}\n`);
+  process.exit(2);
+});
+child.on('exit', (code) => process.exit(code === null ? 1 : code));
