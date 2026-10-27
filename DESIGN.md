@@ -13,7 +13,7 @@ Swapping roles needs no feature: start `claude` under another profile and that p
 
 ## Account registry
 
-`~/.wingman/accounts.json`. It never holds credentials; login stays in each profile's own config dir. In v0.1 it lists the profiles and the caller picks one by `id`; selection policy, tags and scope arrive in v0.2.
+`~/.wingman/accounts.json`. It never holds credentials; login stays in each profile's own config dir. In v0.1 it lists the profiles; the caller names one by `id` or omits it and the server picks one at random among eligible targets (see Account selection). Selection policy, tags and scope arrive in v0.2.
 
 | field | meaning |
 |---|---|
@@ -28,7 +28,11 @@ Swapping roles needs no feature: start `claude` under another profile and that p
 
 Quota: every run records the `rate_limit_event` data the CLI emits (`status`, `resetsAt`, `rateLimitType`, `utilization`). That is per-run feedback, not a reliable pre-run gauge. The account `status` state machine built on it is v0.3.
 
-## Account selection (skill `pick-account`, v0.2)
+## Account selection
+
+v0.1: `account` is optional in `wingman_start`. When omitted, the server picks one at random among the registry targets that are not the caller's profile and not `disabled`. When given, it is used as is.
+
+v0.2 (skill `pick-account`) replaces the random pick with a smarter one:
 
 1. Hard filter: `status = active` and matching `scope`.
 2. Match `tags` to the task (heavy implementation, cheap lookup).
@@ -42,38 +46,37 @@ The runner builds the child's environment from an allowlist, never from the call
 ## Run lifecycle
 
 - The MCP server is a stateless control plane. Each run is a detached process (own process group); state lives in `~/.wingman/runs/<id>/` (`meta.json`, `events.jsonl`, `result.md`) so a run outlives the caller session. The child's stdout and stderr go to a file descriptor opened by the runner, never through a pipe to the MCP server, so the child does not get EPIPE when the caller ends.
-- The runner pre-assigns the session id (`--session-id <uuid>`) and stores it for `wingman_send`.
-- **Worktree**: when `cwd` is a repo, the run gets a worktree on a distinct run branch `<caller-branch>-wm-<runid>` cut from the **caller's current feature-branch HEAD** (never from origin/base, so artifacts the caller just committed, such as an OpenSpec change, are present; never the base branch). The caller reviews the run branch and merges or fast-forwards it. The worktree lives under `~/.wingman/worktrees/<runid>`. A per-repo lock, keyed by repo and change name, stops two runs from applying the same change.
-- **Worktree setup**: a fresh worktree has no dependencies or ignored local config. Each project provides a setup command (from `openspec/config.yaml` or a wingman preset) that runs before the task. `.env` files are never copied; checks that need local config are reported as Human items.
+- Runs are one-shot, like an ordinary subagent: there is no continue or resume. To give more work, start a new run. The runner still pre-assigns a session id (`--session-id <uuid>`) and records it in `meta.json` for diagnostics only.
+- **Worktree**: when `cwd` is a repo, the run gets a worktree on a distinct run branch `<caller-branch>-wm-<runid>` cut from the **caller's current feature-branch HEAD** (never from origin/base, so work the caller just committed is present; never the base branch). The caller reviews the run branch and merges or fast-forwards it. The worktree lives under `~/.wingman/worktrees/<runid>`. A per-repo lock, keyed by repo and the optional `lock_key` start parameter, stops two runs from working on the same item.
+- **Worktree setup**: a fresh worktree has no dependencies or ignored local config. The setup command comes from the `setup` start parameter or a wingman preset and runs before the task. `.env` files are never copied; checks that need local config are reported as Human items.
 - **Cleanup**: a worktree is removed when its run is accepted or discarded; orphans (run finished or pid dead) are pruned. Cancel kills the process group and checks pid against the recorded start time to avoid pid reuse.
 - `wingman-wait <run_id>` blocks until the run ends; run it with Bash `run_in_background` so the caller is woken on exit instead of polling.
-- Continuing a run (`wingman_send`) always goes back to the account that ran it (see Decisions) and is refused for a run in `failed_no_report` state.
 
 ### Run status
 
-A run ends in one of: `done`, `partial`, `blocked`, `needs_input`, `needs_caller`, `failed`, `failed_no_report`, `rate_limited`, `cancelled`. The runner appends an instruction that the final message ends with a machine-readable line `WINGMAN_STATUS: done|partial|blocked|needs_input`. A missing line maps to `needs_input`; a child that exits without any result message (for example killed by a DLP block) maps to `failed_no_report`, so `wingman-wait` never hangs. For apply-style work the runner also compares task ticks before and after the run. A result that reports a plugin update or install maps to `needs_caller`.
+A run ends in one of: `done`, `partial`, `blocked`, `needs_input`, `needs_caller`, `failed`, `failed_no_report`, `rate_limited`, `cancelled`. The runner appends an instruction that the final message ends with a machine-readable line `WINGMAN_STATUS: done|partial|blocked|needs_input`. A missing line maps to `needs_input`; a child that exits without any result message (for example killed by a DLP block) maps to `failed_no_report`, so `wingman-wait` never hangs. A result that reports a plugin update or install maps to `needs_caller`.
 
 ## Tools (MCP server `wingman`)
 
-v0.1: `wingman_start`, `wingman_status`, `wingman_result`, `wingman_send`, `wingman_cancel`, `wingman_list`, `wingman_cleanup` (accept or discard: removes the worktree and lock, always keeps the run branch). Later: `wingman_accounts`. Start takes `account`, `prompt`, `cwd`, `model`, `preset` or `allowed_tools`, `max_turns`, `worktree`.
+v0.1: `wingman_start`, `wingman_status`, `wingman_result`, `wingman_cancel`, `wingman_list`, `wingman_cleanup` (accept or discard: removes the worktree and lock, always keeps the run branch). Later: `wingman_accounts`. Start takes optional `account` (random eligible target when omitted), `prompt`, `lock_key`, `setup`, `cwd`, `model`, `preset` or `allowed_tools`, `max_turns`, `worktree`.
 
 ## Guardrails (in the server, not left to each brief)
 
 - Every run gets an appended system prompt (through `--append-system-prompt`, or `systemPrompt: {type: 'preset', preset: 'claude_code', append}` in the SDK): never print or send sensitive values, never commit to the base branch, do not ask questions (inside a wingman run, "ask the Human" in any rule or skill means: stop and finish with `WINGMAN_STATUS: needs_input`), always end with a final report and the status line.
 - No interaction: `--permission-prompts none` where available, `AskUserQuestion` disallowed. Permission denials are recorded and their tool names returned to the caller so it can widen the preset deliberately.
-- **Permissions are a preset, not a bare allowlist.** The `os-apply` preset allows: `Agent`, `Skill`, `Edit`, `Write`, `Read`, `Bash(git:*)`, `Bash(node:*)`, `Bash(openspec:*)`, `Bash(date:*)` and the project's check commands read from `openspec/config.yaml`. `git push` is denied outright (os-apply never pushes; pushing stays with the caller and `os-mr`), because prefix rules on a push to the base branch are bypassable (`git -C . push`, `env git push`, `sh -c`). Never `bypassPermissions`. The permission mode (`acceptEdits` versus `auto`, the shared settings default) is decided in Gate 0.
-- **No plugin management in a run**: `Bash(claude:*)`, `Bash(claude plugin:*)` and `Bash(npm install -g:*)` are disallowed. The caller runs the plugin version gate (`check-version-plugin.mjs --gate`) before delegating, because the plugin's own rules tell a run to self-update on a failed gate, which would change the plugin cache under the caller's live session.
+- **Permissions are a preset, not a bare allowlist.** Two presets. `readonly` (default) allows `Read`, `Glob`, `Grep` and read-only git. `edit` allows `Agent`, `Skill`, `Edit`, `Write`, `Read`, `Glob`, `Grep` and `Bash` for git, node, npm and date. `git push` is denied outright in both (pushing stays with the caller), because prefix rules on a push to the base branch are bypassable (`git -C . push`, `env git push`, `sh -c`). Never `bypassPermissions`. The permission mode (`acceptEdits` versus `auto`, the shared settings default) is decided in Gate 0.
+- **No plugin management in a run**: `Bash(claude:*)`, `Bash(claude plugin:*)` and `Bash(npm install -g:*)` are disallowed. A run must not change the plugin cache under the caller's live session.
 - **No recursion in v0.1**: `WINGMAN_DEPTH` (default limit 1) plus the wingman MCP tools disallowed in child runs (`--disallowedTools "mcp__plugin_wingman_*"` or `--strict-mcp-config`), because the plugin is enabled in every profile through the shared `settings.json`.
 - **Output to the caller is masked and capped**: status and result return only the final message and a short status, length-capped, after a secret-pattern mask (bearer, JWT, keys, passwords, URL credentials). Raw `events.jsonl` and tool output are never returned.
 - **Files on disk**: `~/.wingman` is mode 0700, files 0600, with retention for `events.jsonl`. The caller skill forbids reading `events.jsonl` and run logs; to review a run it uses `git diff --stat` and a sensitive-word `grep -c` before reading any hunk.
 
 ## Packaging
 
-A Claude Code plugin named `wingman`: MCP server declared in the plugin's `.mcp.json`, skills (`delegate-apply` in v0.1; `pick-account` and `add-account` later), and the helper CLI. Plugin install copies the git tree and runs no build, so the server is committed as a single bundled file (`server/dist/index.js`, esbuild, MCP SDK included) and `.mcp.json` points at `${CLAUDE_PLUGIN_ROOT}/server/dist/index.js`. "Build at install" is not an option. Profiles share the plugin through the symlinked `plugins/` dir and `settings.json` (`enabledPlugins`), so the MCP server is available in every profile without per-profile `claude mcp add`.
+A Claude Code plugin named `wingman`: MCP server declared in the plugin's `.mcp.json`, skills (`new-agent` in v0.1; `pick-account` and `add-account` later), and the helper CLI. Plugin install copies the git tree and runs no build, so the server is committed as a single bundled file (`server/dist/index.js`, esbuild, MCP SDK included) and `.mcp.json` points at `${CLAUDE_PLUGIN_ROOT}/server/dist/index.js`. "Build at install" is not an option. Profiles share the plugin through the symlinked `plugins/` dir and `settings.json` (`enabledPlugins`), so the MCP server is available in every profile without per-profile `claude mcp add`.
 
 ## Backends
 
-v0.1 supports Claude Code only, but the runner is written against a small adapter interface: build the command, set the account selector env, inject the guardrail prompt, parse events into a common shape (`started`, `message`, `tool`, `rate_limited`, `finished`), and report the session id for resume. Registry entries have a `provider` field (default `claude`). Other providers (OpenAI Codex, OpenCode, and similar CLIs) are added as further adapters in v0.6; the guardrails and the capped-report rule stay in the server so they apply to every provider.
+v0.1 supports Claude Code only, but the runner is written against a small adapter interface: build the command, set the account selector env, inject the guardrail prompt, parse events into a common shape (`started`, `message`, `tool`, `rate_limited`, `finished`), and report the session id. Registry entries have a `provider` field (default `claude`). Other providers (OpenAI Codex, OpenCode, and similar CLIs) are added as further adapters in v0.6; the guardrails and the capped-report rule stay in the server so they apply to every provider.
 
 ## Engine
 
@@ -82,13 +85,13 @@ Candidates, to be decided in Gate 0 by testing under a real second profile: the 
 ### Gate 0 outcome
 
 - **Engine: `claude -p --output-format stream-json --verbose`** (default, nothing argued for another). Permission mode `acceptEdits`; the `auto` comparison is deferred.
-- Verified under the second profile through its launcher, started with `env -i PATH HOME`: `-p` runs, `/ailab-agent:os-onboard` expands as a skill under `-p`, and this command line is accepted: `-p <prompt> --session-id <uuid> --append-system-prompt <text> --disallowedTools <names...> --permission-mode acceptEdits --permission-prompts none --max-turns <n> --output-format stream-json --verbose`. `--strict-mcp-config` and `--plugin-dir` exist; `--max-turns` is hidden from `--help` but works.
+- Verified under the second profile through its launcher, started with `env -i PATH HOME`: `-p` runs, a harmless installed skill expands under `-p`, and this command line is accepted: `-p <prompt> --session-id <uuid> --append-system-prompt <text> --disallowedTools <names...> --permission-mode acceptEdits --permission-prompts none --max-turns <n> --output-format stream-json --verbose`. `--strict-mcp-config` and `--plugin-dir` exist; `--max-turns` is hidden from `--help` but works.
 - Event contract (keys): `system/init`, `system/hook_started`, `system/hook_response`, `assistant` (`message`, `session_id`, `uuid`), `rate_limit_event` (`rate_limit_info`: `status`, `resetsAt`, `rateLimitType`, `isUsingOverage`, `overageStatus`, `unifiedWindows`; no `utilization` key seen on an idle account), `result/success` (`result`, `is_error`, `num_turns`, `permission_denials`, `stop_reason`, `session_id`, `duration_ms`). The final message is `result.result`.
 - **Open (not run in Gate 0)**: spawn from inside a real MCP server (covered by verification step 8.1), `installed_plugins.json` before/after comparison, settings-symlink survival, `--bg`, detached survival after the desktop session ends, `Agent` allow under `-p`.
 
 ## Decisions
 
-- **`projects/` is not shared between profiles.** Each profile keeps its own session history. Cost: a run can only be continued on its own account. Benefit: no concurrent writes to the same session files and no mixing of transcripts. Revisit if cross-account resume proves necessary.
+- **`projects/` is not shared between profiles.** Each profile keeps its own session history. Benefit: no concurrent writes to the same session files and no mixing of transcripts.
 - Shared via symlink from the default profile: `CLAUDE.md`, `settings.json`, `skills`, `agents`, `commands`, `rules`, `plugins` (only the ones that exist). Per profile: credentials, `.claude.json`, history, `projects/`.
 - User-scope MCP servers (for example redmine, grafana) live in each profile's `.claude.json` and are not shared; add them to a target only if its runs need them.
 - Profile identity is checked with `claude auth status --json` (compare account or organization fields and print only same or different), not with file mtimes: the default profile's credentials file changes on every token refresh.
@@ -101,4 +104,4 @@ Candidates, to be decided in Gate 0 by testing under a real second profile: the 
 - Both profiles write to the shared `plugins/` (`installed_plugins.json`, `known_marketplaces.json`, `synced/`, `data/`) on startup and plugin sync. Gate 0 compares `installed_plugins.json` before and after a second-profile start.
 - Updating the plugin while a run is in flight can fail the run.
 - Hooks that hard-code `~/.claude` run in every profile; keep hooks path-agnostic.
-- Unverified at runtime until Gate 0: whether `/ailab-agent:os-apply <name>` expands as a skill under `-p`; whether `rate_limit_event` appears in stream-json; whether plugin stdio MCP servers receive `WINGMAN_DEPTH`; whether `--bg` works under a custom `CLAUDE_CONFIG_DIR`; whether detached children survive the desktop app ending a session; whether the `Agent` tool needs an explicit allow in `-p`; how a worktree path with no plugin install entry resolves project-scope plugins; whether the second profile receives its own `remote-settings.json` proxy (check presence with `ls` only).
+- Unverified at runtime until Gate 0: whether a plugin skill invoked by name expands under `-p`; whether `rate_limit_event` appears in stream-json; whether plugin stdio MCP servers receive `WINGMAN_DEPTH`; whether `--bg` works under a custom `CLAUDE_CONFIG_DIR`; whether detached children survive the desktop app ending a session; whether the `Agent` tool needs an explicit allow in `-p`; how a worktree path with no plugin install entry resolves project-scope plugins; whether the second profile receives its own `remote-settings.json` proxy (check presence with `ls` only).
