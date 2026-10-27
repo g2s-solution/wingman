@@ -87,7 +87,7 @@ Claude picks the `readonly` preset, starts a run on a random eligible target, wa
 
 For a task that changes files, ask for it explicitly (for example "... and fix it"): the skill then uses the `edit` preset. The target commits on a run branch that you review and merge yourself; wingman never pushes or merges.
 
-Claude is told to prefer wingman over its built-in Agent tool when you ask for a subagent, delegation or an independent review ("use a subagent to ..."). It falls back to the built-in tool, and says so, when wingman is unavailable, the target is rate limited, or the task needs to run tests under `readonly`.
+Claude is told to prefer wingman over its built-in Agent tool when you ask for a subagent, delegation or an independent review ("use a subagent to ..."). The plugin does this with the skill description and a `SessionStart` hook that prints a static instruction (`wingman/hooks/session-start.json`) into each session; the hook runs no other code. To avoid the hook, empty `hooks/hooks.json` in your installed copy of the plugin, or set `disableAllHooks` in your Claude Code settings (which turns off every hook, not only this one). It falls back to the built-in tool, and says so, when wingman is unavailable, the target is rate limited, or the task needs to run tests under `readonly`.
 
 ## Presets, worktrees and branches
 
