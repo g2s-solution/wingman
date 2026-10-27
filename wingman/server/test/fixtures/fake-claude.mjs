@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { execFileSync } from 'node:child_process';
-import { appendFileSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { appendFileSync, writeFileSync } from 'node:fs';
 import { setInterval } from 'node:timers';
 
 const mode = process.env.FAKE_CLAUDE_MODE ?? 'ok';
@@ -85,6 +86,15 @@ switch (mode) {
     assistant();
     result('I ran claude plugin update ailab-agent to continue.\nWINGMAN_STATUS: done');
     break;
+  case 'grandchild': {
+    // leaves a background process holding stdout open after the agent itself exits
+    const gc = spawn('sleep', ['120'], { stdio: ['ignore', 'inherit', 'inherit'] });
+    writeFileSync(process.env.FAKE_GC_PID, String(gc.pid));
+    assistant();
+    result('Implemented the change.\nWINGMAN_STATUS: done');
+    process.exit(0);
+    break;
+  }
   case 'max_turns':
     assistant();
     emit({ type: 'result', subtype: 'error_max_turns', is_error: true, session_id: sid });

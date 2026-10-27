@@ -16,6 +16,7 @@ import {
   listRuns,
   newRunId,
   pruneEvents,
+  pruneOldEvents,
   readMeta,
   runSummary,
   updateStatus,
@@ -180,5 +181,38 @@ describe('runs', () => {
     expect(r).not.toContain('hunter2x');
     expect(r).toContain('[truncated');
     expect(r.length).toBeLessThan(4100);
+  });
+});
+
+describe('pruneOldEvents (L8)', () => {
+  const saved = process.env.WINGMAN_HOME;
+  let home: string;
+  beforeEach(() => {
+    home = mkdtempSync(join(tmpdir(), 'wm-ev-'));
+    process.env.WINGMAN_HOME = home;
+  });
+  afterEach(() => {
+    if (saved === undefined) delete process.env.WINGMAN_HOME;
+    else process.env.WINGMAN_HOME = saved;
+    rmSync(home, { recursive: true, force: true });
+  });
+
+  it('deletes only events.jsonl of terminal runs older than the retention', () => {
+    const old = createRun(base);
+    const fresh = createRun(base);
+    const live = createRun(base);
+    for (const m of [old, fresh, live]) appendEvent(m.id, '{"x":1}');
+    writeResult(old.id, 'report');
+    updateStatus(old.id, 'done', {
+      finished_at: new Date(Date.now() - 15 * 86400_000).toISOString(),
+    });
+    updateStatus(fresh.id, 'done', {
+      finished_at: new Date(Date.now() - 2 * 86400_000).toISOString(),
+    });
+    expect(pruneOldEvents()).toEqual([old.id]);
+    expect(readdirSync(runDir(old.id)).sort()).toEqual(['meta.json', 'result.md']);
+    expect(readdirSync(runDir(fresh.id))).toContain('events.jsonl');
+    expect(readdirSync(runDir(live.id))).toContain('events.jsonl');
+    expect(readMeta(old.id).status).toBe('done');
   });
 });

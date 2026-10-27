@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import {
   chmodSync,
   closeSync,
@@ -7,10 +7,11 @@ import {
   mkdirSync,
   openSync,
   readFileSync,
+  linkSync,
   readdirSync,
   realpathSync,
+  renameSync,
   rmSync,
-  unlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
@@ -115,7 +116,7 @@ export interface WorktreeInfo {
   warnings: string[];
 }
 
-interface LockInfo {
+export interface LockInfo {
   pid: number;
   start_time?: string;
   run_id: string;
@@ -149,9 +150,13 @@ function readLock(path: string): LockInfo | undefined {
   }
 }
 
-function acquireLock(path: string, info: LockInfo, ownedBy?: string): void {
+/**
+ * Creates the lock with O_EXCL. A stale lock is reclaimed by renaming it to a unique name first,
+ * so of several reclaimers only the one whose rename succeeds goes on to create the new lock.
+ */
+export function acquireLock(path: string, info: LockInfo, ownedBy?: string): void {
   mkdirSync(locksDir(), { recursive: true, mode: 0o700 });
-  for (let attempt = 0; attempt < 2; attempt++) {
+  for (let attempt = 0; attempt < 3; attempt++) {
     try {
       const fd = openSync(path, 'wx', 0o600);
       try {
@@ -169,11 +174,26 @@ function acquireLock(path: string, info: LockInfo, ownedBy?: string): void {
           { cause: err },
         );
       }
+      const aside = `${path}.stale-${randomBytes(4).toString('hex')}`;
       try {
-        unlinkSync(path);
+        renameSync(path, aside);
       } catch {
-        // another process reclaimed it first; retry the create
+        continue; // another reclaimer moved it first; look again
       }
+      const moved = readLock(aside);
+      if (held && moved && (moved.run_id !== held.run_id || moved.pid !== held.pid)) {
+        // we moved a fresh lock created after our read: put it back and give way
+        try {
+          linkSync(aside, path);
+        } catch {
+          // the path was taken again; the fresh holder is lost only if it was never re-created
+        }
+        rmSync(aside, { force: true });
+        throw new Error(`Change "${info.change}" is already being applied by run ${moved.run_id}`, {
+          cause: err,
+        });
+      }
+      rmSync(aside, { force: true });
     }
   }
   throw new Error(`Could not acquire the lock for change "${info.change}"`);

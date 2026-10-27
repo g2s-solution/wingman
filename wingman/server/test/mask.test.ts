@@ -45,6 +45,41 @@ describe('maskSecrets', () => {
     expect(out).toBe('clone https://[MASKED]@host.example/repo.git now');
   });
 
+  it('masks token-only userinfo and passwords that contain @, :, or other characters', () => {
+    const tok = 'ghp_' + x(30);
+    expect(maskSecrets(`git clone https://${tok}@github.example/o/r.git`)).toBe(
+      'git clone https://[MASKED]@github.example/o/r.git',
+    );
+    expect(maskSecrets('url postgres://admin:p@ss:w0rd!@db.example:5432/app ok')).toBe(
+      'url postgres://[MASKED]@db.example:5432/app ok',
+    );
+    expect(maskSecrets('see https://host.example/path@notcreds and https://h.example:8080/x')).toBe(
+      'see https://host.example/path@notcreds and https://h.example:8080/x',
+    );
+  });
+
+  it('masks Authorization: Basic values and keeps the scheme', () => {
+    const out = maskSecrets(`Authorization: Basic ${b64(6)}== then`);
+    expect(out).toBe('Authorization: Basic [MASKED] then');
+    expect(maskSecrets(`{"Authorization":"Basic ${b64(6)}"}`)).toBe(
+      '{"Authorization":"Basic [MASKED]"}',
+    );
+  });
+
+  it('masks auth, credential and private_key assignments, but not author', () => {
+    expect(maskSecrets('auth=abc123')).toBe('auth=[MASKED]');
+    expect(maskSecrets('x-auth: v1')).toBe('x-auth: [MASKED]');
+    expect(maskSecrets('GOOGLE_CREDENTIALS=file1')).toBe('GOOGLE_CREDENTIALS=[MASKED]');
+    expect(maskSecrets('credential: c1')).toBe('credential: [MASKED]');
+    expect(maskSecrets('private_key: "k1"')).toBe('private_key: "[MASKED]"');
+    expect(maskSecrets('privateKey=k2 PRIVATE-KEY=k3')).toBe(
+      'privateKey=[MASKED] PRIVATE-KEY=[MASKED]',
+    );
+    expect(maskSecrets('author: Ada, authority=none, authored=yes')).toBe(
+      'author: Ada, authority=none, authored=yes',
+    );
+  });
+
   it('masks PEM private key blocks', () => {
     const pem = `-----BEGIN ${'RSA '}PRIVATE KEY-----\n${b64(10)}\n${b64(10)}\n-----END ${'RSA '}PRIVATE KEY-----`;
     const out = maskSecrets(`before\n${pem}\nafter`);

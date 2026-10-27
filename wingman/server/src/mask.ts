@@ -2,7 +2,11 @@ export const MASK = '[MASKED]';
 
 const PEM =
   /-----BEGIN [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?-----[\s\S]*?(?:-----END [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?-----|$)/g;
-const URL_CREDENTIALS = /\b([a-z][a-z0-9+.-]*:\/\/)[^\s/@:]+:[^\s/@]+@/gi;
+// Greedy up to the last "@" before a "/" so a password that itself contains "@" is covered, and a
+// token-only userinfo (https://<token>@host) is masked as well.
+const URL_CREDENTIALS = /\b([a-z][a-z0-9+.-]*:\/\/)[^\s/]+@/gi;
+const AUTH_SCHEME =
+  /(\bAuthorization["']?\s*[:=]\s*["']?)(Basic|Digest|Negotiate|NTLM)\s+[^\s"',;]+/gi;
 const JWT = /\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*/g;
 const BEARER = /\b(Bearer)\s+[A-Za-z0-9._~+/=-]+/gi;
 const KEY_SHAPES = [
@@ -13,12 +17,14 @@ const KEY_SHAPES = [
   /\bxox[baprs]-[A-Za-z0-9-]{10,}/g,
   /\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g,
 ];
+// "auth" only as a whole word, so "author" and "Authorization" (handled above) are left alone.
 const ASSIGNMENT =
-  /([A-Za-z0-9_.-]*(?:password|passwd|secret|token|api[_-]?key)[A-Za-z0-9_.-]*)(["']?\s*[:=]\s*)("[^"\n]*"|'[^'\n]*'|[^\s"',;&}]+)/gi;
+  /([A-Za-z0-9_.-]*(?:password|passwd|secret|token|api[_-]?key|credentials?|private[_-]?key|(?<![A-Za-z])auth(?![A-Za-z]))[A-Za-z0-9_.-]*)(["']?\s*[:=]\s*)("[^"\n]*"|'[^'\n]*'|[^\s"',;&}]+)/gi;
 
 export function maskSecrets(text: string): string {
   let out = text.replace(PEM, MASK);
   out = out.replace(URL_CREDENTIALS, `$1${MASK}@`);
+  out = out.replace(AUTH_SCHEME, `$1$2 ${MASK}`);
   out = out.replace(JWT, MASK);
   out = out.replace(BEARER, `$1 ${MASK}`);
   for (const re of KEY_SHAPES) out = out.replace(re, MASK);

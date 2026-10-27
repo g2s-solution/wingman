@@ -10,6 +10,7 @@ import {
   readSync,
   readdirSync,
   renameSync,
+  rmSync,
   unlinkSync,
   writeFileSync,
   appendFileSync,
@@ -189,6 +190,22 @@ export function pruneEvents(id: string, maxBytes: number): void {
   writeFileSync(tmp, kept, { mode: FILE_MODE });
   chmodSync(tmp, FILE_MODE);
   renameSync(tmp, path);
+}
+
+export const EVENTS_RETENTION_MS = 14 * 24 * 60 * 60 * 1000;
+
+/** Deletes `events.jsonl` (never the run directory) of terminal runs finished more than `maxAgeMs` ago. */
+export function pruneOldEvents(maxAgeMs: number = EVENTS_RETENTION_MS): string[] {
+  const pruned: string[] = [];
+  for (const meta of listRuns()) {
+    if (!TERMINAL_STATUSES.includes(meta.status) || !meta.finished_at) continue;
+    if (Date.now() - Date.parse(meta.finished_at) < maxAgeMs) continue;
+    const path = join(dirOf(meta.id), 'events.jsonl');
+    if (!existsSync(path)) continue;
+    rmSync(path, { force: true });
+    pruned.push(meta.id);
+  }
+  return pruned;
 }
 
 export function writeResult(id: string, text: string): void {

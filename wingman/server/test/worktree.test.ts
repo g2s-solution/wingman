@@ -1,10 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { existsSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { wingmanHome } from '../src/paths.js';
 import { join } from 'node:path';
 import { worktreesDir } from '../src/paths.js';
 import { createRun, readMeta, updateStatus, writeMeta } from '../src/runs.js';
 import {
+  acquireLock,
   createWorktree,
   pruneOrphans,
   removeWorktree,
@@ -238,5 +240,29 @@ describe('setup and prune', () => {
     expect(existsSync(live.path)).toBe(true);
     expect(existsSync(done.path)).toBe(false);
     expect(readdirSync(worktreesDir())).toEqual([live.id]);
+  });
+});
+
+describe('stale lock reclaim (L2)', () => {
+  const info = (run_id: string, pid: number) => ({ pid, run_id, repo: '/r', change: 'c' });
+
+  it('reclaims a dead lock once and leaves no stale files behind', () => {
+    const path = join(wingmanHome(), 'locks', 'k.lock');
+    const dead = spawnSync(process.execPath, ['-e', '0']).pid;
+    acquireLock(path, info('old', dead));
+    acquireLock(path, info('first', process.pid));
+    expect(() => acquireLock(path, info('second', process.pid))).toThrow(
+      /already being applied by run first/,
+    );
+    expect(readdirSync(join(wingmanHome(), 'locks'))).toEqual(['k.lock']);
+  });
+
+  it('a live lock written by the reclaimer that won is never removed by the loser', () => {
+    const path = join(wingmanHome(), 'locks', 'race.lock');
+    const dead = spawnSync(process.execPath, ['-e', '0']).pid;
+    acquireLock(path, info('old', dead));
+    acquireLock(path, info('winner', process.pid));
+    expect(() => acquireLock(path, info('loser', process.pid))).toThrow(/already being applied/);
+    expect(JSON.parse(readFileSync(path, 'utf8')).run_id).toBe('winner');
   });
 });

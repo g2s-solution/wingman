@@ -58,6 +58,7 @@ import {
 
 const DEFAULT_TIMEOUT_MS = 4 * 60 * 60 * 1000;
 const KILL_GRACE_MS = 3000;
+const DRAIN_MS = 2000;
 const MAX_EVENTS_BYTES = 20 * 1024 * 1024;
 
 const PLUGIN_COMMAND = /\bclaude\s+plugins?\s+(?:install|update|uninstall)\b/i;
@@ -125,7 +126,9 @@ export function mapOutcome(input: {
 }): Outcome {
   const { finished, exitCode, timedOut, rateRejected } = input;
   const exit = `exit code ${exitCode ?? 'none'}${input.signal ? `, signal ${input.signal}` : ''}`;
-  if (timedOut) {
+  // a result that arrived before the kill stands; the kill then explains any nonzero exit
+  const killedAfterResult = timedOut && finished !== undefined;
+  if (timedOut && !killedAfterResult) {
     return {
       status: 'failed',
       text: `[wingman] agent exceeded the time limit and was killed (${exit})`,
@@ -150,7 +153,7 @@ export function mapOutcome(input: {
     };
   }
   const text = finished.result ?? '';
-  if (finished.is_error || (exitCode !== null && exitCode !== 0)) {
+  if (finished.is_error || (!killedAfterResult && exitCode !== null && exitCode !== 0)) {
     if (rateRejected) return { status: 'rate_limited', text };
     return { status: 'failed', text };
   }
@@ -246,9 +249,20 @@ export async function runSupervisor(runId: string): Promise<void> {
     spawnError = err.message;
   });
 
+  // `close` waits for every holder of the pipes, so a grandchild that outlives the agent would
+  // hang the run: finalize on `exit` once the pipes had a short time to drain.
   const end = await new Promise<{ code: number | null; signal: string | null }>((resolve) => {
-    child.on('close', (code, signal) => resolve({ code, signal }));
-    child.on('error', () => resolve({ code: null, signal: null }));
+    let settled = false;
+    const settle = (code: number | null, signal: string | null): void => {
+      if (settled) return;
+      settled = true;
+      resolve({ code, signal });
+    };
+    child.on('close', (code, signal) => settle(code, signal));
+    child.on('exit', (code, signal) => {
+      setTimeout(() => settle(code, signal), DRAIN_MS).unref();
+    });
+    child.on('error', () => settle(null, null));
   });
   if (timer) clearTimeout(timer);
 
@@ -281,14 +295,36 @@ export async function runSupervisor(runId: string): Promise<void> {
   pruneEvents(runId, MAX_EVENTS_BYTES);
 }
 
+/**
+ * Takes down whatever the agent left behind in the supervisor's process group. The supervisor
+ * is the group leader and has a SIGTERM handler, so the first signal spares it; the final
+ * SIGKILL ends the supervisor too, which is why it runs only after the run is finalized.
+ */
+async function reapGroup(): Promise<void> {
+  try {
+    process.kill(-process.pid, 'SIGTERM');
+  } catch {
+    return;
+  }
+  await sleepMs(500);
+  try {
+    process.kill(-process.pid, 'SIGKILL');
+  } catch {
+    // not a group leader, or the group is already gone
+  }
+}
+
 /** Call first thing in the process entry; returns true when this process is a supervisor. */
 export function maybeRunSupervisor(argv: string[] = process.argv): boolean {
   const index = argv.indexOf('--supervise');
   const runId = index === -1 ? undefined : argv[index + 1];
   if (!runId) return false;
   runSupervisor(runId).then(
-    () => process.exit(0),
-    (err: unknown) => {
+    async () => {
+      await reapGroup();
+      process.exit(0);
+    },
+    async (err: unknown) => {
       process.stderr.write(
         `supervisor failed: ${err instanceof Error ? err.message : String(err)}\n`,
       );
@@ -297,6 +333,7 @@ export function maybeRunSupervisor(argv: string[] = process.argv): boolean {
       } catch {
         // already terminal or run missing
       }
+      await reapGroup();
       process.exit(1);
     },
   );

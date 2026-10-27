@@ -28613,7 +28613,7 @@ var StdioServerTransport = class {
 
 // src/runner.ts
 import { randomUUID } from "node:crypto";
-import { closeSync as closeSync3, existsSync as existsSync4, mkdirSync as mkdirSync3, openSync as openSync3, realpathSync as realpathSync3, rmSync as rmSync2 } from "node:fs";
+import { closeSync as closeSync3, existsSync as existsSync4, mkdirSync as mkdirSync3, openSync as openSync3, realpathSync as realpathSync3, rmSync as rmSync3 } from "node:fs";
 import { spawn as spawn2 } from "node:child_process";
 import { createInterface } from "node:readline";
 import { relative, join as join6, isAbsolute } from "node:path";
@@ -28941,6 +28941,7 @@ import {
   readSync,
   readdirSync,
   renameSync,
+  rmSync,
   unlinkSync,
   writeFileSync,
   appendFileSync
@@ -28950,7 +28951,8 @@ import { join as join2 } from "node:path";
 // src/mask.ts
 var MASK = "[MASKED]";
 var PEM = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?-----[\s\S]*?(?:-----END [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?-----|$)/g;
-var URL_CREDENTIALS = /\b([a-z][a-z0-9+.-]*:\/\/)[^\s/@:]+:[^\s/@]+@/gi;
+var URL_CREDENTIALS = /\b([a-z][a-z0-9+.-]*:\/\/)[^\s/]+@/gi;
+var AUTH_SCHEME = /(\bAuthorization["']?\s*[:=]\s*["']?)(Basic|Digest|Negotiate|NTLM)\s+[^\s"',;]+/gi;
 var JWT = /\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*/g;
 var BEARER = /\b(Bearer)\s+[A-Za-z0-9._~+/=-]+/gi;
 var KEY_SHAPES = [
@@ -28961,10 +28963,11 @@ var KEY_SHAPES = [
   /\bxox[baprs]-[A-Za-z0-9-]{10,}/g,
   /\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g
 ];
-var ASSIGNMENT = /([A-Za-z0-9_.-]*(?:password|passwd|secret|token|api[_-]?key)[A-Za-z0-9_.-]*)(["']?\s*[:=]\s*)("[^"\n]*"|'[^'\n]*'|[^\s"',;&}]+)/gi;
+var ASSIGNMENT = /([A-Za-z0-9_.-]*(?:password|passwd|secret|token|api[_-]?key|credentials?|private[_-]?key|(?<![A-Za-z])auth(?![A-Za-z]))[A-Za-z0-9_.-]*)(["']?\s*[:=]\s*)("[^"\n]*"|'[^'\n]*'|[^\s"',;&}]+)/gi;
 function maskSecrets(text) {
   let out = text.replace(PEM, MASK);
   out = out.replace(URL_CREDENTIALS, `$1${MASK}@`);
+  out = out.replace(AUTH_SCHEME, `$1$2 ${MASK}`);
   out = out.replace(JWT, MASK);
   out = out.replace(BEARER, `$1 ${MASK}`);
   for (const re of KEY_SHAPES) out = out.replace(re, MASK);
@@ -29131,6 +29134,19 @@ function pruneEvents(id, maxBytes) {
   chmodSync(tmp, FILE_MODE);
   renameSync(tmp, path);
 }
+var EVENTS_RETENTION_MS = 14 * 24 * 60 * 60 * 1e3;
+function pruneOldEvents(maxAgeMs = EVENTS_RETENTION_MS) {
+  const pruned = [];
+  for (const meta3 of listRuns()) {
+    if (!TERMINAL_STATUSES.includes(meta3.status) || !meta3.finished_at) continue;
+    if (Date.now() - Date.parse(meta3.finished_at) < maxAgeMs) continue;
+    const path = join2(dirOf(meta3.id), "events.jsonl");
+    if (!existsSync(path)) continue;
+    rmSync(path, { force: true });
+    pruned.push(meta3.id);
+  }
+  return pruned;
+}
 function writeResult(id, text) {
   const dir = dirOf(id);
   ensureDir(dir);
@@ -29256,7 +29272,7 @@ import { createHash as createHash2 } from "node:crypto";
 
 // src/worktree.ts
 import { spawn } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes as randomBytes3 } from "node:crypto";
 import {
   chmodSync as chmodSync2,
   closeSync as closeSync2,
@@ -29264,10 +29280,11 @@ import {
   mkdirSync as mkdirSync2,
   openSync as openSync2,
   readFileSync as readFileSync3,
+  linkSync,
   readdirSync as readdirSync2,
   realpathSync as realpathSync2,
-  rmSync,
-  unlinkSync as unlinkSync2,
+  renameSync as renameSync2,
+  rmSync as rmSync2,
   writeFileSync as writeFileSync2
 } from "node:fs";
 import { join as join5 } from "node:path";
@@ -29345,7 +29362,7 @@ function readLock(path) {
 }
 function acquireLock(path, info, ownedBy) {
   mkdirSync2(locksDir(), { recursive: true, mode: 448 });
-  for (let attempt = 0; attempt < 2; attempt++) {
+  for (let attempt = 0; attempt < 3; attempt++) {
     try {
       const fd = openSync2(path, "wx", 384);
       try {
@@ -29363,10 +29380,24 @@ function acquireLock(path, info, ownedBy) {
           { cause: err }
         );
       }
+      const aside = `${path}.stale-${randomBytes3(4).toString("hex")}`;
       try {
-        unlinkSync2(path);
+        renameSync2(path, aside);
       } catch {
+        continue;
       }
+      const moved = readLock(aside);
+      if (held && moved && (moved.run_id !== held.run_id || moved.pid !== held.pid)) {
+        try {
+          linkSync(aside, path);
+        } catch {
+        }
+        rmSync2(aside, { force: true });
+        throw new Error(`Change "${info.change}" is already being applied by run ${moved.run_id}`, {
+          cause: err
+        });
+      }
+      rmSync2(aside, { force: true });
     }
   }
   throw new Error(`Could not acquire the lock for change "${info.change}"`);
@@ -29392,7 +29423,7 @@ function releaseLocksOf(runId) {
   if (!existsSync3(locksDir())) return;
   for (const entry of readdirSync2(locksDir())) {
     const path = join5(locksDir(), entry);
-    if (readLock(path)?.run_id === runId) rmSync(path, { force: true });
+    if (readLock(path)?.run_id === runId) rmSync2(path, { force: true });
   }
 }
 async function withRetry(exec, sleep, file2, args, opts) {
@@ -29466,7 +29497,7 @@ async function createWorktree(opts) {
     if (lockPath) info.lockPath = lockPath;
     return info;
   } catch (err) {
-    if (lockPath) rmSync(lockPath, { force: true });
+    if (lockPath) rmSync2(lockPath, { force: true });
     throw err;
   }
 }
@@ -29505,7 +29536,7 @@ async function removeWorktree(runId, exec = defaultExec) {
       timeoutMs: DEFAULT_ADD_TIMEOUT_MS
     });
     if (removed.code !== 0 && meta3.worktree.startsWith(worktreesDir())) {
-      rmSync(meta3.worktree, { recursive: true, force: true });
+      rmSync2(meta3.worktree, { recursive: true, force: true });
     }
     await exec("git", ["worktree", "prune"], {
       cwd: meta3.cwd,
@@ -29579,6 +29610,7 @@ async function changedSince(exec, repo, snapshot) {
 // src/runner.ts
 var DEFAULT_TIMEOUT_MS = 4 * 60 * 60 * 1e3;
 var KILL_GRACE_MS = 3e3;
+var DRAIN_MS = 2e3;
 var MAX_EVENTS_BYTES = 20 * 1024 * 1024;
 var PLUGIN_COMMAND = /\bclaude\s+plugins?\s+(?:install|update|uninstall)\b/i;
 var PLUGIN_UPDATED = /\bplugins?\s+(?:was\s+|were\s+|has\s+been\s+|have\s+been\s+)?updated\b/i;
@@ -29589,7 +29621,8 @@ function reportsPluginChange(text) {
 function mapOutcome(input2) {
   const { finished, exitCode, timedOut, rateRejected } = input2;
   const exit = `exit code ${exitCode ?? "none"}${input2.signal ? `, signal ${input2.signal}` : ""}`;
-  if (timedOut) {
+  const killedAfterResult = timedOut && finished !== void 0;
+  if (timedOut && !killedAfterResult) {
     return {
       status: "failed",
       text: `[wingman] agent exceeded the time limit and was killed (${exit})`
@@ -29612,7 +29645,7 @@ function mapOutcome(input2) {
     };
   }
   const text = finished.result ?? "";
-  if (finished.is_error || exitCode !== null && exitCode !== 0) {
+  if (finished.is_error || !killedAfterResult && exitCode !== null && exitCode !== 0) {
     if (rateRejected) return { status: "rate_limited", text };
     return { status: "failed", text };
   }
@@ -29691,8 +29724,17 @@ async function runSupervisor(runId) {
     spawnError = err.message;
   });
   const end = await new Promise((resolve3) => {
-    child.on("close", (code, signal) => resolve3({ code, signal }));
-    child.on("error", () => resolve3({ code: null, signal: null }));
+    let settled = false;
+    const settle2 = (code, signal) => {
+      if (settled) return;
+      settled = true;
+      resolve3({ code, signal });
+    };
+    child.on("close", (code, signal) => settle2(code, signal));
+    child.on("exit", (code, signal) => {
+      setTimeout(() => settle2(code, signal), DRAIN_MS).unref();
+    });
+    child.on("error", () => settle2(null, null));
   });
   if (timer) clearTimeout(timer);
   const current = readMeta(runId);
@@ -29722,13 +29764,28 @@ async function runSupervisor(runId) {
   }
   pruneEvents(runId, MAX_EVENTS_BYTES);
 }
+async function reapGroup() {
+  try {
+    process.kill(-process.pid, "SIGTERM");
+  } catch {
+    return;
+  }
+  await sleepMs(500);
+  try {
+    process.kill(-process.pid, "SIGKILL");
+  } catch {
+  }
+}
 function maybeRunSupervisor(argv = process.argv) {
   const index = argv.indexOf("--supervise");
   const runId = index === -1 ? void 0 : argv[index + 1];
   if (!runId) return false;
   runSupervisor(runId).then(
-    () => process.exit(0),
-    (err) => {
+    async () => {
+      await reapGroup();
+      process.exit(0);
+    },
+    async (err) => {
       process.stderr.write(
         `supervisor failed: ${err instanceof Error ? err.message : String(err)}
 `
@@ -29737,6 +29794,7 @@ function maybeRunSupervisor(argv = process.argv) {
         updateStatus(runId, "failed_no_report", { exit_code: null });
       } catch {
       }
+      await reapGroup();
       process.exit(1);
     }
   );
@@ -29887,7 +29945,7 @@ async function discardStart(meta3, exec) {
   }
   if (meta3.worktree) await removeWorktree(meta3.id, exec).catch(() => void 0);
   releaseLocksOf(meta3.id);
-  rmSync2(runDir(meta3.id), { recursive: true, force: true });
+  rmSync3(runDir(meta3.id), { recursive: true, force: true });
 }
 function spawnRun(meta3, opts, adapter, spec, depth, parentEnv, lockPath) {
   const { command, args } = adapter.buildCommand(opts.account, spec);
@@ -29980,7 +30038,7 @@ async function sendToRun(runId, prompt, opts = {}) {
     try {
       lockPath = takeOverLock(previous.repo, previous.change, previous.id, meta3.id);
     } catch (err) {
-      rmSync2(runDir(meta3.id), { recursive: true, force: true });
+      rmSync3(runDir(meta3.id), { recursive: true, force: true });
       throw err;
     }
   }
@@ -38323,6 +38381,12 @@ function buildServer(deps = {}) {
 // src/index.ts
 var DAY_MS = 24 * 60 * 60 * 1e3;
 if (!maybeRunSupervisor(process.argv)) {
-  if (currentDepth() === 0) pruneOrphans({ minAgeMs: DAY_MS }).catch(() => void 0);
+  if (currentDepth() === 0) {
+    pruneOrphans({ minAgeMs: DAY_MS }).catch(() => void 0);
+    try {
+      pruneOldEvents();
+    } catch {
+    }
+  }
   await buildServer().connect(new StdioServerTransport());
 }

@@ -5,7 +5,14 @@ import { join } from 'node:path';
 import { runDir, worktreesDir } from '../src/paths.js';
 import { readMeta, runSummary, writeMeta } from '../src/runs.js';
 import { saveAccounts } from '../src/registry.js';
-import { cancelRun, sendToRun, startRun, waitForRun, type StartRunOptions } from '../src/runner.js';
+import {
+  cancelRun,
+  mapOutcome,
+  sendToRun,
+  startRun,
+  waitForRun,
+  type StartRunOptions,
+} from '../src/runner.js';
 import { isAlive } from '../src/worktree.js';
 import type { RunMeta } from '../src/types.js';
 import {
@@ -133,6 +140,41 @@ describe('status mapping', () => {
     const meta = await finish(await startRun(ctx('permission_denial').opts));
     expect(meta.status).toBe('partial');
     expect(meta.permission_denials).toEqual(['Bash', 'WebFetch']);
+  });
+});
+
+describe('process hygiene (M5)', () => {
+  it('finalizes on exit without waiting for a grandchild that holds the pipes, then reaps it', async () => {
+    const gcFile = join(work, `gc-${Math.random().toString(16).slice(2)}.pid`);
+    const { opts } = ctx('grandchild', {}, `export FAKE_GC_PID=${gcFile}`);
+    const t0 = Date.now();
+    const meta = await finish(await startRun(opts), 15000);
+    expect(meta.status).toBe('done');
+    expect(Date.now() - t0).toBeLessThan(10000);
+    const gc = Number(readFileSync(gcFile, 'utf8'));
+    const deadline = Date.now() + 5000;
+    while (isAlive(gc) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 50));
+    expect(isAlive(gc)).toBe(false);
+  });
+
+  it('a received result wins over timedOut and the kill-caused exit code', () => {
+    const out = mapOutcome({
+      finished: { result: 'Done.\nWINGMAN_STATUS: done', is_error: false },
+      exitCode: 143,
+      signal: null,
+      timedOut: true,
+      rateRejected: false,
+    });
+    expect(out.status).toBe('done');
+    expect(
+      mapOutcome({
+        finished: undefined,
+        exitCode: 143,
+        signal: null,
+        timedOut: true,
+        rateRejected: false,
+      }).status,
+    ).toBe('failed');
   });
 });
 
