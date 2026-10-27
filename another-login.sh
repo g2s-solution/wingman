@@ -46,7 +46,7 @@ while [ $# -gt 0 ]; do
     --method=*) method="${1#--method=}" ;;
     -h|--help) usage ;;
     -*) usage ;;
-    *) [ -z "$dir" ] && dir="$1" || usage ;;
+    *) if [ -z "$dir" ]; then dir="$1"; else usage; fi ;;
   esac
   shift
 done
@@ -188,6 +188,7 @@ esac
 echo
 echo "Account now signed in under $dir:"
 if [ "$method" = api_key ]; then
+  # shellcheck source=/dev/null
   ( set -a; . "$dir/$KEY_FILE"; set +a; CLAUDE_CONFIG_DIR="$dir" claude auth status --text )
 else
   CLAUDE_CONFIG_DIR="$dir" claude auth status --text
