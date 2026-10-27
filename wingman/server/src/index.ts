@@ -1,6 +1,12 @@
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { maybeRunSupervisor } from './runner.js';
+import { buildServer } from './tools.js';
+import { pruneOrphans } from './worktree.js';
 
-const server = new McpServer({ name: 'wingman', version: '0.1.0' });
+const DAY_MS = 24 * 60 * 60 * 1000;
 
-await server.connect(new StdioServerTransport());
+// The bundled entry doubles as the supervisor process; stdout there belongs to the run log.
+if (!maybeRunSupervisor(process.argv)) {
+  pruneOrphans({ minAgeMs: DAY_MS }).catch(() => undefined);
+  await buildServer().connect(new StdioServerTransport());
+}
