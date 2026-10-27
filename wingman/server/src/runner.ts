@@ -23,6 +23,7 @@ import {
   appendEvent,
   createRun,
   pruneEvents,
+  patchRunning,
   readMeta,
   updateStatus,
   writeMeta,
@@ -35,6 +36,8 @@ import { changedSince, takeSnapshot } from './snapshot.js';
 import {
   baseBranches,
   createWorktree,
+  DEFAULT_SETUP_TIMEOUT_MS,
+  START_BUDGET_MS,
   defaultExec,
   releaseLocksOf,
   removeWorktree,
@@ -95,6 +98,8 @@ export interface StartRunOptions {
   worktree_timeout_ms?: number;
   /** The setup command; default 600s. */
   setup_timeout_ms?: number;
+  /** Total start phase (fetch, worktree add, setup); default 15 min, below reconcile's grace. */
+  start_budget_ms?: number;
 }
 
 interface SupervisorPayload {
@@ -372,9 +377,22 @@ function launchSupervisor(
   const pid = child.pid;
   if (pid === undefined) throw new Error('Could not start the supervisor process');
   const startTime = readStartTime(pid);
-  const next: RunMeta = { ...readMeta(meta.id), pid, started_at: new Date().toISOString() };
-  if (startTime !== undefined) next.pid_start_time = startTime;
-  writeMeta(next);
+  const patch: Partial<Omit<RunMeta, 'id' | 'status'>> = {
+    pid,
+    started_at: new Date().toISOString(),
+  };
+  if (startTime !== undefined) patch.pid_start_time = startTime;
+  try {
+    patchRunning(meta.id, patch);
+  } catch (err) {
+    // the run was ended during start: the supervisor never gets its payload, so stop it
+    try {
+      process.kill(-pid, 'SIGKILL');
+    } catch {
+      child.kill('SIGKILL');
+    }
+    throw err;
+  }
   child.stdin?.on('error', () => undefined);
   child.stdin?.end(JSON.stringify(payload));
   child.unref();
@@ -405,6 +423,9 @@ export async function startRun(opts: StartRunOptions): Promise<RunMeta> {
     }
   }
   const repo = opts.worktree ? top : undefined;
+  if (opts.lock_key !== undefined && !repo) {
+    throw new Error('lock_key needs a worktree run inside a git repository');
+  }
   const offset = repo ? offsetInRepo(repo, opts.cwd) : '';
 
   const sessionId = randomUUID();
@@ -421,6 +442,7 @@ export async function startRun(opts: StartRunOptions): Promise<RunMeta> {
     ...(opts.preset !== undefined ? { preset: opts.preset } : {}),
   });
 
+  const deadline = Date.now() + (opts.start_budget_ms ?? START_BUDGET_MS);
   let runCwd = opts.cwd;
   let lockPath: string | undefined;
   try {
@@ -431,6 +453,7 @@ export async function startRun(opts: StartRunOptions): Promise<RunMeta> {
         runId: meta.id,
         env: parentEnv,
         exec,
+        deadline,
         ...(opts.lock_key !== undefined ? { lock_key: opts.lock_key } : {}),
         ...(opts.sleep ? { sleep: opts.sleep } : {}),
         ...(opts.fetch_timeout_ms !== undefined ? { fetchTimeoutMs: opts.fetch_timeout_ms } : {}),
@@ -443,13 +466,19 @@ export async function startRun(opts: StartRunOptions): Promise<RunMeta> {
       meta.run_branch = wt.branch;
       runCwd = offset ? join(wt.path, offset) : wt.path;
       meta.run_cwd = runCwd;
-      writeMeta(meta);
+      patchRunning(meta.id, {
+        worktree: wt.path,
+        run_branch: wt.branch,
+        run_cwd: runCwd,
+      });
       if (opts.setup) {
+        const left = deadline - Date.now();
+        if (left <= 0) throw new Error('Worktree setup skipped: the start budget is used up');
         const setup = await runSetup(
           wt.path,
           opts.setup,
           adapter.buildEnv(parentEnv, opts.account, depth),
-          opts.setup_timeout_ms,
+          Math.min(opts.setup_timeout_ms ?? DEFAULT_SETUP_TIMEOUT_MS, left),
         );
         if (!setup.ok)
           throw new Error(`Worktree setup command failed: ${setup.output.slice(-300)}`);
@@ -464,7 +493,7 @@ export async function startRun(opts: StartRunOptions): Promise<RunMeta> {
     const snapshot = await takeSnapshot(exec, top, callerBranch).catch(() => undefined);
     if (snapshot) {
       meta.ref_snapshot = snapshot;
-      writeMeta(meta);
+      patchRunning(meta.id, { ref_snapshot: snapshot });
     }
   }
 
@@ -502,7 +531,15 @@ async function discardStart(meta: RunMeta, exec: ExecFn): Promise<void> {
   } catch {
     // already terminal or run dir gone
   }
-  if (meta.worktree) await removeWorktree(meta.id, exec).catch(() => undefined);
+  if (meta.worktree) {
+    try {
+      // the disk copy may predate the worktree when the start-phase patch was refused
+      writeMeta({ ...readMeta(meta.id), worktree: meta.worktree });
+    } catch {
+      // run dir gone
+    }
+    await removeWorktree(meta.id, exec).catch(() => undefined);
+  }
   releaseLocksOf(meta.id);
   rmSync(runDir(meta.id), { recursive: true, force: true });
 }

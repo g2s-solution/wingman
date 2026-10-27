@@ -220,6 +220,30 @@ describe('refusals and errors', () => {
     expect(unknown.text).toMatch(/Unknown account "nope"/);
   });
 
+  it('refuses an explicitly named inactive account', async () => {
+    const command = launcher('ok').command;
+    await saveAccounts({
+      accounts: [
+        {
+          id: 'target',
+          label: 'target',
+          config_dir: join(home, 'cfg-target'),
+          provider: 'claude',
+          command,
+          status: 'disabled',
+        },
+      ],
+    });
+    const client = await connect();
+    const res = await call(client, 'wingman_start', {
+      account: 'target',
+      prompt: 'x',
+      cwd: tmp('cwd'),
+    });
+    expect(res.isError).toBe(true);
+    expect(res.text).toMatch(/"target" is disabled, not active/);
+  });
+
   it('refuses a relative or missing cwd', async () => {
     await register(launcher('ok').command);
     const client = await connect();

@@ -141,6 +141,21 @@ export function writeMeta(meta: RunMeta): void {
   writeAtomic(join(dir, 'meta.json'), `${JSON.stringify(parsed, null, 2)}\n`);
 }
 
+/**
+ * Merges `patch` into the run's current meta without ever changing its status. Refuses once the
+ * run is terminal (reconcile may have ended it while a start was still in progress), so a stale
+ * in-memory copy can never bring a finished run back to `running`.
+ */
+export function patchRunning(id: string, patch: Partial<Omit<RunMeta, 'id' | 'status'>>): RunMeta {
+  const current = readMeta(id);
+  if (TERMINAL_STATUSES.includes(current.status)) {
+    throw new Error(`run ${id} already ended as ${current.status} during start`);
+  }
+  const next: RunMeta = { ...current, ...patch, id, status: current.status };
+  writeMeta(next);
+  return next;
+}
+
 export function readMeta(id: string): RunMeta {
   return metaSchema.parse(JSON.parse(readFileSync(join(dirOf(id), 'meta.json'), 'utf8')));
 }

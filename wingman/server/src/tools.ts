@@ -79,6 +79,11 @@ async function chooseAccount(
     if (!targets.some((a) => a.id === accountId)) {
       throw new Error(`Account "${accountId}" is the caller's own profile; pick another account`);
     }
+    if (!isActive(account)) {
+      throw new Error(
+        `Account "${accountId}" is ${account.status}, not active; pick another account`,
+      );
+    }
     return account;
   }
   const pool = targets.filter(isActive);
@@ -111,7 +116,9 @@ const startInput = {
     .min(1)
     .max(200)
     .optional()
-    .describe('Stops two concurrent runs in the same repo with the same key.'),
+    .describe(
+      'Stops two concurrent runs in the same repo with the same key. Needs a worktree run: refused with worktree:false or outside a git repo.',
+    ),
   setup: z.string().min(1).max(2000).optional().describe('Shell command run in a new worktree.'),
 };
 const runIdInput = { run_id: z.string().min(1).max(64) };

@@ -4,7 +4,15 @@ import { join } from 'node:path';
 import { runDir, wingmanHome, worktreesDir } from '../src/paths.js';
 import { startRun, waitForRun, type StartRunOptions } from '../src/runner.js';
 import { createHandlers } from '../src/tools.js';
-import { defaultExec, pruneOrphans, runSetup, type ExecFn } from '../src/worktree.js';
+import { DEFAULT_NO_PID_GRACE_MS } from '../src/reconcile.js';
+import { updateStatus } from '../src/runs.js';
+import {
+  START_BUDGET_MS,
+  defaultExec,
+  pruneOrphans,
+  runSetup,
+  type ExecFn,
+} from '../src/worktree.js';
 import type { RunMeta } from '../src/types.js';
 import {
   bundleSupervisor,
@@ -207,5 +215,71 @@ describe('uncommitted changes (L4)', () => {
     const h = createHandlers({ env: env() });
     await h.cleanup({ run_id: first.id, action: 'accept' });
     expect(existsSync(first.worktree as string)).toBe(false);
+  });
+});
+
+describe('start budget and terminal runs', () => {
+  it('the start budget is below the no-pid grace', () => {
+    expect(START_BUDGET_MS).toBeLessThan(DEFAULT_NO_PID_GRACE_MS);
+  });
+
+  it('git steps and setup are cut to the remaining start budget', async () => {
+    const repo = makeRepo('main');
+    git(repo, 'switch', '-q', '-c', 'feat/b');
+    const seen: Record<string, number | undefined> = {};
+    const exec: ExecFn = async (file, args, opts) => {
+      if (args[0] === 'fetch') seen.fetch = opts.timeoutMs;
+      if (args[0] === 'worktree' && args[1] === 'add') seen.add = opts.timeoutMs;
+      return defaultExec(file, args, opts);
+    };
+    const started = Date.now();
+    await expect(
+      startRun(
+        startOpts(launcher('ok').command, {
+          cwd: repo,
+          worktree: true,
+          exec,
+          setup: 'sleep 30',
+          start_budget_ms: 1500,
+        }),
+      ),
+    ).rejects.toThrow(/setup command failed|start budget/);
+    expect(seen.fetch).toBeLessThanOrEqual(1500);
+    expect(seen.add).toBeLessThanOrEqual(1500);
+    expect(Date.now() - started).toBeLessThan(10000);
+    expect(readdirSync(join(home, 'runs'))).toEqual([]);
+  });
+
+  it('a run ended during the start phase is not resurrected and nothing is left behind', async () => {
+    const repo = makeRepo('main');
+    git(repo, 'switch', '-q', '-c', 'feat/r');
+    const { command, log } = launcher('ok');
+    const exec: ExecFn = async (file, args, opts) => {
+      const res = await defaultExec(file, args, opts);
+      if (args[0] === 'worktree' && args[1] === 'add') {
+        // what reconcile does to a run it considers dead
+        for (const id of readdirSync(join(home, 'runs'))) updateStatus(id, 'failed_no_report');
+      }
+      return res;
+    };
+    await expect(
+      startRun(startOpts(command, { cwd: repo, worktree: true, lock_key: 'c', exec })),
+    ).rejects.toThrow(/already ended as failed_no_report/);
+    expect(existsSync(log)).toBe(false);
+    expect(readdirSync(join(home, 'runs'))).toEqual([]);
+    expect(existsSync(worktreesDir()) ? readdirSync(worktreesDir()) : []).toEqual([]);
+    expect(lockFiles()).toEqual([]);
+  });
+
+  it('refuses a lock_key without a worktree run before creating anything', async () => {
+    const repo = makeRepo('main');
+    git(repo, 'switch', '-q', '-c', 'feat/l');
+    await expect(
+      startRun(startOpts(launcher('ok').command, { cwd: repo, worktree: false, lock_key: 'k' })),
+    ).rejects.toThrow(/lock_key needs a worktree/);
+    await expect(
+      startRun(startOpts(launcher('ok').command, { cwd: tmp('plain'), lock_key: 'k' })),
+    ).rejects.toThrow(/lock_key needs a worktree/);
+    expect(existsSync(join(home, 'runs')) ? readdirSync(join(home, 'runs')) : []).toEqual([]);
   });
 });

@@ -33,7 +33,6 @@ describe('claude adapter command', () => {
     expect(command).toBe('/bin/launcher');
     expect(args).toEqual([
       '-p',
-      'do it',
       '--session-id',
       'sid-1',
       '--append-system-prompt',
@@ -55,7 +54,18 @@ describe('claude adapter command', () => {
       'Bash(git:*)',
       '--model',
       'opus',
+      '--',
+      'do it',
     ]);
+  });
+
+  it('puts the prompt after a `--` terminator so a dash-leading prompt is not a flag', () => {
+    const prompt = '--dangerously-skip-permissions';
+    const { args } = claudeAdapter.buildCommand(account, { ...spec, prompt });
+    expect(args.at(-1)).toBe(prompt);
+    expect(args.at(-2)).toBe('--');
+    expect(args.indexOf(prompt)).toBe(args.lastIndexOf('--') + 1);
+    expect(args.slice(0, -2)).not.toContain(prompt);
   });
 
   it('omits optional flags', () => {
@@ -191,6 +201,9 @@ describe('guard', () => {
       'Bash(git show:*)',
       'Bash(date:*)',
     ]);
+    for (const preset of Object.values(PRESETS)) {
+      expect(preset.allowed).not.toContain('Bash(git:*)');
+    }
     expect(PRESETS.edit.allowed).toEqual([
       'Agent',
       'Skill',
@@ -199,7 +212,18 @@ describe('guard', () => {
       'Read',
       'Glob',
       'Grep',
-      'Bash(git:*)',
+      'Bash(git status:*)',
+      'Bash(git add:*)',
+      'Bash(git commit:*)',
+      'Bash(git diff:*)',
+      'Bash(git log:*)',
+      'Bash(git show:*)',
+      'Bash(git rev-parse:*)',
+      'Bash(git branch --show-current)',
+      'Bash(git ls-files:*)',
+      'Bash(git mv:*)',
+      'Bash(git rm:*)',
+      'Bash(git restore:*)',
       'Bash(node:*)',
       'Bash(npm:*)',
       'Bash(date:*)',
@@ -217,6 +241,13 @@ describe('guard', () => {
       'Bash(claude:*)',
       'Bash(claude plugin:*)',
       'Bash(npm install -g:*)',
+      'Bash(npm publish:*)',
+      'Bash(git --git-dir:*)',
+      'Bash(git --work-tree:*)',
+      'Bash(git send-pack:*)',
+      'Bash(git diff --output:*)',
+      'Bash(git log --output:*)',
+      'Bash(git show --output:*)',
       'mcp__plugin_wingman_*',
       'mcp__wingman__*',
     ]) {

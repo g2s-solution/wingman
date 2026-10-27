@@ -12,6 +12,8 @@ import {
   type StartRunOptions,
 } from '../src/runner.js';
 import { isAlive } from '../src/worktree.js';
+import { groupMembers } from '../src/proc.js';
+import { reconcile } from '../src/reconcile.js';
 import type { RunMeta } from '../src/types.js';
 import {
   bundleSupervisor,
@@ -296,6 +298,15 @@ describe('guards', () => {
     expect(existsSync(join(home, 'runs')) ? readdirSync(join(home, 'runs')) : []).toEqual([]);
   });
 
+  it('delivers a prompt that looks like a flag as the prompt, after `--`', async () => {
+    const prompt = '--dangerously-skip-permissions';
+    const { opts, log } = ctx('ok', { prompt });
+    await finish(await startRun(opts));
+    const argv = readLog(log)[0]!.argv;
+    expect(argv.slice(-2)).toEqual(['--', prompt]);
+    expect(argv.slice(0, -2)).not.toContain(prompt);
+  });
+
   it('passes depth+1 and the base deny list to the child', async () => {
     const { opts, log } = ctx('ok');
     await finish(await startRun(opts));
@@ -359,5 +370,26 @@ describe('waitForRun', () => {
     } finally {
       await cancelRun(started.id);
     }
+  });
+});
+
+describe('agent outliving a killed supervisor', () => {
+  it('reconcile takes down the orphaned process group', async () => {
+    const started = await startRun(ctx('hang').opts);
+    const pid = started.pid as number;
+    for (let i = 0; i < 100 && groupMembers(pid).length < 2; i++) {
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    expect(groupMembers(pid).length).toBeGreaterThanOrEqual(2);
+    process.kill(pid, 'SIGKILL'); // only the supervisor: the agent stays in its group
+    for (let i = 0; i < 100 && isAlive(pid); i++) await new Promise((r) => setTimeout(r, 50));
+    expect(groupMembers(pid).length).toBeGreaterThan(0);
+
+    const meta = reconcile(readMeta(started.id));
+    expect(meta.status).toBe('failed_no_report');
+    for (let i = 0; i < 100 && groupMembers(pid).length > 0; i++) {
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    expect(groupMembers(pid)).toEqual([]);
   });
 });

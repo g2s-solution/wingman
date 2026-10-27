@@ -28643,7 +28643,18 @@ var PRESETS = {
       "Read",
       "Glob",
       "Grep",
-      "Bash(git:*)",
+      "Bash(git status:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git show:*)",
+      "Bash(git rev-parse:*)",
+      "Bash(git branch --show-current)",
+      "Bash(git ls-files:*)",
+      "Bash(git mv:*)",
+      "Bash(git rm:*)",
+      "Bash(git restore:*)",
       "Bash(node:*)",
       "Bash(npm:*)",
       "Bash(date:*)"
@@ -28667,12 +28678,19 @@ function baseDisallowed() {
     "Bash(git -C:*)",
     "Bash(git -c:*)",
     "Bash(git --no-pager:*)",
+    "Bash(git --git-dir:*)",
+    "Bash(git --work-tree:*)",
+    "Bash(git send-pack:*)",
+    "Bash(git diff --output:*)",
+    "Bash(git log --output:*)",
+    "Bash(git show --output:*)",
     "Bash(git update-ref:*)",
     "Bash(git config:*)",
     "Bash(git remote:*)",
     "Bash(claude:*)",
     "Bash(claude plugin:*)",
     "Bash(npm install -g:*)",
+    "Bash(npm publish:*)",
     "mcp__plugin_wingman_*",
     "mcp__wingman__*",
     "mcp__plugin_wingman_wingman__*"
@@ -28746,7 +28764,7 @@ var claudeAdapter = {
   buildCommand(account, spec) {
     assertToolItems(spec.allowed_tools, "allowed_tools");
     assertToolItems(spec.disallowed_tools, "disallowed_tools");
-    const args = ["-p", spec.prompt];
+    const args = ["-p"];
     args.push("--session-id", spec.session_id);
     args.push("--append-system-prompt", spec.append_system_prompt);
     args.push("--disallowedTools", ...spec.disallowed_tools);
@@ -28755,6 +28773,7 @@ var claudeAdapter = {
     args.push("--output-format", "stream-json", "--verbose", "--strict-mcp-config");
     if (spec.allowed_tools.length > 0) args.push("--allowedTools", ...spec.allowed_tools);
     if (spec.model) args.push("--model", spec.model);
+    args.push("--", spec.prompt);
     return { command: account.command, args };
   },
   buildEnv(parent, account, depth) {
@@ -29015,6 +29034,15 @@ function writeMeta(meta3) {
   writeAtomic(join2(dir, "meta.json"), `${JSON.stringify(parsed, null, 2)}
 `);
 }
+function patchRunning(id, patch) {
+  const current = readMeta(id);
+  if (TERMINAL_STATUSES.includes(current.status)) {
+    throw new Error(`run ${id} already ended as ${current.status} during start`);
+  }
+  const next = { ...current, ...patch, id, status: current.status };
+  writeMeta(next);
+  return next;
+}
 function readMeta(id) {
   return metaSchema.parse(JSON.parse(readFileSync(join2(dirOf(id), "meta.json"), "utf8")));
 }
@@ -29109,7 +29137,7 @@ function runSummary(id) {
 }
 
 // src/proc.ts
-import { readFileSync as readFileSync2 } from "node:fs";
+import { readFileSync as readFileSync2, readdirSync as readdirSync2 } from "node:fs";
 function readStartTime(pid) {
   try {
     const stat = readFileSync2(`/proc/${pid}/stat`, "utf8");
@@ -29133,6 +29161,47 @@ function isSameProcess(pid, startTime) {
   const actual = readStartTime(pid);
   return actual === void 0 || actual === startTime;
 }
+var GROUP_KILL_GRACE_MS = 3e3;
+function groupMembers(pgid) {
+  let names;
+  try {
+    names = readdirSync2("/proc");
+  } catch {
+    return [];
+  }
+  const members2 = [];
+  for (const name of names) {
+    if (!/^\d+$/.test(name)) continue;
+    try {
+      const stat = readFileSync2(`/proc/${name}/stat`, "utf8");
+      const rest = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
+      if (rest[0] !== "Z" && Number(rest[2]) === pgid) members2.push(Number(name));
+    } catch {
+    }
+  }
+  return members2;
+}
+function hasOrphanedGroup(pgid) {
+  if (!Number.isInteger(pgid) || pgid <= 1 || isAlive(pgid)) return false;
+  const members2 = groupMembers(pgid);
+  return members2.length > 0 && !members2.includes(process.pid);
+}
+function terminateOrphanedGroup(pgid, graceMs2 = GROUP_KILL_GRACE_MS) {
+  if (!hasOrphanedGroup(pgid)) return false;
+  try {
+    process.kill(-pgid, "SIGTERM");
+  } catch {
+    return false;
+  }
+  setTimeout(() => {
+    if (!hasOrphanedGroup(pgid)) return;
+    try {
+      process.kill(-pgid, "SIGKILL");
+    } catch {
+    }
+  }, graceMs2).unref();
+  return true;
+}
 
 // src/reconcile.ts
 import { existsSync as existsSync2 } from "node:fs";
@@ -29147,6 +29216,7 @@ function reconcile(meta3, opts = {}) {
   if (meta3.status !== "running") return meta3;
   if (meta3.pid !== void 0) {
     if (isSameProcess(meta3.pid, meta3.pid_start_time)) return meta3;
+    terminateOrphanedGroup(meta3.pid);
   } else {
     const age = (opts.now ?? Date.now()) - Date.parse(meta3.created_at);
     if (!(age > graceMs(opts))) return meta3;
@@ -29206,7 +29276,7 @@ import {
   openSync as openSync2,
   readFileSync as readFileSync3,
   linkSync,
-  readdirSync as readdirSync2,
+  readdirSync as readdirSync3,
   realpathSync as realpathSync2,
   renameSync as renameSync2,
   rmSync as rmSync2,
@@ -29265,6 +29335,7 @@ timed out after ${timeoutMs}ms`.trim();
 var DEFAULT_FETCH_TIMEOUT_MS = 12e4;
 var DEFAULT_ADD_TIMEOUT_MS = 6e4;
 var DEFAULT_SETUP_TIMEOUT_MS = 6e5;
+var START_BUDGET_MS = 15 * 60 * 1e3;
 function withoutProxy(env) {
   const copy = { ...env };
   for (const name of PROXY_VARS) delete copy[name];
@@ -29338,18 +29409,33 @@ function setLockOwner(lockPath, pid) {
 }
 function releaseLocksOf(runId) {
   if (!existsSync3(locksDir())) return;
-  for (const entry of readdirSync2(locksDir())) {
+  for (const entry of readdirSync3(locksDir())) {
     const path = join5(locksDir(), entry);
     if (readLock(path)?.run_id === runId) rmSync2(path, { force: true });
   }
 }
-async function withRetry(exec, sleep, file2, args, opts) {
-  let result = await exec(file2, args, opts);
+async function withRetry(exec, sleep, file2, args, opts, deadline) {
+  const attemptOpts = () => {
+    if (deadline === void 0) return opts;
+    const left = deadline - Date.now();
+    if (left <= 0) return void 0;
+    return { ...opts, timeoutMs: Math.min(opts.timeoutMs ?? left, left) };
+  };
+  const budgetGone = {
+    code: TIMED_OUT,
+    stdout: "",
+    stderr: "start budget exhausted"
+  };
+  const first = attemptOpts();
+  if (!first) return budgetGone;
+  let result = await exec(file2, args, first);
   for (let attempt = 1; attempt < FETCH_ATTEMPTS && result.code !== 0; attempt++) {
     if (!`${result.stdout}
 ${result.stderr}`.includes("503")) break;
     await sleep(2e3);
-    result = await exec(file2, args, opts);
+    const next = attemptOpts();
+    if (!next) break;
+    result = await exec(file2, args, next);
   }
   return result;
 }
@@ -29388,11 +29474,18 @@ async function createWorktree(opts) {
   }
   try {
     const warnings = [];
-    const fetched = await withRetry(exec, sleep, "git", ["fetch", "origin"], {
-      cwd: repo,
-      env,
-      timeoutMs: opts.fetchTimeoutMs ?? DEFAULT_FETCH_TIMEOUT_MS
-    });
+    const fetched = await withRetry(
+      exec,
+      sleep,
+      "git",
+      ["fetch", "origin"],
+      {
+        cwd: repo,
+        env,
+        timeoutMs: opts.fetchTimeoutMs ?? DEFAULT_FETCH_TIMEOUT_MS
+      },
+      opts.deadline
+    );
     if (fetched.code !== 0) {
       warnings.push(`git fetch failed (code ${fetched.code}); worktree cut from local HEAD`);
     }
@@ -29405,7 +29498,8 @@ async function createWorktree(opts) {
       sleep,
       "git",
       ["worktree", "add", "-b", branch, path, "HEAD"],
-      { cwd: repo, env, timeoutMs: opts.addTimeoutMs ?? DEFAULT_ADD_TIMEOUT_MS }
+      { cwd: repo, env, timeoutMs: opts.addTimeoutMs ?? DEFAULT_ADD_TIMEOUT_MS },
+      opts.deadline
     );
     if (added.code !== 0) {
       throw new Error(`git worktree add failed: ${added.stderr.trim().slice(0, 500)}`);
@@ -29477,6 +29571,7 @@ async function pruneOrphans(opts = {}) {
     if (!wasDead && minAge > 0 && meta3.finished_at) {
       if (Date.now() - Date.parse(meta3.finished_at) < minAge) continue;
     }
+    if (meta3.pid !== void 0 && groupMembers(meta3.pid).length > 0) continue;
     if (await worktreeDirty(meta3.worktree, opts.exec)) continue;
     try {
       await removeWorktree(meta3.id, opts.exec);
@@ -29745,9 +29840,21 @@ function launchSupervisor(meta3, payload, env, entry) {
   const pid = child.pid;
   if (pid === void 0) throw new Error("Could not start the supervisor process");
   const startTime = readStartTime(pid);
-  const next = { ...readMeta(meta3.id), pid, started_at: (/* @__PURE__ */ new Date()).toISOString() };
-  if (startTime !== void 0) next.pid_start_time = startTime;
-  writeMeta(next);
+  const patch = {
+    pid,
+    started_at: (/* @__PURE__ */ new Date()).toISOString()
+  };
+  if (startTime !== void 0) patch.pid_start_time = startTime;
+  try {
+    patchRunning(meta3.id, patch);
+  } catch (err) {
+    try {
+      process.kill(-pid, "SIGKILL");
+    } catch {
+      child.kill("SIGKILL");
+    }
+    throw err;
+  }
   child.stdin?.on("error", () => void 0);
   child.stdin?.end(JSON.stringify(payload));
   child.unref();
@@ -29774,6 +29881,9 @@ async function startRun(opts) {
     }
   }
   const repo = opts.worktree ? top : void 0;
+  if (opts.lock_key !== void 0 && !repo) {
+    throw new Error("lock_key needs a worktree run inside a git repository");
+  }
   const offset = repo ? offsetInRepo(repo, opts.cwd) : "";
   const sessionId = randomUUID();
   const meta3 = createRun({
@@ -29788,6 +29898,7 @@ async function startRun(opts) {
     ...opts.lock_key !== void 0 ? { lock_key: opts.lock_key } : {},
     ...opts.preset !== void 0 ? { preset: opts.preset } : {}
   });
+  const deadline = Date.now() + (opts.start_budget_ms ?? START_BUDGET_MS);
   let runCwd = opts.cwd;
   let lockPath;
   try {
@@ -29798,6 +29909,7 @@ async function startRun(opts) {
         runId: meta3.id,
         env: parentEnv,
         exec,
+        deadline,
         ...opts.lock_key !== void 0 ? { lock_key: opts.lock_key } : {},
         ...opts.sleep ? { sleep: opts.sleep } : {},
         ...opts.fetch_timeout_ms !== void 0 ? { fetchTimeoutMs: opts.fetch_timeout_ms } : {},
@@ -29808,13 +29920,19 @@ async function startRun(opts) {
       meta3.run_branch = wt.branch;
       runCwd = offset ? join6(wt.path, offset) : wt.path;
       meta3.run_cwd = runCwd;
-      writeMeta(meta3);
+      patchRunning(meta3.id, {
+        worktree: wt.path,
+        run_branch: wt.branch,
+        run_cwd: runCwd
+      });
       if (opts.setup) {
+        const left = deadline - Date.now();
+        if (left <= 0) throw new Error("Worktree setup skipped: the start budget is used up");
         const setup = await runSetup(
           wt.path,
           opts.setup,
           adapter.buildEnv(parentEnv, opts.account, depth),
-          opts.setup_timeout_ms
+          Math.min(opts.setup_timeout_ms ?? DEFAULT_SETUP_TIMEOUT_MS, left)
         );
         if (!setup.ok)
           throw new Error(`Worktree setup command failed: ${setup.output.slice(-300)}`);
@@ -29828,7 +29946,7 @@ async function startRun(opts) {
     const snapshot = await takeSnapshot(exec, top, callerBranch).catch(() => void 0);
     if (snapshot) {
       meta3.ref_snapshot = snapshot;
-      writeMeta(meta3);
+      patchRunning(meta3.id, { ref_snapshot: snapshot });
     }
   }
   const spec = {
@@ -29860,7 +29978,13 @@ async function discardStart(meta3, exec) {
     updateStatus(meta3.id, "failed_no_report");
   } catch {
   }
-  if (meta3.worktree) await removeWorktree(meta3.id, exec).catch(() => void 0);
+  if (meta3.worktree) {
+    try {
+      writeMeta({ ...readMeta(meta3.id), worktree: meta3.worktree });
+    } catch {
+    }
+    await removeWorktree(meta3.id, exec).catch(() => void 0);
+  }
   releaseLocksOf(meta3.id);
   rmSync3(runDir(meta3.id), { recursive: true, force: true });
 }
@@ -38110,6 +38234,11 @@ async function chooseAccount(env, accountId, random) {
     if (!targets.some((a) => a.id === accountId)) {
       throw new Error(`Account "${accountId}" is the caller's own profile; pick another account`);
     }
+    if (!isActive(account)) {
+      throw new Error(
+        `Account "${accountId}" is ${account.status}, not active; pick another account`
+      );
+    }
     return account;
   }
   const pool = targets.filter(isActive);
@@ -38129,7 +38258,9 @@ var startInput = {
   allowed_tools: external_exports.array(external_exports.string().min(1).max(300).regex(TOOL_ITEM, "invalid tool rule")).max(100).optional(),
   max_turns: external_exports.number().int().positive().max(1e3).optional(),
   worktree: external_exports.boolean().optional().describe("Run in a fresh git worktree; default true in a repo."),
-  lock_key: external_exports.string().min(1).max(200).optional().describe("Stops two concurrent runs in the same repo with the same key."),
+  lock_key: external_exports.string().min(1).max(200).optional().describe(
+    "Stops two concurrent runs in the same repo with the same key. Needs a worktree run: refused with worktree:false or outside a git repo."
+  ),
   setup: external_exports.string().min(1).max(2e3).optional().describe("Shell command run in a new worktree.")
 };
 var runIdInput = { run_id: external_exports.string().min(1).max(64) };

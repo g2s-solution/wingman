@@ -16,7 +16,7 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import { runDir, wingmanHome, worktreesDir } from './paths.js';
-import { isAlive, isSameProcess, readStartTime } from './proc.js';
+import { groupMembers, isAlive, isSameProcess, readStartTime } from './proc.js';
 import { reconcile } from './reconcile.js';
 import { listRuns, readMeta } from './runs.js';
 import { TERMINAL_STATUSES, type RunMeta } from './types.js';
@@ -103,11 +103,15 @@ export interface CreateWorktreeOptions {
   fetchTimeoutMs?: number;
   /** Default 60s. */
   addTimeoutMs?: number;
+  /** Epoch ms by which the start phase must be over; later attempts are cut short or skipped. */
+  deadline?: number;
 }
 
 export const DEFAULT_FETCH_TIMEOUT_MS = 120_000;
 export const DEFAULT_ADD_TIMEOUT_MS = 60_000;
 export const DEFAULT_SETUP_TIMEOUT_MS = 600_000;
+/** Cap on the whole start phase (fetch, worktree add, setup); reconcile's no-pid grace is longer. */
+export const START_BUDGET_MS = 15 * 60 * 1000;
 
 export interface WorktreeInfo {
   path: string;
@@ -223,12 +227,28 @@ async function withRetry(
   file: string,
   args: string[],
   opts: { cwd: string; env: NodeJS.ProcessEnv; timeoutMs?: number },
+  deadline?: number,
 ): Promise<ExecResult> {
-  let result = await exec(file, args, opts);
+  const attemptOpts = (): typeof opts | undefined => {
+    if (deadline === undefined) return opts;
+    const left = deadline - Date.now();
+    if (left <= 0) return undefined;
+    return { ...opts, timeoutMs: Math.min(opts.timeoutMs ?? left, left) };
+  };
+  const budgetGone: ExecResult = {
+    code: TIMED_OUT,
+    stdout: '',
+    stderr: 'start budget exhausted',
+  };
+  const first = attemptOpts();
+  if (!first) return budgetGone;
+  let result = await exec(file, args, first);
   for (let attempt = 1; attempt < FETCH_ATTEMPTS && result.code !== 0; attempt++) {
     if (!`${result.stdout}\n${result.stderr}`.includes('503')) break;
     await sleep(2000);
-    result = await exec(file, args, opts);
+    const next = attemptOpts();
+    if (!next) break;
+    result = await exec(file, args, next);
   }
   return result;
 }
@@ -276,11 +296,18 @@ export async function createWorktree(opts: CreateWorktreeOptions): Promise<Workt
 
   try {
     const warnings: string[] = [];
-    const fetched = await withRetry(exec, sleep, 'git', ['fetch', 'origin'], {
-      cwd: repo,
-      env,
-      timeoutMs: opts.fetchTimeoutMs ?? DEFAULT_FETCH_TIMEOUT_MS,
-    });
+    const fetched = await withRetry(
+      exec,
+      sleep,
+      'git',
+      ['fetch', 'origin'],
+      {
+        cwd: repo,
+        env,
+        timeoutMs: opts.fetchTimeoutMs ?? DEFAULT_FETCH_TIMEOUT_MS,
+      },
+      opts.deadline,
+    );
     if (fetched.code !== 0) {
       warnings.push(`git fetch failed (code ${fetched.code}); worktree cut from local HEAD`);
     }
@@ -295,6 +322,7 @@ export async function createWorktree(opts: CreateWorktreeOptions): Promise<Workt
       'git',
       ['worktree', 'add', '-b', branch, path, 'HEAD'],
       { cwd: repo, env, timeoutMs: opts.addTimeoutMs ?? DEFAULT_ADD_TIMEOUT_MS },
+      opts.deadline,
     );
     if (added.code !== 0) {
       throw new Error(`git worktree add failed: ${added.stderr.trim().slice(0, 500)}`);
@@ -388,6 +416,8 @@ export async function pruneOrphans(
     if (!wasDead && minAge > 0 && meta.finished_at) {
       if (Date.now() - Date.parse(meta.finished_at) < minAge) continue;
     }
+    // an agent can outlive its supervisor in the same process group
+    if (meta.pid !== undefined && groupMembers(meta.pid).length > 0) continue;
     if (await worktreeDirty(meta.worktree as string, opts.exec)) continue;
     try {
       await removeWorktree(meta.id, opts.exec);
