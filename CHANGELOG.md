@@ -2,6 +2,13 @@
 
 Versions are the plugin version in `wingman/.claude-plugin/plugin.json`. Claude Code only updates an installed plugin when this number changes.
 
+## 0.3.0
+
+- Manage accounts without editing JSON: `wingman accounts list|add|disable|enable|remove` (run as `node <plugin dir>/wingman/bin/wingman accounts ...`). `another-login.sh` now registers the profile through it. `remove` needs `--yes` and never touches the profile directory or credentials.
+- New read-only MCP tool `wingman_accounts` (id, label, status, whether it is your own profile). There is deliberately no tool that adds or changes accounts: a registry entry's `command` is executed by the runner, so mutations stay in the CLI.
+- `wingman doctor [--online] [--json]`: checks the state directory and file modes, the registry, each account's config directory and launcher, the links to the default profile, and the wingman version in each profile; `--online` confirms each profile is signed in without printing any account details.
+- New skill `add-account` that guides you through adding a second account; it never enters credentials for you.
+
 ## 0.2.0
 
 - Safer: the prompt is sent to the agent over stdin, so it no longer shows in the process list (the static guard text is still an argument).

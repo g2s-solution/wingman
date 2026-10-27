@@ -10,12 +10,13 @@ The order follows dependencies: first make the public project healthy, safe and 
 
 **v0.2** (0.2.0): the prompt goes to the agent over stdin (not visible in `ps`); preset `edit-files` (no `node`, `npm`, `Agent`, `Skill`); `proc.ts` platform layer (`/proc` on Linux, `ps` on macOS) with a macOS CI job; `wingman wait` and `wingman gc` in the bundle (old run directories, stale locks, orphan worktrees). The macOS path has had little real-world use.
 
+**v0.3** (0.3.0): `wingman accounts` (list, add, disable, enable, remove), the read-only tool `wingman_accounts`, `wingman doctor` (offline and `--online`), the `add-account` skill. Mutations stay in the CLI on purpose.
+
 ## Planned
 
 | Phase | Goal | Scope | Done when | Depends on |
 |---|---|---|---|---|
 | **v0.1.x** (patch releases) | Keep the public repository healthy. | Pin CI actions by SHA and add Dependabot; code of conduct, issue and PR templates, release checklist; remove timing-dependent tests (poll for conditions, never fixed sleeps); document retention of `~/.wingman` | CI actions pinned; the test suite passes three CI runs in a row without retries; templates exist | v0.1 |
-| **v0.3 Manage accounts** | Manage the registry without editing JSON. | `wingman` CLI: `list`, `add`, `disable`, `enable`, `remove`, reusing the registration logic of `another-login.sh`; tool `wingman_accounts`; `doctor` (profile symlinks, plugin version in each profile, whether `CLAUDE_CONFIG_DIR` still takes effect); skill `add-account` | Add, disable and list work from the CLI alone; `doctor` flags a broken symlink in a test fixture | v0.2 |
 | **v0.4 Account status** | Make limits visible and self-healing. | Write `rate_limited` and `limited_until` back to the registry from the run's `rate_limit` data (the run already ends as `rate_limited` and records it); expiry on read; `mark-limited --until`; a hint to the caller naming other active accounts; per-account run and outcome summary | A run that hits a limit marks its account, the account is skipped until it expires, and the caller sees alternatives | v0.3 |
 | **v0.5 Selection policy** | Pick targets by policy instead of at random. | `tags`, `priority`, `scope`, filters; least-recently-used default; skill `pick-account`; failover stays the caller's decision | With three accounts, selection honors tags and priority and skips limited ones, in tests | v0.4 |
 | **v0.6 Follow-ups and limits** | Continue work and avoid overloading an account. | Follow-up run on the same account (`--resume` with the recorded session id); per-account concurrency cap and an optional queue; optional sandbox wrapper (`bubblewrap`, `sandbox-exec`) for `edit`; `setup` restricted or opt-in | A follow-up run keeps the earlier context; N runs over M accounts never exceed the cap in a stress test; a documented attack test (`env git push`, `node -e`) is blocked under the sandbox | v0.2, v0.4 |

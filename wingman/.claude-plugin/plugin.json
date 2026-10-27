@@ -1,6 +1,6 @@
 {
   "name": "wingman",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Delegate a task to a second Claude account as a one-shot agent, with its own git worktree.",
   "author": {
     "name": "g2s-solution"
