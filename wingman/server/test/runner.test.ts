@@ -288,8 +288,10 @@ describe('environment and secrets', () => {
       await eventsContain(started.id, '"subtype":"init"');
       const pid = started.pid as number;
       const events = join(runDir(started.id), 'events.jsonl');
-      expect(readlinkSync(`/proc/${pid}/fd/1`)).toBe(events);
-      expect(readlinkSync(`/proc/${pid}/fd/2`)).toBe(events);
+      if (process.platform === 'linux') {
+        expect(readlinkSync(`/proc/${pid}/fd/1`)).toBe(events);
+        expect(readlinkSync(`/proc/${pid}/fd/2`)).toBe(events);
+      }
       expect(statSync(events).mode & 0o777).toBe(0o600);
       expect(readFileSync(events, 'utf8')).toContain('"subtype":"init"');
     } finally {

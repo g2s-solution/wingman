@@ -1,5 +1,12 @@
 import { execFileSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { build } from 'esbuild';
@@ -8,7 +15,8 @@ import type { Account } from '../src/types.js';
 export const FAKE = resolve(__dirname, 'fixtures/fake-claude.mjs');
 
 export function tmp(prefix: string): string {
-  return mkdtempSync(join(tmpdir(), `wm-${prefix}-`));
+  // realpath: on macOS the temp dir sits behind a /var -> /private/var symlink, and the server reports real paths
+  return realpathSync(mkdtempSync(join(tmpdir(), `wm-${prefix}-`)));
 }
 
 export async function bundleSupervisor(dir: string): Promise<string> {
