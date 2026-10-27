@@ -108,11 +108,16 @@ describe('ref snapshot', () => {
 });
 
 describe('start on a base branch or detached HEAD (M4)', () => {
-  it('refuses regardless of the worktree option', async () => {
+  it('refuses on the base branch only without a worktree', async () => {
     const repo = makeRepo('main');
-    for (const worktree of [true, false, undefined]) {
-      await expect(startRun(opts('ok', { cwd: repo, worktree }))).rejects.toThrow(/base branch/);
-    }
+    await expect(startRun(opts('ok', { cwd: repo, worktree: false }))).rejects.toThrow(
+      /base branch/,
+    );
+    await expect(startRun(opts('ok', { cwd: repo, worktree: undefined }))).rejects.toThrow(
+      /base branch/,
+    );
+    const onBase = await startRun(opts('ok', { cwd: repo, worktree: true }));
+    expect((await settle(onBase.id)).status).toBe('done');
     git(repo, 'checkout', '-q', '--detach');
     await expect(startRun(opts('ok', { cwd: repo, worktree: false }))).rejects.toThrow(/detached/);
     git(repo, 'switch', '-q', '-c', 'feat/ok');
@@ -129,6 +134,93 @@ describe('start on a base branch or detached HEAD (M4)', () => {
     await expect(
       h.start({ account: 'target', prompt: 'x', cwd: repo, worktree: false }),
     ).rejects.toThrow(/base branch/);
+  });
+});
+
+describe('run branch rules', () => {
+  it('a slashed caller branch gets <branch>-wm-<id> and a branch from a feature branch is not wingman/', async () => {
+    const { repo } = featureRepo();
+    const started = await startRun(opts('ok', { cwd: repo, worktree: true }));
+    expect(started.run_branch).toBe(`feat/g-wm-${started.id}`);
+    expect((await settle(started.id)).status).toBe('done');
+  });
+
+  it('branch:false is refused for a run that may commit, and the readonly default needs no branch', async () => {
+    const { repo } = featureRepo();
+    await expect(
+      startRun(opts('ok', { cwd: repo, worktree: true, create_branch: false })),
+    ).rejects.toThrow(/cannot commit/);
+    await expect(
+      startRun(
+        opts('ok', {
+          cwd: repo,
+          worktree: true,
+          preset: 'readonly',
+          allowed_tools: ['Read'],
+          create_branch: false,
+        }),
+      ),
+    ).rejects.toThrow(/cannot commit/);
+    const ro = await startRun(opts('ok', { cwd: repo, worktree: true, preset: 'readonly' }));
+    expect(ro.run_branch).toBeUndefined();
+    expect((await settle(ro.id)).status).toBe('done');
+  });
+
+  it('create_branch:true gives a readonly run a branch, and explicit allowed_tools imply one', async () => {
+    const { repo } = featureRepo();
+    const forced = await startRun(
+      opts('ok', { cwd: repo, worktree: true, preset: 'readonly', create_branch: true }),
+    );
+    expect(forced.run_branch).toBe(`feat/g-wm-${forced.id}`);
+    const tools = await startRun(
+      opts('ok', { cwd: repo, worktree: true, preset: 'readonly', allowed_tools: ['Read'] }),
+    );
+    expect(tools.run_branch).toBe(`feat/g-wm-${tools.id}`);
+    await settle(forced.id);
+    await settle(tools.id);
+  });
+
+  it('a detached HEAD is refused even with a worktree', async () => {
+    const { repo } = featureRepo();
+    git(repo, 'checkout', '-q', '--detach');
+    await expect(startRun(opts('ok', { cwd: repo, worktree: true }))).rejects.toThrow(/detached/);
+  });
+
+  it('an existing branch named wingman makes the start fail with a clear git error and no leftovers', async () => {
+    const repo = makeRepo('main');
+    git(repo, 'branch', 'wingman');
+    await expect(
+      startRun(opts('ok', { cwd: repo, worktree: true, lock_key: 'k1' })),
+    ).rejects.toThrow(/git worktree add failed/);
+    const retry = await startRun(
+      opts('ok', { cwd: repo, worktree: true, preset: 'readonly', lock_key: 'k1' }),
+    );
+    expect((await settle(retry.id)).status).toBe('done');
+  });
+
+  it('wingman_cleanup on a detached run omits kept_branch', async () => {
+    const { repo } = featureRepo();
+    const callerDir = join(home, 'cfg-caller');
+    const o = opts('ok', {});
+    await saveAccounts({ accounts: [o.account] });
+    const h = createHandlers({
+      env: { ...env(), CLAUDE_CONFIG_DIR: callerDir },
+      supervisorEntry: entry,
+    });
+    const started = (await h.start({
+      account: 'target',
+      prompt: 'x',
+      cwd: repo,
+      preset: 'readonly',
+    })) as { run_id: string; run_branch?: string };
+    expect(started.run_branch).toBeUndefined();
+    await settle(started.run_id);
+    const cleaned = (await h.cleanup({ run_id: started.run_id, action: 'accept' })) as Record<
+      string,
+      unknown
+    >;
+    expect(cleaned.worktree_removed).toBe(true);
+    expect(cleaned).not.toHaveProperty('kept_branch');
   });
 });
 

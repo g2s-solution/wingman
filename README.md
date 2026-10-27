@@ -47,11 +47,11 @@ In a session: `/new-agent <task>`. The skill chooses a preset, calls `wingman_st
 
 | Tool | Purpose |
 |---|---|
-| `wingman_start` | start a run; `preset` is `readonly` (default) or `edit`; in a git repo it gets a worktree on `<branch>-wm-<runid>` cut from the caller's branch |
+| `wingman_start` | start a run; `preset` is `readonly` (default) or `edit`; in a git repo it gets a worktree cut from the caller's HEAD, also on the base branch; `edit` runs commit on `<branch>-wm-<runid>` (or `wingman/<runid>` from a base branch), `readonly` runs get a detached worktree with no branch (`branch` overrides) |
 | `wingman_status`, `wingman_result` | state and the final report, masked and capped |
 | `wingman_cancel` | stop a run |
 | `wingman_list` | recent runs |
-| `wingman_cleanup` | remove a run's worktree (`accept` refuses uncommitted changes); the run branch is always kept |
+| `wingman_cleanup` | remove a run's worktree (`accept` refuses uncommitted changes); the run branch, when there is one, is kept |
 
 Run state lives in `~/.wingman/runs/<id>/`. Do not read `events.jsonl`: it holds raw tool output. Review an edit run with `git diff --stat <caller-branch>..<run-branch>`; merging and pushing stay with the caller.
 

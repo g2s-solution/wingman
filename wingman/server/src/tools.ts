@@ -110,7 +110,18 @@ const startInput = {
     .max(100)
     .optional(),
   max_turns: z.number().int().positive().max(1000).optional(),
-  worktree: z.boolean().optional().describe('Run in a fresh git worktree; default true in a repo.'),
+  worktree: z
+    .boolean()
+    .optional()
+    .describe(
+      'Run in a fresh git worktree; default true in a repo, also when the caller is on the base branch.',
+    ),
+  branch: z
+    .boolean()
+    .optional()
+    .describe(
+      'Create a run branch in the worktree. Default: yes for edit runs, no (detached worktree) for readonly runs. branch:false is refused for runs that may commit.',
+    ),
   lock_key: z
     .string()
     .min(1)
@@ -151,6 +162,7 @@ export function createHandlers(deps: ServerDeps = {}) {
         prompt: input.prompt,
         cwd: input.cwd,
         worktree,
+        ...(input.branch !== undefined ? { create_branch: input.branch } : {}),
         ...(input.model !== undefined ? { model: input.model } : {}),
         ...(input.preset !== undefined ? { preset: input.preset } : {}),
         ...(input.allowed_tools !== undefined ? { allowed_tools: input.allowed_tools } : {}),
@@ -288,7 +300,7 @@ export function buildServer(deps: ServerDeps = {}): McpServer {
     'wingman_cleanup',
     {
       description:
-        'Remove the worktree and lock of a finished run; the run branch is always kept. Refused while running.',
+        'Remove the worktree and lock of a finished run; the run branch, when the run has one, is kept. Refused while running.',
       inputSchema: { ...runIdInput, action: z.enum(['accept', 'discard']) },
     },
     wrap(h.cleanup),

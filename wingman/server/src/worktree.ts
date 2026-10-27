@@ -96,6 +96,8 @@ export interface CreateWorktreeOptions {
   callerBranch: string;
   runId: string;
   lock_key?: string;
+  /** Create a run branch (default). False gives a detached worktree for runs that never commit. */
+  createBranch?: boolean;
   exec?: ExecFn;
   sleep?: (ms: number) => Promise<void>;
   env?: NodeJS.ProcessEnv;
@@ -115,7 +117,8 @@ export const START_BUDGET_MS = 15 * 60 * 1000;
 
 export interface WorktreeInfo {
   path: string;
-  branch: string;
+  /** Absent for a detached worktree. */
+  branch?: string;
   lockPath?: string;
   warnings: string[];
 }
@@ -276,9 +279,7 @@ export async function createWorktree(opts: CreateWorktreeOptions): Promise<Workt
   if (!callerBranch || callerBranch === 'HEAD') {
     throw new Error('Refusing to create a worktree from a detached HEAD');
   }
-  if ((await baseBranches(exec, repo, env)).includes(callerBranch)) {
-    throw new Error(`Refusing to create a worktree from the base branch "${callerBranch}"`);
-  }
+  const fromBase = (await baseBranches(exec, repo, env)).includes(callerBranch);
 
   let lockPath: string | undefined;
   if (opts.lock_key) {
@@ -315,19 +316,28 @@ export async function createWorktree(opts: CreateWorktreeOptions): Promise<Workt
     mkdirSync(worktreesDir(), { recursive: true, mode: 0o700 });
     chmodSync(worktreesDir(), 0o700);
     const path = join(worktreesDir(), runId);
-    const branch = `${callerBranch}-wm-${runId}`;
+    // A run from a base branch gets its own `wingman/` branch so it never shares a name with it.
+    const branch =
+      opts.createBranch === false
+        ? undefined
+        : fromBase
+          ? `wingman/${runId}`
+          : `${callerBranch}-wm-${runId}`;
     const added = await withRetry(
       exec,
       sleep,
       'git',
-      ['worktree', 'add', '-b', branch, path, 'HEAD'],
+      branch === undefined
+        ? ['worktree', 'add', '--detach', path, 'HEAD']
+        : ['worktree', 'add', '-b', branch, path, 'HEAD'],
       { cwd: repo, env, timeoutMs: opts.addTimeoutMs ?? DEFAULT_ADD_TIMEOUT_MS },
       opts.deadline,
     );
     if (added.code !== 0) {
       throw new Error(`git worktree add failed: ${added.stderr.trim().slice(0, 500)}`);
     }
-    const info: WorktreeInfo = { path, branch, warnings };
+    const info: WorktreeInfo = { path, warnings };
+    if (branch !== undefined) info.branch = branch;
     if (lockPath) info.lockPath = lockPath;
     return info;
   } catch (err) {
