@@ -23,7 +23,7 @@ A bare name such as `claude-thinh` becomes `~/.claude-thinh`. The script signs i
 
 ## Register the target
 
-v0.1 has no CLI for this. Create `~/.wingman/accounts.json` (directory mode 0700, file mode 0600):
+`another-login.sh` registers the profile for you: after writing the launcher it adds or updates an entry in `~/.wingman/accounts.json` (id = the name without a leading `claude-`, so `claude-thinh` becomes `thinh`), keeps fields you set by hand such as `status`, and leaves an invalid file untouched. Nothing to do unless you want to edit the file yourself (directory mode 0700, file mode 0600):
 
 ```json
 {

@@ -12,6 +12,6 @@ See `DESIGN.md` for the concepts and decisions and `PLAN.md` for the v0.1 steps.
 | **v0.5** | Queue and concurrency limits per account, usage report per account. | Several runs are scheduled across accounts without overloading one. |
 | **v0.6** | Other agent backends beyond Claude Code (OpenAI Codex, OpenCode, and similar CLIs). An account's `provider` selects an adapter that builds the command, sets the account selection variable (for example `CLAUDE_CONFIG_DIR`, `CODEX_HOME`), injects the guardrail prompt, parses events and detects rate limits. | A run can be delegated to a non-Claude agent through the same `wingman_*` tools, with the same masked, capped report. |
 
-Backlog, **do now (next task, before v0.2)**: `another-login.sh` should register the new profile in `~/.wingman/accounts.json` itself (`id`, `label`, `config_dir`, `command` = the launcher it just wrote, mode 0700 dir and 0600 file, no credentials, skip or update when the id exists), so v0.1 needs no hand-edited JSON. The v0.2 `add-account` CLI and skill then reuse the same code.
+Done in v0.1: `another-login.sh` registers the new profile in `~/.wingman/accounts.json` itself (no credentials, update when the id exists). The v0.2 `add-account` CLI and skill should reuse that logic.
 
 Out of scope for now: automatic failover without the caller's decision, a pre-run quota gauge, cross-account session resume.
