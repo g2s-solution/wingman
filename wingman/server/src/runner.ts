@@ -1,0 +1,538 @@
+/**
+ * Runner design
+ *
+ * The MCP server process never holds a pipe to the agent. `startRun` spawns a detached
+ * supervisor (`node <entry> --supervise <runId>`, own process group, `unref`ed) whose stdout
+ * and stderr are a file descriptor on `events.jsonl` opened here. The run spec (including the
+ * prompt) is handed to the supervisor on stdin and is never written to disk; the supervisor's
+ * environment is the adapter's allowlisted env, so no credential or caller variable reaches it.
+ * The supervisor spawns the agent command with a pipe to itself, tees every raw line to
+ * `events.jsonl`, parses events through the adapter and, when the agent ends, writes
+ * `result.md` and the final status. Because the supervisor is the group leader, cancel and the
+ * wall-clock timeout signal the whole group.
+ */
+import { randomUUID } from 'node:crypto';
+import { closeSync, existsSync, mkdirSync, openSync, rmSync } from 'node:fs';
+import { spawn, type ChildProcess } from 'node:child_process';
+import { createInterface } from 'node:readline';
+import { relative, join } from 'node:path';
+import { claudeAdapter, getAdapter, isRateLimitRejected } from './adapters/claude.js';
+import { guardPrompt, parseStatusLine, resolveTools } from './guard.js';
+import { runDir, wingmanHome } from './paths.js';
+import { getAccount } from './registry.js';
+import {
+  appendEvent,
+  createRun,
+  pruneEvents,
+  readMeta,
+  updateStatus,
+  writeMeta,
+  writeResult,
+} from './runs.js';
+import { assertCanStart, currentDepth } from './self.js';
+import {
+  defaultExec,
+  isAlive,
+  isSameProcess,
+  readStartTime,
+  removeWorktree,
+  runSetup,
+  setLockOwner,
+  createWorktree,
+  type ExecFn,
+} from './worktree.js';
+import {
+  TERMINAL_STATUSES,
+  type Account,
+  type Adapter,
+  type RateLimitInfo,
+  type RunMeta,
+  type RunStatus,
+  type StartSpec,
+} from './types.js';
+
+const DEFAULT_TIMEOUT_MS = 4 * 60 * 60 * 1000;
+const KILL_GRACE_MS = 3000;
+const MAX_EVENTS_BYTES = 20 * 1024 * 1024;
+
+const PLUGIN_CHANGE =
+  /\bclaude\s+plugins?\s+(?:update|install)\b|\bplugins?\s+(?:was\s+|were\s+|has\s+been\s+|have\s+been\s+)?(?:updated|installed)\b/i;
+
+export interface StartRunOptions {
+  account: Account;
+  prompt: string;
+  cwd: string;
+  model?: string;
+  preset?: string;
+  allowed_tools?: string[];
+  max_turns?: number;
+  worktree?: boolean;
+  change?: string;
+  parentEnv?: NodeJS.ProcessEnv;
+  adapter?: Adapter;
+  /** Wall-clock limit for the agent; a hung child is killed and the run is `failed`. */
+  timeout_ms?: number;
+  /** Shell command run in a fresh worktree before the task. */
+  setup?: string;
+  /** Script the supervisor is started from; defaults to the running entry (`process.argv[1]`). */
+  supervisorEntry?: string;
+  exec?: ExecFn;
+  sleep?: (ms: number) => Promise<void>;
+}
+
+interface SupervisorPayload {
+  provider: string;
+  command: string;
+  args: string[];
+  cwd: string;
+  timeout_ms: number;
+  wingman_home: string;
+}
+
+export interface Outcome {
+  status: RunStatus;
+  text: string;
+}
+
+export function mapOutcome(input: {
+  finished: { result: string | null; is_error: boolean } | undefined;
+  exitCode: number | null;
+  signal: string | null;
+  timedOut: boolean;
+  rateRejected: boolean;
+  spawnError?: string;
+}): Outcome {
+  const { finished, exitCode, timedOut, rateRejected } = input;
+  const exit = `exit code ${exitCode ?? 'none'}${input.signal ? `, signal ${input.signal}` : ''}`;
+  if (timedOut) {
+    return {
+      status: 'failed',
+      text: `[wingman] agent exceeded the time limit and was killed (${exit})`,
+    };
+  }
+  if (!finished) {
+    const detail = input.spawnError ? `could not start: ${input.spawnError}` : exit;
+    if (rateRejected) {
+      return { status: 'rate_limited', text: `[wingman] rate limited before a result (${detail})` };
+    }
+    return {
+      status: 'failed_no_report',
+      text: `[wingman] agent ended without a result message (${detail})`,
+    };
+  }
+  const text = finished.result ?? '';
+  if (finished.is_error || (exitCode !== null && exitCode !== 0)) {
+    if (rateRejected) return { status: 'rate_limited', text };
+    return { status: 'failed', text };
+  }
+  if (PLUGIN_CHANGE.test(text)) return { status: 'needs_caller', text };
+  return { status: parseStatusLine(text) ?? 'needs_input', text };
+}
+
+async function readStdin(): Promise<string> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of process.stdin) chunks.push(chunk as Buffer);
+  return Buffer.concat(chunks).toString('utf8');
+}
+
+export async function runSupervisor(runId: string): Promise<void> {
+  const payload = JSON.parse(await readStdin()) as SupervisorPayload;
+  const childEnv = { ...process.env } as Record<string, string>;
+  process.env.WINGMAN_HOME = payload.wingman_home;
+  const adapter = getAdapter(payload.provider);
+
+  let sessionRateLimit: RateLimitInfo | undefined;
+  let rateRejected = false;
+  let finished:
+    { result: string | null; is_error: boolean; permission_denials: string[] } | undefined;
+  let timedOut = false;
+  let spawnError: string | undefined;
+
+  const child: ChildProcess = spawn(payload.command, payload.args, {
+    cwd: payload.cwd,
+    env: childEnv,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+
+  const terminateGroup = (): void => {
+    try {
+      process.kill(-process.pid, 'SIGTERM');
+    } catch {
+      child.kill('SIGTERM');
+    }
+    setTimeout(() => child.kill('SIGKILL'), KILL_GRACE_MS).unref();
+  };
+  process.on('SIGTERM', () => {
+    setTimeout(() => child.kill('SIGKILL'), KILL_GRACE_MS).unref();
+  });
+
+  let timer: NodeJS.Timeout | undefined;
+  if (payload.timeout_ms > 0) {
+    timer = setTimeout(() => {
+      timedOut = true;
+      terminateGroup();
+    }, payload.timeout_ms);
+  }
+
+  if (child.stdout) {
+    createInterface({ input: child.stdout }).on('line', (line) => {
+      appendEvent(runId, line);
+      for (const event of adapter.parseLine(line)) {
+        if (event.kind === 'rate_limited') {
+          sessionRateLimit = event.info;
+          if (isRateLimitRejected(event.info)) rateRejected = true;
+        } else if (event.kind === 'finished') {
+          finished = event;
+        }
+      }
+    });
+  }
+  child.stderr?.on('data', (chunk: Buffer) => {
+    appendEvent(
+      runId,
+      JSON.stringify({ type: 'stderr', text: chunk.toString('utf8').slice(0, 2000) }),
+    );
+  });
+  child.on('error', (err) => {
+    spawnError = err.message;
+  });
+
+  const end = await new Promise<{ code: number | null; signal: string | null }>((resolve) => {
+    child.on('close', (code, signal) => resolve({ code, signal }));
+    child.on('error', () => resolve({ code: null, signal: null }));
+  });
+  if (timer) clearTimeout(timer);
+
+  const current = readMeta(runId);
+  if (TERMINAL_STATUSES.includes(current.status)) return;
+  const input: Parameters<typeof mapOutcome>[0] = {
+    finished,
+    exitCode: end.code,
+    signal: end.signal,
+    timedOut,
+    rateRejected,
+  };
+  if (spawnError !== undefined) input.spawnError = spawnError;
+  const outcome = mapOutcome(input);
+  writeResult(runId, outcome.text);
+  const patch: Partial<Omit<RunMeta, 'id' | 'status'>> = {
+    exit_code: end.code,
+    permission_denials: [...new Set(finished?.permission_denials ?? [])],
+  };
+  if (sessionRateLimit) patch.rate_limit = sessionRateLimit;
+  try {
+    updateStatus(runId, outcome.status, patch);
+  } catch {
+    // the run was cancelled while we were finalizing; the cancel status stands
+  }
+  pruneEvents(runId, MAX_EVENTS_BYTES);
+}
+
+/** Call first thing in the process entry; returns true when this process is a supervisor. */
+export function maybeRunSupervisor(argv: string[] = process.argv): boolean {
+  const index = argv.indexOf('--supervise');
+  const runId = index === -1 ? undefined : argv[index + 1];
+  if (!runId) return false;
+  runSupervisor(runId).then(
+    () => process.exit(0),
+    (err: unknown) => {
+      process.stderr.write(
+        `supervisor failed: ${err instanceof Error ? err.message : String(err)}\n`,
+      );
+      try {
+        updateStatus(runId, 'failed_no_report', { exit_code: null });
+      } catch {
+        // already terminal or run missing
+      }
+      process.exit(1);
+    },
+  );
+  return true;
+}
+
+async function gitOut(exec: ExecFn, cwd: string, args: string[]): Promise<string | undefined> {
+  const res = await exec('git', args, { cwd, env: process.env });
+  return res.code === 0 ? res.stdout.trim() : undefined;
+}
+
+function launchSupervisor(
+  meta: RunMeta,
+  payload: SupervisorPayload,
+  env: Record<string, string>,
+  entry: string,
+): { pid: number; startTime: string | undefined } {
+  const dir = runDir(meta.id);
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const fd = openSync(join(dir, 'events.jsonl'), 'a', 0o600);
+  let child: ChildProcess;
+  try {
+    child = spawn(process.execPath, [entry, '--supervise', meta.id], {
+      detached: true,
+      stdio: ['pipe', fd, fd],
+      env,
+      cwd: payload.cwd,
+    });
+  } finally {
+    closeSync(fd);
+  }
+  child.on('error', () => {
+    try {
+      updateStatus(meta.id, 'failed_no_report');
+    } catch {
+      // already terminal
+    }
+  });
+  const pid = child.pid;
+  if (pid === undefined) throw new Error('Could not start the supervisor process');
+  const startTime = readStartTime(pid);
+  const next: RunMeta = { ...readMeta(meta.id), pid, started_at: new Date().toISOString() };
+  if (startTime !== undefined) next.pid_start_time = startTime;
+  writeMeta(next);
+  child.stdin?.on('error', () => undefined);
+  child.stdin?.end(JSON.stringify(payload));
+  child.unref();
+  return { pid, startTime };
+}
+
+export async function startRun(opts: StartRunOptions): Promise<RunMeta> {
+  const parentEnv = opts.parentEnv ?? process.env;
+  assertCanStart(parentEnv);
+  const adapter = opts.adapter ?? claudeAdapter;
+  const exec = opts.exec ?? defaultExec;
+  const depth = currentDepth(parentEnv) + 1;
+  const tools = resolveTools({
+    ...(opts.preset !== undefined ? { preset: opts.preset } : {}),
+    ...(opts.allowed_tools !== undefined ? { allowed_tools: opts.allowed_tools } : {}),
+  });
+
+  const repo = opts.worktree
+    ? await gitOut(exec, opts.cwd, ['rev-parse', '--show-toplevel'])
+    : undefined;
+  const callerBranch = repo
+    ? await gitOut(exec, repo, ['rev-parse', '--abbrev-ref', 'HEAD'])
+    : undefined;
+
+  const sessionId = randomUUID();
+  const meta = createRun({
+    account: opts.account.id,
+    cwd: opts.cwd,
+    session_id: sessionId,
+    depth,
+    prompt_chars: opts.prompt.length,
+    ...(callerBranch !== undefined ? { branch: callerBranch } : {}),
+    ...(opts.change !== undefined ? { change: opts.change } : {}),
+    ...(opts.preset !== undefined ? { preset: opts.preset } : {}),
+  });
+
+  let runCwd = opts.cwd;
+  let lockPath: string | undefined;
+  try {
+    if (repo && callerBranch !== undefined) {
+      const wt = await createWorktree({
+        repo,
+        callerBranch,
+        runId: meta.id,
+        env: parentEnv,
+        exec,
+        ...(opts.change !== undefined ? { change: opts.change } : {}),
+        ...(opts.sleep ? { sleep: opts.sleep } : {}),
+      });
+      lockPath = wt.lockPath;
+      meta.worktree = wt.path;
+      meta.run_branch = wt.branch;
+      writeMeta(meta);
+      runCwd = join(wt.path, relative(repo, opts.cwd));
+      if (opts.setup) {
+        const setup = await runSetup(
+          wt.path,
+          opts.setup,
+          adapter.buildEnv(parentEnv, opts.account, depth),
+        );
+        if (!setup.ok)
+          throw new Error(`Worktree setup command failed: ${setup.output.slice(-300)}`);
+      }
+    }
+  } catch (err) {
+    if (meta.worktree) await removeWorktree(meta.id, exec).catch(() => undefined);
+    rmSync(runDir(meta.id), { recursive: true, force: true });
+    throw err;
+  }
+
+  const spec: StartSpec = {
+    prompt: opts.prompt,
+    cwd: runCwd,
+    allowed_tools: tools.allowed,
+    disallowed_tools: tools.disallowed,
+    session_id: sessionId,
+    append_system_prompt: guardPrompt(),
+    ...(opts.model !== undefined ? { model: opts.model } : {}),
+    ...(opts.max_turns !== undefined ? { max_turns: opts.max_turns } : {}),
+  };
+  return spawnRun(meta, opts, adapter, spec, depth, parentEnv, lockPath);
+}
+
+function spawnRun(
+  meta: RunMeta,
+  opts: Pick<StartRunOptions, 'account' | 'timeout_ms' | 'supervisorEntry'>,
+  adapter: Adapter,
+  spec: StartSpec,
+  depth: number,
+  parentEnv: NodeJS.ProcessEnv,
+  lockPath: string | undefined,
+): RunMeta {
+  const { command, args } = adapter.buildCommand(opts.account, spec);
+  const payload: SupervisorPayload = {
+    provider: adapter.provider,
+    command,
+    args,
+    cwd: spec.cwd,
+    timeout_ms: opts.timeout_ms ?? DEFAULT_TIMEOUT_MS,
+    wingman_home: wingmanHome(),
+  };
+  const entry = opts.supervisorEntry ?? process.argv[1];
+  try {
+    if (!entry) throw new Error('No supervisor entry script');
+    const { pid } = launchSupervisor(
+      meta,
+      payload,
+      adapter.buildEnv(parentEnv, opts.account, depth),
+      entry,
+    );
+    if (lockPath) setLockOwner(lockPath, pid);
+  } catch (err) {
+    try {
+      updateStatus(meta.id, 'failed_no_report');
+    } catch {
+      // already terminal
+    }
+    throw err;
+  }
+  return readMeta(meta.id);
+}
+
+export async function sendToRun(
+  runId: string,
+  prompt: string,
+  opts: Partial<StartRunOptions> = {},
+): Promise<RunMeta> {
+  const previous = readMeta(runId);
+  if (previous.status === 'running') throw new Error(`Run ${runId} is still running`);
+  if (previous.status === 'failed_no_report') {
+    throw new Error(`Run ${runId} ended without a report and cannot be continued`);
+  }
+  const parentEnv = opts.parentEnv ?? process.env;
+  assertCanStart(parentEnv);
+  const account = await getAccount(previous.account);
+  const adapter = opts.adapter ?? getAdapter(account.provider);
+  const depth = currentDepth(parentEnv) + 1;
+  const preset = opts.preset ?? previous.preset;
+  const tools = resolveTools({
+    ...(preset !== undefined ? { preset } : {}),
+    ...(opts.allowed_tools !== undefined ? { allowed_tools: opts.allowed_tools } : {}),
+  });
+  const cwd = previous.worktree && existsSync(previous.worktree) ? previous.worktree : previous.cwd;
+  const meta = createRun({
+    account: account.id,
+    cwd: previous.cwd,
+    session_id: previous.session_id,
+    depth,
+    prompt_chars: prompt.length,
+    ...(previous.branch !== undefined ? { branch: previous.branch } : {}),
+    ...(previous.run_branch !== undefined ? { run_branch: previous.run_branch } : {}),
+    ...(previous.worktree !== undefined ? { worktree: previous.worktree } : {}),
+    ...(previous.change !== undefined ? { change: previous.change } : {}),
+    ...(preset !== undefined ? { preset } : {}),
+  });
+  const spec: StartSpec = {
+    prompt,
+    cwd,
+    allowed_tools: tools.allowed,
+    disallowed_tools: tools.disallowed,
+    session_id: previous.session_id,
+    append_system_prompt: guardPrompt(),
+    resume: true,
+    ...(opts.model !== undefined ? { model: opts.model } : {}),
+    ...(opts.max_turns !== undefined ? { max_turns: opts.max_turns } : {}),
+  };
+  return spawnRun(
+    meta,
+    { account, ...pickRunOpts(opts) },
+    adapter,
+    spec,
+    depth,
+    parentEnv,
+    undefined,
+  );
+}
+
+function pickRunOpts(opts: Partial<StartRunOptions>): Partial<StartRunOptions> {
+  const out: Partial<StartRunOptions> = {};
+  if (opts.timeout_ms !== undefined) out.timeout_ms = opts.timeout_ms;
+  if (opts.supervisorEntry !== undefined) out.supervisorEntry = opts.supervisorEntry;
+  return out;
+}
+
+export interface CancelResult {
+  cancelled: boolean;
+  killed: boolean;
+  reason?: string;
+}
+
+const sleepMs = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
+export async function cancelRun(runId: string): Promise<CancelResult> {
+  const meta = readMeta(runId);
+  if (meta.status !== 'running') {
+    return { cancelled: false, killed: false, reason: `run is already ${meta.status}` };
+  }
+  const pid = meta.pid;
+  if (pid === undefined)
+    return { cancelled: false, killed: false, reason: 'run has no recorded pid' };
+  if (!isSameProcess(pid, meta.pid_start_time)) {
+    return {
+      cancelled: false,
+      killed: false,
+      reason: 'recorded pid is gone or was reused by another process; nothing was killed',
+    };
+  }
+  try {
+    updateStatus(runId, 'cancelled');
+  } catch {
+    return { cancelled: false, killed: false, reason: 'run finished while cancelling' };
+  }
+  try {
+    process.kill(-pid, 'SIGTERM');
+  } catch {
+    // group already gone
+  }
+  const deadline = Date.now() + KILL_GRACE_MS + 1000;
+  while (isAlive(pid) && Date.now() < deadline) await sleepMs(50);
+  if (isAlive(pid) && isSameProcess(pid, meta.pid_start_time)) {
+    try {
+      process.kill(-pid, 'SIGKILL');
+    } catch {
+      // group already gone
+    }
+  }
+  return { cancelled: true, killed: true };
+}
+
+export async function waitForRun(
+  runId: string,
+  opts: { timeoutMs?: number; pollMs?: number } = {},
+): Promise<RunMeta> {
+  const pollMs = opts.pollMs ?? 500;
+  const deadline = opts.timeoutMs === undefined ? Infinity : Date.now() + opts.timeoutMs;
+  for (;;) {
+    const meta = readMeta(runId);
+    if (TERMINAL_STATUSES.includes(meta.status)) return meta;
+    if (meta.pid !== undefined && !isSameProcess(meta.pid, meta.pid_start_time)) {
+      // the supervisor died without finalizing; re-read once in case it finished just now
+      const again = readMeta(runId);
+      if (TERMINAL_STATUSES.includes(again.status)) return again;
+      return updateStatus(runId, 'failed_no_report');
+    }
+    if (Date.now() >= deadline) throw new Error(`Timed out waiting for run ${runId}`);
+    await sleepMs(pollMs);
+  }
+}
