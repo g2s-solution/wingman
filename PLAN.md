@@ -41,9 +41,9 @@ wingman/                      plugin root (the repo-root .mcp.json stays separat
 1. User runs `./another-login.sh` (it signs in with `claude auth login` and prints the signed-in account).
 2. Isolation, without reading credential files: the second profile has its own `.credentials.json` (`ls -la`); `claude auth status --json` under each profile, compared with `jq` on account and organization fields, printing only `same` or `different`. Do not use the default profile's credentials mtime as a test (it changes on every token refresh).
 3. `CLAUDE_CONFIG_DIR=<dir> claude -p "reply ok" --output-format json` succeeds.
-4. Plugins and skills: `claude plugin list` under the second profile lists the shared plugins; a headless call runs a harmless installed skill; a plugin skill invoked by name expands under `-p`.
+4. Plugins and skills: `claude plugin list` under the second profile lists that profile's own plugins (`plugins/` is per profile); a headless call runs a harmless installed skill; a plugin skill invoked by name expands under `-p`.
 5. Real spawn context: spawn the child from inside a real Claude Code session (ideally from a stub MCP server), log env variable names only, and confirm the allowlist env makes the child serve the second account (same `auth status` comparison from the child).
-6. Shared state: compare `installed_plugins.json` hash and mtime before and after a second-profile start; change a setting in the second profile and confirm `settings.json` is still a symlink; check with `ls` that the second profile gets its own `remote-settings.json`.
+6. Shared state: if `plugins/` is shared, compare `installed_plugins.json` hash and mtime before and after a second-profile start (not needed by default: `plugins/` is per profile); change a setting in the second profile and confirm `settings.json` is still a symlink; check with `ls` that the second profile gets its own `remote-settings.json`.
 7. Engine comparison on the same trivial prompt: Agent SDK `query()`, `claude -p --output-format stream-json --verbose`, and the built-in background sessions (`--bg`, `claude agents --json`, `claude logs`, `claude stop`). Record what each loads (CLAUDE.md, skills, plugins), whether `rate_limit_event` is emitted, how detach and cancel behave, whether detached children survive the desktop app ending a session, and whether the `Agent` tool needs an explicit allow in `-p`. Compare permission modes `acceptEdits` and `auto` for the `edit` preset. Pick one engine; default if equal is `claude -p` stream-json.
 8. Note for the user: user-scope MCP servers (redmine, grafana) are per profile and will be absent in the target.
 
@@ -92,7 +92,7 @@ Exit: engine, permission mode and env allowlist confirmed and written into `DESI
 5. Review: independent reviewer subagent over the whole diff (correctness, security, DLP leakage, env leakage, process and worktree cleanup).
 
 ### 9. Packaging
-- Committed bundle, `README` with install and login steps, version `0.1.0`; install the plugin into the default profile and confirm the second profile sees it through the shared `plugins/` and `settings.json`.
+- Committed bundle, `README` with install and login steps, version `0.1.0`; install the plugin into the caller's profile (user scope) and confirm a fresh session there lists the six `wingman_*` tools and completes a run on the second account. The second profile does not need the plugin.
 
 ## Parallelisation
 
