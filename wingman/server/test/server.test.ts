@@ -6,8 +6,8 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { saveAccounts } from '../src/registry.js';
-import { buildServer } from '../src/tools.js';
 import { readMeta } from '../src/runs.js';
+import { buildServer, createHandlers } from '../src/tools.js';
 import { waitForRun } from '../src/runner.js';
 import { bundleSupervisor, git, makeLauncher, makeRepo, readLog, tmp } from './helpers.js';
 
@@ -17,7 +17,6 @@ const TOOLS = [
   'wingman_cleanup',
   'wingman_list',
   'wingman_result',
-  'wingman_send',
   'wingman_start',
   'wingman_status',
 ];
@@ -139,10 +138,10 @@ describe('tools end to end', () => {
       account: 'target',
       prompt: 'do it',
       cwd: tmp('cwd'),
-      preset: 'os-apply',
+      preset: 'edit',
     });
     expect(started.isError).toBe(false);
-    expect(Object.keys(started.data).sort()).toEqual(['run_id', 'status']);
+    expect(Object.keys(started.data).sort()).toEqual(['account', 'run_id', 'status']);
     const id = started.data.run_id as string;
     expect(started.data.status).toBe('running');
 
@@ -174,7 +173,7 @@ describe('tools end to end', () => {
       account: 'target',
       prompt: 'do it',
       cwd: repo,
-      preset: 'os-apply',
+      preset: 'edit',
     });
     expect(started.isError).toBe(false);
     const branch = started.data.run_branch as string;
@@ -237,7 +236,6 @@ describe('refusals and errors', () => {
       ['wingman_status', {}],
       ['wingman_result', {}],
       ['wingman_cancel', {}],
-      ['wingman_send', { prompt: 'x' }],
       ['wingman_cleanup', { action: 'accept' }],
     ];
     for (const [name, extra] of calls) {
@@ -271,7 +269,7 @@ describe('output safety', () => {
       account: 'target',
       prompt: 'x',
       cwd: tmp('cwd'),
-      preset: 'os-apply',
+      preset: 'edit',
     });
     outputs.push(started.text);
     const id = started.data.run_id as string;
@@ -309,10 +307,6 @@ describe('send, cancel, cleanup', () => {
     expect(cleanup.isError).toBe(true);
     expect(cleanup.text).toMatch(/still running/);
 
-    const send = await call(client, 'wingman_send', { run_id: id, prompt: 'more' });
-    expect(send.isError).toBe(true);
-    expect(send.text).toMatch(/still running/);
-
     await new Promise((r) => setTimeout(r, 400));
     const cancelled = await call(client, 'wingman_cancel', { run_id: id });
     expect(cancelled.data).toMatchObject({ run_id: id, cancelled: true });
@@ -322,58 +316,91 @@ describe('send, cancel, cleanup', () => {
     expect(again.data.cancelled).toBe(false);
   });
 
-  it('send continues a finished run on the same account and is refused for failed_no_report', async () => {
+  it('start returns the chosen account and defaults to the readonly preset', async () => {
     const ok = launcher('ok');
     await register(ok.command);
     const client = await connect();
-    const first = await call(client, 'wingman_start', {
-      account: 'target',
-      prompt: 'x',
-      cwd: tmp('cwd'),
-    });
-    const id = first.data.run_id as string;
-    await settle(id);
-    const sent = await call(client, 'wingman_send', { run_id: id, prompt: 'continue' });
-    expect(sent.isError).toBe(false);
-    expect(sent.data.run_id).not.toBe(id);
-    await settle(sent.data.run_id as string);
-    expect(readLog(ok.log).at(-1)!.argv).toContain('--resume');
-
-    const none = launcher('no_result');
-    await register(none.command);
-    const bad = await call(client, 'wingman_start', {
-      account: 'target',
-      prompt: 'x',
-      cwd: tmp('cwd'),
-    });
-    await settle(bad.data.run_id as string);
-    const refused = await call(client, 'wingman_send', {
-      run_id: bad.data.run_id,
-      prompt: 'again',
-    });
-    expect(refused.isError).toBe(true);
-    expect(refused.text).toMatch(/without a report/);
+    const started = await call(client, 'wingman_start', { prompt: 'x', cwd: tmp('cwd') });
+    expect(started.isError).toBe(false);
+    expect(started.data.account).toBe('target');
+    await settle(started.data.run_id as string);
+    const argv = readLog(ok.log)[0]!.argv;
+    const allowed = argv.slice(argv.indexOf('--allowedTools') + 1);
+    expect(allowed).toContain('Grep');
+    expect(allowed).not.toContain('Edit');
   });
 
-  it('send is refused when the run account became the caller profile', async () => {
+  it('wingman_send is not a tool', async () => {
     await register(launcher('ok').command);
     const client = await connect();
-    const first = await call(client, 'wingman_start', {
-      account: 'target',
-      prompt: 'x',
-      cwd: tmp('cwd'),
+    const names = (await client.listTools()).tools.map((t) => t.name);
+    expect(names).not.toContain('wingman_send');
+    expect(names).toHaveLength(6);
+  });
+});
+
+describe('account selection', () => {
+  const acct = (id: string, dir: string, status?: string) => ({
+    id,
+    label: id,
+    config_dir: dir,
+    provider: 'claude',
+    command: 'x',
+    ...(status !== undefined ? { status } : {}),
+  });
+  const pick = async (random: () => number): Promise<string> => {
+    const h = createHandlers({ env: callerEnv(), supervisorEntry: entry, random });
+    const res = await h.start({ prompt: 'x', cwd: tmp('cwd') });
+    await settle(res.run_id as string);
+    return res.account as string;
+  };
+
+  it('picks with the injected RNG among the other active accounts', async () => {
+    const ok = launcher('ok');
+    const a = (id: string, dir: string, status?: string) => ({
+      ...acct(id, dir, status),
+      command: ok.command,
     });
-    const id = first.data.run_id as string;
-    await settle(id);
-    const meta = readMeta(id);
     await saveAccounts({
       accounts: [
-        { id: 'target', label: 't', config_dir: callerDir, provider: 'claude', command: 'x' },
+        a('own', callerDir),
+        a('one', join(home, 'c1')),
+        a('off', join(home, 'c2'), 'disabled'),
+        a('two', join(home, 'c3'), 'active'),
       ],
     });
-    const res = await call(client, 'wingman_send', { run_id: meta.id, prompt: 'x' });
-    expect(res.isError).toBe(true);
-    expect(res.text).toMatch(/own profile/);
+    expect(await pick(() => 0)).toBe('one');
+    expect(await pick(() => 0.99)).toBe('two');
+    for (let i = 0; i < 6; i++) {
+      expect(['one', 'two']).toContain(await pick(Math.random));
+    }
+  });
+
+  it('errors when nobody else is available', async () => {
+    const h = createHandlers({ env: callerEnv(), supervisorEntry: entry, random: () => 0 });
+    await saveAccounts({ accounts: [] });
+    await expect(h.start({ prompt: 'x', cwd: tmp('cwd') })).rejects.toThrow(/No other active/);
+    await saveAccounts({
+      accounts: [acct('own', callerDir), acct('off', join(home, 'c2'), 'disabled')],
+    });
+    await expect(h.start({ prompt: 'x', cwd: tmp('cwd') })).rejects.toThrow(/No other active/);
+  });
+
+  it('an explicit account still works and the own profile is refused', async () => {
+    const ok = launcher('ok');
+    await saveAccounts({
+      accounts: [
+        { ...acct('own', callerDir), command: ok.command },
+        { ...acct('named', join(home, 'c1')), command: ok.command },
+      ],
+    });
+    const h = createHandlers({ env: callerEnv(), supervisorEntry: entry, random: () => 0 });
+    const res = await h.start({ account: 'named', prompt: 'x', cwd: tmp('cwd') });
+    expect(res.account).toBe('named');
+    await settle(res.run_id as string);
+    await expect(h.start({ account: 'own', prompt: 'x', cwd: tmp('cwd') })).rejects.toThrow(
+      /own profile/,
+    );
   });
 });
 

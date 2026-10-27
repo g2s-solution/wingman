@@ -95,7 +95,7 @@ export interface CreateWorktreeOptions {
   repo: string;
   callerBranch: string;
   runId: string;
-  change?: string;
+  lock_key?: string;
   exec?: ExecFn;
   sleep?: (ms: number) => Promise<void>;
   env?: NodeJS.ProcessEnv;
@@ -121,7 +121,7 @@ export interface LockInfo {
   start_time?: string;
   run_id: string;
   repo: string;
-  change: string;
+  lock_key: string;
 }
 
 export function withoutProxy(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
@@ -134,9 +134,9 @@ function locksDir(): string {
   return join(wingmanHome(), 'locks');
 }
 
-function lockPathFor(repo: string, change: string): string {
+function lockPathFor(repo: string, lockKey: string): string {
   const key = createHash('sha256')
-    .update(`${realpathSync(repo)}\0${change}`)
+    .update(`${realpathSync(repo)}\0${lockKey}`)
     .digest('hex');
   return join(locksDir(), `${key.slice(0, 24)}.lock`);
 }
@@ -170,7 +170,7 @@ export function acquireLock(path: string, info: LockInfo, ownedBy?: string): voi
       const held = readLock(path);
       if (held && held.run_id !== ownedBy && isSameProcess(held.pid, held.start_time)) {
         throw new Error(
-          `Change "${info.change}" is already being applied by run ${held.run_id} (pid ${held.pid})`,
+          `Lock key "${info.lock_key}" is already held by run ${held.run_id} (pid ${held.pid})`,
           { cause: err },
         );
       }
@@ -189,29 +189,14 @@ export function acquireLock(path: string, info: LockInfo, ownedBy?: string): voi
           // the path was taken again; the fresh holder is lost only if it was never re-created
         }
         rmSync(aside, { force: true });
-        throw new Error(`Change "${info.change}" is already being applied by run ${moved.run_id}`, {
+        throw new Error(`Lock key "${info.lock_key}" is already held by run ${moved.run_id}`, {
           cause: err,
         });
       }
       rmSync(aside, { force: true });
     }
   }
-  throw new Error(`Could not acquire the lock for change "${info.change}"`);
-}
-
-/** Re-points the change lock of a finished run at the run that continues it. */
-export function takeOverLock(
-  repo: string,
-  change: string,
-  fromRunId: string,
-  toRunId: string,
-): string {
-  const path = lockPathFor(repo, change);
-  const info: LockInfo = { pid: process.pid, run_id: toRunId, repo, change };
-  const startTime = readStartTime(process.pid);
-  if (startTime !== undefined) info.start_time = startTime;
-  acquireLock(path, info, fromRunId);
-  return path;
+  throw new Error(`Could not acquire the lock for key "${info.lock_key}"`);
 }
 
 export function setLockOwner(lockPath: string, pid: number): void {
@@ -276,13 +261,13 @@ export async function createWorktree(opts: CreateWorktreeOptions): Promise<Workt
   }
 
   let lockPath: string | undefined;
-  if (opts.change) {
-    lockPath = lockPathFor(repo, opts.change);
+  if (opts.lock_key) {
+    lockPath = lockPathFor(repo, opts.lock_key);
     const info: LockInfo = {
       pid: process.pid,
       run_id: runId,
       repo,
-      change: opts.change,
+      lock_key: opts.lock_key,
     };
     const startTime = readStartTime(process.pid);
     if (startTime !== undefined) info.start_time = startTime;
@@ -352,7 +337,7 @@ export async function worktreeDirty(path: string, exec: ExecFn = defaultExec): P
   return res.code !== 0 || res.stdout.trim() !== '';
 }
 
-/** Removes the run's worktree and releases its change lock; refuses while another run still uses the worktree. */
+/** Removes the run's worktree and releases its lock; refuses while another run still uses the worktree. */
 export async function removeWorktree(runId: string, exec: ExecFn = defaultExec): Promise<void> {
   const meta = readMeta(runId);
   const sharing = meta.worktree ? listRuns().filter((m) => m.worktree === meta.worktree) : [];

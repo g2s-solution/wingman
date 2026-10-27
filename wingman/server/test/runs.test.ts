@@ -149,7 +149,7 @@ describe('runs', () => {
   });
 
   it('summary exposes only the allowed fields', () => {
-    const meta = createRun({ ...base, cwd: '/secret/cwd', change: 'c', preset: 'p' });
+    const meta = createRun({ ...base, cwd: '/secret/cwd', lock_key: 'c', preset: 'p' });
     updateStatus(meta.id, 'rate_limited', {
       permission_denials: ['Bash'],
       rate_limit: { status: 'limited', resetsAt: 5 },

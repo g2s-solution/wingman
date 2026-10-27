@@ -43,7 +43,7 @@ export const claudeAdapter: Adapter = {
     assertToolItems(spec.allowed_tools, 'allowed_tools');
     assertToolItems(spec.disallowed_tools, 'disallowed_tools');
     const args = ['-p', spec.prompt];
-    args.push(spec.resume ? '--resume' : '--session-id', spec.session_id);
+    args.push('--session-id', spec.session_id);
     args.push('--append-system-prompt', spec.append_system_prompt);
     args.push('--disallowedTools', ...spec.disallowed_tools);
     args.push('--permission-mode', 'acceptEdits', '--permission-prompts', 'none');

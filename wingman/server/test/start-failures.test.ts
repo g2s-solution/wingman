@@ -2,17 +2,9 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import { existsSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { runDir, wingmanHome, worktreesDir } from '../src/paths.js';
-import { readMeta } from '../src/runs.js';
-import { saveAccounts } from '../src/registry.js';
-import { cancelRun, sendToRun, startRun, waitForRun, type StartRunOptions } from '../src/runner.js';
+import { startRun, waitForRun, type StartRunOptions } from '../src/runner.js';
 import { createHandlers } from '../src/tools.js';
-import {
-  defaultExec,
-  pruneOrphans,
-  removeWorktree,
-  runSetup,
-  type ExecFn,
-} from '../src/worktree.js';
+import { defaultExec, pruneOrphans, runSetup, type ExecFn } from '../src/worktree.js';
 import type { RunMeta } from '../src/types.js';
 import {
   bundleSupervisor,
@@ -59,14 +51,10 @@ function startOpts(command: string, extra: Partial<StartRunOptions>): StartRunOp
     cwd: tmp('cwd'),
     parentEnv: env(),
     supervisorEntry: entry,
-    preset: 'os-apply',
+    preset: 'edit',
     sleep: noSleep,
     ...extra,
   };
-}
-
-async function register(command: string): Promise<void> {
-  await saveAccounts({ accounts: [makeAccount(command, join(home, 'cfg-target'))] });
 }
 
 const settle = (m: RunMeta): Promise<RunMeta> => waitForRun(m.id, { timeoutMs: 20000, pollMs: 50 });
@@ -77,66 +65,20 @@ function lockFiles(): { run_id: string; pid: number }[] {
   return readdirSync(dir).map((f) => JSON.parse(readFileSync(join(dir, f), 'utf8')));
 }
 
-async function finishedWorktreeRun(change = 'chg'): Promise<{ repo: string; first: RunMeta }> {
+async function finishedWorktreeRun(lockKey = 'chg'): Promise<{ repo: string; first: RunMeta }> {
   const repo = makeRepo('main');
   git(repo, 'switch', '-q', '-c', 'feat/c');
   const first = await settle(
-    await startRun(startOpts(launcher('ok').command, { cwd: repo, worktree: true, change })),
+    await startRun(
+      startOpts(launcher('ok').command, { cwd: repo, worktree: true, lock_key: lockKey }),
+    ),
   );
   expect(first.status).toBe('done');
   return { repo, first };
 }
 
-describe('worktree ownership across a continued run (H1)', () => {
-  it('a continued run blocks cleanup and prune of the shared worktree and owns the lock', async () => {
-    const { first } = await finishedWorktreeRun();
-    const hang = launcher('hang');
-    await register(hang.command);
-    const second = await sendToRun(first.id, 'more', { parentEnv: env(), supervisorEntry: entry });
-    try {
-      expect(second.worktree).toBe(first.worktree);
-      const locks = lockFiles();
-      expect(locks).toHaveLength(1);
-      expect(locks[0]).toMatchObject({ run_id: second.id, pid: second.pid });
-
-      await expect(removeWorktree(first.id)).rejects.toThrow(/still in use/);
-      const h = createHandlers({ env: env() });
-      await expect(h.cleanup({ run_id: first.id, action: 'discard' })).rejects.toThrow(
-        /still in use/,
-      );
-      expect(await pruneOrphans()).toEqual([]);
-      expect(existsSync(first.worktree as string)).toBe(true);
-      await expect(sendToRun(first.id, 'again', { parentEnv: env() })).rejects.toThrow(
-        /in use by run/,
-      );
-    } finally {
-      await cancelRun(second.id);
-      await settle(second);
-    }
-    const h = createHandlers({ env: env() });
-    await h.cleanup({ run_id: first.id, action: 'discard' });
-    expect(existsSync(first.worktree as string)).toBe(false);
-    expect(lockFiles()).toEqual([]);
-  });
-
-  it('a live holder of the change lock other than the previous run blocks the send', async () => {
-    const { first } = await finishedWorktreeRun();
-    const lockDir = join(wingmanHome(), 'locks');
-    const [file] = readdirSync(lockDir);
-    writeFileSync(
-      join(lockDir, file!),
-      JSON.stringify({ pid: process.pid, run_id: 'someone-else', repo: first.repo, change: 'chg' }),
-    );
-    await register(launcher('ok').command);
-    await expect(
-      sendToRun(first.id, 'more', { parentEnv: env(), supervisorEntry: entry }),
-    ).rejects.toThrow(/already being applied/);
-    expect(readdirSync(join(home, 'runs'))).toEqual([first.id]);
-  });
-});
-
-describe('run_cwd and send (M3)', () => {
-  it('stores the effective cwd through a symlinked subdirectory and reuses it on send', async () => {
+describe('run_cwd (M3)', () => {
+  it('stores the effective cwd through a symlinked subdirectory', async () => {
     const repo = makeRepo('main');
     git(repo, 'switch', '-q', '-c', 'feat/s');
     const link = join(tmp('link'), 'via');
@@ -144,24 +86,7 @@ describe('run_cwd and send (M3)', () => {
     const { command, log } = launcher('ok');
     const first = await settle(await startRun(startOpts(command, { cwd: link, worktree: true })));
     expect(first.run_cwd).toBe(join(first.worktree as string, 'sub'));
-    await register(command);
-    const second = await settle(
-      await sendToRun(first.id, 'more', { parentEnv: env(), supervisorEntry: entry }),
-    );
-    expect(second.run_cwd).toBe(first.run_cwd);
-    const cwds = readLog(log).map((r) => r.cwd);
-    expect(cwds[1]).toBe(cwds[0]);
-    expect(cwds[1]).toBe(join(first.worktree as string, 'sub'));
-  });
-
-  it('refuses to send when the worktree is gone instead of using the caller checkout', async () => {
-    const { first } = await finishedWorktreeRun();
-    await register(launcher('ok').command);
-    await removeWorktree(first.id);
-    await expect(
-      sendToRun(first.id, 'more', { parentEnv: env(), supervisorEntry: entry }),
-    ).rejects.toThrow(/no longer exists/);
-    expect(readdirSync(join(home, 'runs'))).toEqual([first.id]);
+    expect(readLog(log)[0]!.cwd).toBe(join(first.worktree as string, 'sub'));
   });
 
   it('rejects a cwd that resolves outside the repository toplevel', async () => {
@@ -209,7 +134,7 @@ describe('timeouts and clean failed starts (M6, L3)', () => {
         startOpts(launcher('ok').command, {
           cwd: repo,
           worktree: true,
-          change: 'c',
+          lock_key: 'c',
           setup: 'sleep 30',
           setup_timeout_ms: 300,
         }),
@@ -233,7 +158,7 @@ describe('timeouts and clean failed starts (M6, L3)', () => {
         startOpts(launcher('ok').command, {
           cwd: repo,
           worktree: true,
-          change: 'c',
+          lock_key: 'c',
           exec,
           worktree_timeout_ms: 300,
         }),
@@ -243,7 +168,7 @@ describe('timeouts and clean failed starts (M6, L3)', () => {
     expect(lockFiles()).toEqual([]);
   });
 
-  it('a failed spawn in startRun releases the worktree and lock; in sendToRun the lock', async () => {
+  it('a failed spawn in startRun releases the worktree and lock', async () => {
     const repo = makeRepo('main');
     git(repo, 'switch', '-q', '-c', 'feat/f');
     await expect(
@@ -251,25 +176,13 @@ describe('timeouts and clean failed starts (M6, L3)', () => {
         startOpts(launcher('ok').command, {
           cwd: repo,
           worktree: true,
-          change: 'c',
+          lock_key: 'c',
           supervisorEntry: '',
         }),
       ),
     ).rejects.toThrow(/supervisor/i);
     expect(lockFiles()).toEqual([]);
     expect(existsSync(worktreesDir()) ? readdirSync(worktreesDir()) : []).toEqual([]);
-
-    const { first } = await finishedWorktreeRun('d');
-    await register(launcher('ok').command);
-    expect(lockFiles()).toHaveLength(1);
-    await expect(
-      sendToRun(first.id, 'more', { parentEnv: env(), supervisorEntry: '' }),
-    ).rejects.toThrow(/supervisor/i);
-    expect(lockFiles()).toEqual([]);
-    expect(existsSync(first.worktree as string)).toBe(true);
-    for (const id of readdirSync(join(home, 'runs'))) {
-      if (id !== first.id) expect(readMeta(id).status).toBe('failed_no_report');
-    }
   });
 });
 

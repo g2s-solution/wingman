@@ -58,16 +58,14 @@ describe('claude adapter command', () => {
     ]);
   });
 
-  it('uses --resume and omits optional flags', () => {
+  it('omits optional flags', () => {
     const { args } = claudeAdapter.buildCommand(account, {
       ...spec,
-      resume: true,
       allowed_tools: [],
       max_turns: undefined,
       model: undefined,
     });
-    expect(args).toContain('--resume');
-    expect(args).not.toContain('--session-id');
+    expect(args).toContain('--session-id');
     expect(args).not.toContain('--allowedTools');
     expect(args).not.toContain('--max-turns');
     expect(args).not.toContain('--model');
@@ -182,15 +180,30 @@ describe('guard', () => {
     expect(text).toMatch(/WINGMAN_STATUS: done/);
   });
 
-  it('os-apply preset and base deny list', () => {
-    const allowed = PRESETS['os-apply'].allowed;
-    expect(allowed).not.toContain('Bash(git:*)');
-    for (const sub of ['status', 'add', 'commit', 'diff', 'log', 'show', 'ls-files', 'restore']) {
-      expect(allowed).toContain(`Bash(git ${sub}:*)`);
-    }
-    for (const rule of allowed) {
-      expect(rule).not.toMatch(/git (checkout|stash|push|config|remote|update-ref|branch:)/);
-    }
+  it('presets resolve as specified and the base deny list holds', () => {
+    expect(PRESETS.readonly.allowed).toEqual([
+      'Read',
+      'Glob',
+      'Grep',
+      'Bash(git log:*)',
+      'Bash(git diff:*)',
+      'Bash(git status:*)',
+      'Bash(git show:*)',
+      'Bash(date:*)',
+    ]);
+    expect(PRESETS.edit.allowed).toEqual([
+      'Agent',
+      'Skill',
+      'Edit',
+      'Write',
+      'Read',
+      'Glob',
+      'Grep',
+      'Bash(git:*)',
+      'Bash(node:*)',
+      'Bash(npm:*)',
+      'Bash(date:*)',
+    ]);
     const deny = baseDisallowed();
     for (const name of [
       'AskUserQuestion',
@@ -212,11 +225,14 @@ describe('guard', () => {
   });
 
   it('explicit allowed_tools replaces the preset but never the deny list', () => {
-    const r = resolveTools({ preset: 'os-apply', allowed_tools: ['Read', 'Bash(git push:*)'] });
+    const r = resolveTools({ preset: 'edit', allowed_tools: ['Read', 'Bash(git push:*)'] });
     expect(r.allowed).toEqual(['Read']);
     expect(r.disallowed).toEqual(baseDisallowed());
-    expect(resolveTools({ preset: 'os-apply' }).allowed).toContain('Skill');
-    expect(resolveTools({}).allowed).toEqual([]);
+    expect(resolveTools({ preset: 'edit' }).allowed).toContain('Skill');
+    expect(resolveTools({ preset: 'readonly' }).allowed).toEqual([...PRESETS.readonly.allowed]);
+    expect(resolveTools({}).allowed).toEqual([...PRESETS.readonly.allowed]);
+    expect(resolveTools({ allowed_tools: [] }).allowed).toEqual([]);
+    expect(() => resolveTools({ preset: 'constructor' })).toThrow(/Unknown preset/);
     expect(() => resolveTools({ preset: 'nope' })).toThrow(/Unknown preset/);
   });
 

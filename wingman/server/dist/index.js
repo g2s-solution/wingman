@@ -28613,35 +28613,39 @@ var StdioServerTransport = class {
 
 // src/runner.ts
 import { randomUUID } from "node:crypto";
-import { closeSync as closeSync3, existsSync as existsSync4, mkdirSync as mkdirSync3, openSync as openSync3, realpathSync as realpathSync3, rmSync as rmSync3 } from "node:fs";
+import { closeSync as closeSync3, mkdirSync as mkdirSync3, openSync as openSync3, realpathSync as realpathSync3, rmSync as rmSync3 } from "node:fs";
 import { spawn as spawn2 } from "node:child_process";
 import { createInterface } from "node:readline";
 import { relative, join as join6, isAbsolute } from "node:path";
 
 // src/guard.ts
+var DEFAULT_PRESET = "readonly";
 var STATUS_VALUES = ["done", "partial", "blocked", "needs_input"];
 var PRESETS = {
-  "os-apply": {
+  readonly: {
+    allowed: [
+      "Read",
+      "Glob",
+      "Grep",
+      "Bash(git log:*)",
+      "Bash(git diff:*)",
+      "Bash(git status:*)",
+      "Bash(git show:*)",
+      "Bash(date:*)"
+    ]
+  },
+  edit: {
     allowed: [
       "Agent",
       "Skill",
       "Edit",
       "Write",
       "Read",
-      "Bash(git status:*)",
-      "Bash(git add:*)",
-      "Bash(git commit:*)",
-      "Bash(git diff:*)",
-      "Bash(git log:*)",
-      "Bash(git show:*)",
-      "Bash(git rev-parse:*)",
-      "Bash(git branch --show-current)",
-      "Bash(git ls-files:*)",
-      "Bash(git mv:*)",
-      "Bash(git rm:*)",
-      "Bash(git restore:*)",
+      "Glob",
+      "Grep",
+      "Bash(git:*)",
       "Bash(node:*)",
-      "Bash(openspec:*)",
+      "Bash(npm:*)",
       "Bash(date:*)"
     ]
   }
@@ -28684,13 +28688,14 @@ function assertToolItems(items, label) {
 }
 function resolveTools(sel) {
   const disallowed = baseDisallowed();
-  let allowed = [];
+  let allowed;
   if (sel.allowed_tools !== void 0) {
     assertToolItems(sel.allowed_tools, "allowed_tools");
     allowed = [...sel.allowed_tools];
-  } else if (sel.preset !== void 0) {
-    const preset = PRESETS[sel.preset];
-    if (!preset) throw new Error(`Unknown preset "${sel.preset}"`);
+  } else {
+    const name = sel.preset ?? DEFAULT_PRESET;
+    const preset = Object.hasOwn(PRESETS, name) ? PRESETS[name] : void 0;
+    if (!preset) throw new Error(`Unknown preset "${name}"`);
     allowed = [...preset.allowed];
   }
   allowed = allowed.filter((name) => !disallowed.includes(name));
@@ -28742,7 +28747,7 @@ var claudeAdapter = {
     assertToolItems(spec.allowed_tools, "allowed_tools");
     assertToolItems(spec.disallowed_tools, "disallowed_tools");
     const args = ["-p", spec.prompt];
-    args.push(spec.resume ? "--resume" : "--session-id", spec.session_id);
+    args.push("--session-id", spec.session_id);
     args.push("--append-system-prompt", spec.append_system_prompt);
     args.push("--disallowedTools", ...spec.disallowed_tools);
     args.push("--permission-mode", "acceptEdits", "--permission-prompts", "none");
@@ -28848,88 +28853,8 @@ var runsDir = () => join(wingmanHome(), "runs");
 var runDir = (id) => join(runsDir(), id);
 var worktreesDir = () => join(wingmanHome(), "worktrees");
 
-// src/registry.ts
-import { randomBytes } from "node:crypto";
-import { chmod, mkdir, realpath, rename, writeFile, readFile, unlink } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
-var accountSchema = external_exports.object({
-  id: external_exports.string().min(1),
-  label: external_exports.string().min(1),
-  config_dir: external_exports.string().min(1),
-  provider: external_exports.string().min(1).default("claude"),
-  command: external_exports.string().min(1).default("claude")
-});
-var registrySchema = external_exports.object({ accounts: external_exports.array(accountSchema) });
-async function saveAccounts(registry2) {
-  const parsed = registrySchema.parse(registry2);
-  const ids = parsed.accounts.map((a) => a.id);
-  if (new Set(ids).size !== ids.length) throw new Error("accounts.json has duplicate account ids");
-  const file2 = accountsFile();
-  const dir = dirname(file2);
-  await mkdir(dir, { recursive: true, mode: 448 });
-  await chmod(dir, 448);
-  const tmp = `${file2}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`;
-  try {
-    await writeFile(tmp, `${JSON.stringify(parsed, null, 2)}
-`, { mode: 384 });
-    await chmod(tmp, 384);
-    await rename(tmp, file2);
-  } catch (err) {
-    await unlink(tmp).catch(() => void 0);
-    throw err;
-  }
-}
-async function loadAccounts() {
-  const file2 = accountsFile();
-  let raw;
-  try {
-    raw = await readFile(file2, "utf8");
-  } catch (err) {
-    if (err.code !== "ENOENT") throw err;
-    const empty = { accounts: [] };
-    await saveAccounts(empty);
-    return empty;
-  }
-  let json2;
-  try {
-    json2 = JSON.parse(raw);
-  } catch {
-    throw new Error(`accounts.json at ${file2} is not valid JSON`);
-  }
-  const result = registrySchema.safeParse(json2);
-  if (!result.success) {
-    throw new Error(`accounts.json at ${file2} is invalid: ${result.error.message}`);
-  }
-  return result.data;
-}
-async function getAccount(id) {
-  const { accounts } = await loadAccounts();
-  const found = accounts.find((a) => a.id === id);
-  if (!found) {
-    const known = accounts.map((a) => a.id).join(", ") || "none";
-    throw new Error(`Unknown account "${id}". Registered accounts: ${known}`);
-  }
-  return found;
-}
-async function canonical(dir) {
-  try {
-    return await realpath(dir);
-  } catch {
-    return resolve(dir);
-  }
-}
-async function targetsFor(callerProfileDir) {
-  const { accounts } = await loadAccounts();
-  const caller = await canonical(callerProfileDir);
-  const result = [];
-  for (const account of accounts) {
-    if (await canonical(account.config_dir) !== caller) result.push(account);
-  }
-  return result;
-}
-
 // src/runs.ts
-import { randomBytes as randomBytes2 } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import {
   chmodSync,
   closeSync,
@@ -29039,13 +28964,13 @@ var metaSchema = external_exports.object({
     utilization: external_exports.number().optional()
   }).optional(),
   depth: external_exports.number(),
-  change: external_exports.string().optional(),
+  lock_key: external_exports.string().optional(),
   preset: external_exports.string().optional(),
   prompt_chars: external_exports.number()
 });
 var RUN_ID = /^[A-Za-z0-9_-]{1,64}$/;
 function newRunId() {
-  return randomBytes2(6).toString("hex");
+  return randomBytes(6).toString("hex");
 }
 function dirOf(id) {
   if (!RUN_ID.test(id)) throw new Error(`invalid run id: ${id}`);
@@ -29056,7 +28981,7 @@ function ensureDir(path) {
   chmodSync(path, DIR_MODE);
 }
 function writeAtomic(path, data) {
-  const tmp = `${path}.${randomBytes2(4).toString("hex")}.tmp`;
+  const tmp = `${path}.${randomBytes(4).toString("hex")}.tmp`;
   try {
     writeFileSync(tmp, data, { mode: FILE_MODE });
     chmodSync(tmp, FILE_MODE);
@@ -29129,7 +29054,7 @@ function pruneEvents(id, maxBytes) {
   }
   const firstNewline = tail.indexOf(10);
   const kept = firstNewline === -1 ? Buffer.alloc(0) : tail.subarray(firstNewline + 1);
-  const tmp = `${path}.${randomBytes2(4).toString("hex")}.tmp`;
+  const tmp = `${path}.${randomBytes(4).toString("hex")}.tmp`;
   writeFileSync(tmp, kept, { mode: FILE_MODE });
   chmodSync(tmp, FILE_MODE);
   renameSync(tmp, path);
@@ -29241,17 +29166,17 @@ function reconcile(meta3, opts = {}) {
 // src/self.ts
 import { realpathSync } from "node:fs";
 import { homedir as homedir2 } from "node:os";
-import { join as join4, resolve as resolve2 } from "node:path";
-function canonical2(dir) {
+import { join as join4, resolve } from "node:path";
+function canonical(dir) {
   try {
     return realpathSync(dir);
   } catch {
-    return resolve2(dir);
+    return resolve(dir);
   }
 }
 function callerProfile(env = process.env) {
   const configured = env.CLAUDE_CONFIG_DIR;
-  return canonical2(configured ? configured : join4(homedir2(), ".claude"));
+  return canonical(configured ? configured : join4(homedir2(), ".claude"));
 }
 function currentDepth(env = process.env) {
   const raw = env.WINGMAN_DEPTH;
@@ -29272,7 +29197,7 @@ import { createHash as createHash2 } from "node:crypto";
 
 // src/worktree.ts
 import { spawn } from "node:child_process";
-import { createHash, randomBytes as randomBytes3 } from "node:crypto";
+import { createHash, randomBytes as randomBytes2 } from "node:crypto";
 import {
   chmodSync as chmodSync2,
   closeSync as closeSync2,
@@ -29348,8 +29273,8 @@ function withoutProxy(env) {
 function locksDir() {
   return join5(wingmanHome(), "locks");
 }
-function lockPathFor(repo, change) {
-  const key = createHash("sha256").update(`${realpathSync2(repo)}\0${change}`).digest("hex");
+function lockPathFor(repo, lockKey) {
+  const key = createHash("sha256").update(`${realpathSync2(repo)}\0${lockKey}`).digest("hex");
   return join5(locksDir(), `${key.slice(0, 24)}.lock`);
 }
 function readLock(path) {
@@ -29376,11 +29301,11 @@ function acquireLock(path, info, ownedBy) {
       const held = readLock(path);
       if (held && held.run_id !== ownedBy && isSameProcess(held.pid, held.start_time)) {
         throw new Error(
-          `Change "${info.change}" is already being applied by run ${held.run_id} (pid ${held.pid})`,
+          `Lock key "${info.lock_key}" is already held by run ${held.run_id} (pid ${held.pid})`,
           { cause: err }
         );
       }
-      const aside = `${path}.stale-${randomBytes3(4).toString("hex")}`;
+      const aside = `${path}.stale-${randomBytes2(4).toString("hex")}`;
       try {
         renameSync2(path, aside);
       } catch {
@@ -29393,22 +29318,14 @@ function acquireLock(path, info, ownedBy) {
         } catch {
         }
         rmSync2(aside, { force: true });
-        throw new Error(`Change "${info.change}" is already being applied by run ${moved.run_id}`, {
+        throw new Error(`Lock key "${info.lock_key}" is already held by run ${moved.run_id}`, {
           cause: err
         });
       }
       rmSync2(aside, { force: true });
     }
   }
-  throw new Error(`Could not acquire the lock for change "${info.change}"`);
-}
-function takeOverLock(repo, change, fromRunId, toRunId) {
-  const path = lockPathFor(repo, change);
-  const info = { pid: process.pid, run_id: toRunId, repo, change };
-  const startTime = readStartTime(process.pid);
-  if (startTime !== void 0) info.start_time = startTime;
-  acquireLock(path, info, fromRunId);
-  return path;
+  throw new Error(`Could not acquire the lock for key "${info.lock_key}"`);
 }
 function setLockOwner(lockPath, pid) {
   const held = readLock(lockPath);
@@ -29457,13 +29374,13 @@ async function createWorktree(opts) {
     throw new Error(`Refusing to create a worktree from the base branch "${callerBranch}"`);
   }
   let lockPath;
-  if (opts.change) {
-    lockPath = lockPathFor(repo, opts.change);
+  if (opts.lock_key) {
+    lockPath = lockPathFor(repo, opts.lock_key);
     const info = {
       pid: process.pid,
       run_id: runId,
       repo,
-      change: opts.change
+      lock_key: opts.lock_key
     };
     const startTime = readStartTime(process.pid);
     if (startTime !== void 0) info.start_time = startTime;
@@ -29868,7 +29785,7 @@ async function startRun(opts) {
     prompt_chars: opts.prompt.length,
     ...top !== void 0 ? { repo: top } : {},
     ...callerBranch !== void 0 ? { branch: callerBranch } : {},
-    ...opts.change !== void 0 ? { change: opts.change } : {},
+    ...opts.lock_key !== void 0 ? { lock_key: opts.lock_key } : {},
     ...opts.preset !== void 0 ? { preset: opts.preset } : {}
   });
   let runCwd = opts.cwd;
@@ -29881,7 +29798,7 @@ async function startRun(opts) {
         runId: meta3.id,
         env: parentEnv,
         exec,
-        ...opts.change !== void 0 ? { change: opts.change } : {},
+        ...opts.lock_key !== void 0 ? { lock_key: opts.lock_key } : {},
         ...opts.sleep ? { sleep: opts.sleep } : {},
         ...opts.fetch_timeout_ms !== void 0 ? { fetchTimeoutMs: opts.fetch_timeout_ms } : {},
         ...opts.worktree_timeout_ms !== void 0 ? { addTimeoutMs: opts.worktree_timeout_ms } : {}
@@ -29979,96 +29896,6 @@ function spawnRun(meta3, opts, adapter, spec, depth, parentEnv, lockPath) {
   }
   return readMeta(meta3.id);
 }
-async function sendToRun(runId, prompt, opts = {}) {
-  const previous = reconcile(readMeta(runId));
-  if (previous.status === "running") throw new Error(`Run ${runId} is still running`);
-  if (previous.status === "failed_no_report") {
-    throw new Error(`Run ${runId} ended without a report and cannot be continued`);
-  }
-  let cwd = previous.run_cwd ?? previous.cwd;
-  if (previous.worktree) {
-    cwd = previous.run_cwd ?? previous.worktree;
-    if (!existsSync4(previous.worktree) || !existsSync4(cwd)) {
-      throw new Error(
-        `The worktree of run ${runId} no longer exists; start a new run instead of continuing it`
-      );
-    }
-    const busy = activeUsersOf(previous.worktree, previous.id);
-    if (busy.length > 0) {
-      throw new Error(`The worktree of run ${runId} is in use by run ${busy[0].id}`);
-    }
-  }
-  const parentEnv = opts.parentEnv ?? process.env;
-  assertCanStart(parentEnv);
-  const account = await getAccount(previous.account);
-  const adapter = opts.adapter ?? getAdapter(account.provider);
-  const depth = currentDepth(parentEnv) + 1;
-  const preset = opts.preset ?? previous.preset;
-  const tools = resolveTools({
-    ...preset !== void 0 ? { preset } : {},
-    ...opts.allowed_tools !== void 0 ? { allowed_tools: opts.allowed_tools } : {}
-  });
-  const meta3 = createRun({
-    account: account.id,
-    cwd: previous.cwd,
-    run_cwd: cwd,
-    session_id: previous.session_id,
-    depth,
-    prompt_chars: prompt.length,
-    ...previous.repo !== void 0 ? { repo: previous.repo } : {},
-    ...previous.branch !== void 0 ? { branch: previous.branch } : {},
-    ...previous.run_branch !== void 0 ? { run_branch: previous.run_branch } : {},
-    ...previous.worktree !== void 0 ? { worktree: previous.worktree } : {},
-    ...previous.change !== void 0 ? { change: previous.change } : {},
-    ...preset !== void 0 ? { preset } : {}
-  });
-  if (previous.repo !== void 0 && previous.branch !== void 0) {
-    const snapshot = await takeSnapshot(
-      opts.exec ?? defaultExec,
-      previous.repo,
-      previous.branch
-    ).catch(() => void 0);
-    if (snapshot) {
-      meta3.ref_snapshot = snapshot;
-      writeMeta(meta3);
-    }
-  }
-  let lockPath;
-  if (previous.change !== void 0 && previous.repo !== void 0 && previous.worktree) {
-    try {
-      lockPath = takeOverLock(previous.repo, previous.change, previous.id, meta3.id);
-    } catch (err) {
-      rmSync3(runDir(meta3.id), { recursive: true, force: true });
-      throw err;
-    }
-  }
-  const spec = {
-    prompt,
-    cwd,
-    allowed_tools: tools.allowed,
-    disallowed_tools: tools.disallowed,
-    session_id: previous.session_id,
-    append_system_prompt: guardPrompt(),
-    resume: true,
-    ...opts.model !== void 0 ? { model: opts.model } : {},
-    ...opts.max_turns !== void 0 ? { max_turns: opts.max_turns } : {}
-  };
-  return spawnRun(
-    meta3,
-    { account, ...pickRunOpts(opts) },
-    adapter,
-    spec,
-    depth,
-    parentEnv,
-    lockPath
-  );
-}
-function pickRunOpts(opts) {
-  const out = {};
-  if (opts.timeout_ms !== void 0) out.timeout_ms = opts.timeout_ms;
-  if (opts.supervisorEntry !== void 0) out.supervisorEntry = opts.supervisorEntry;
-  return out;
-}
 var sleepMs = (ms) => new Promise((r) => setTimeout(r, ms));
 async function cancelRun(runId) {
   const meta3 = reconcile(readMeta(runId));
@@ -30107,7 +29934,7 @@ async function cancelRun(runId) {
 
 // src/tools.ts
 import { execFile } from "node:child_process";
-import { existsSync as existsSync5, statSync } from "node:fs";
+import { existsSync as existsSync4, statSync } from "node:fs";
 import { isAbsolute as isAbsolute2 } from "node:path";
 
 // node_modules/zod/v3/helpers/util.js
@@ -38154,6 +37981,90 @@ var EMPTY_COMPLETION_RESULT = {
   }
 };
 
+// src/registry.ts
+import { randomBytes as randomBytes3 } from "node:crypto";
+import { chmod, mkdir, realpath, rename, writeFile, readFile, unlink } from "node:fs/promises";
+import { dirname, resolve as resolve2 } from "node:path";
+var accountSchema = external_exports.object({
+  id: external_exports.string().min(1),
+  label: external_exports.string().min(1),
+  config_dir: external_exports.string().min(1),
+  provider: external_exports.string().min(1).default("claude"),
+  command: external_exports.string().min(1).default("claude"),
+  status: external_exports.string().min(1).optional()
+});
+var registrySchema = external_exports.object({ accounts: external_exports.array(accountSchema) });
+async function saveAccounts(registry2) {
+  const parsed = registrySchema.parse(registry2);
+  const ids = parsed.accounts.map((a) => a.id);
+  if (new Set(ids).size !== ids.length) throw new Error("accounts.json has duplicate account ids");
+  const file2 = accountsFile();
+  const dir = dirname(file2);
+  await mkdir(dir, { recursive: true, mode: 448 });
+  await chmod(dir, 448);
+  const tmp = `${file2}.${process.pid}.${randomBytes3(4).toString("hex")}.tmp`;
+  try {
+    await writeFile(tmp, `${JSON.stringify(parsed, null, 2)}
+`, { mode: 384 });
+    await chmod(tmp, 384);
+    await rename(tmp, file2);
+  } catch (err) {
+    await unlink(tmp).catch(() => void 0);
+    throw err;
+  }
+}
+async function loadAccounts() {
+  const file2 = accountsFile();
+  let raw;
+  try {
+    raw = await readFile(file2, "utf8");
+  } catch (err) {
+    if (err.code !== "ENOENT") throw err;
+    const empty = { accounts: [] };
+    await saveAccounts(empty);
+    return empty;
+  }
+  let json2;
+  try {
+    json2 = JSON.parse(raw);
+  } catch {
+    throw new Error(`accounts.json at ${file2} is not valid JSON`);
+  }
+  const result = registrySchema.safeParse(json2);
+  if (!result.success) {
+    throw new Error(`accounts.json at ${file2} is invalid: ${result.error.message}`);
+  }
+  return result.data;
+}
+async function getAccount(id) {
+  const { accounts } = await loadAccounts();
+  const found = accounts.find((a) => a.id === id);
+  if (!found) {
+    const known = accounts.map((a) => a.id).join(", ") || "none";
+    throw new Error(`Unknown account "${id}". Registered accounts: ${known}`);
+  }
+  return found;
+}
+async function canonical2(dir) {
+  try {
+    return await realpath(dir);
+  } catch {
+    return resolve2(dir);
+  }
+}
+async function targetsFor(callerProfileDir) {
+  const { accounts } = await loadAccounts();
+  const caller = await canonical2(callerProfileDir);
+  const result = [];
+  for (const account of accounts) {
+    if (await canonical2(account.config_dir) !== caller) result.push(account);
+  }
+  return result;
+}
+function isActive(account) {
+  return account.status === void 0 || account.status === "active";
+}
+
 // src/tools.ts
 var LIST_DEFAULT = 20;
 var LIST_MAX = 100;
@@ -38192,36 +38103,46 @@ function currentBranch(cwd) {
     );
   });
 }
-async function assertTarget(env, accountId) {
-  await getAccount(accountId);
+async function chooseAccount(env, accountId, random) {
   const targets = await targetsFor(callerProfile(env));
-  if (!targets.some((a) => a.id === accountId)) {
-    throw new Error(`Account "${accountId}" is the caller's own profile; pick another account`);
+  if (accountId !== void 0) {
+    const account = await getAccount(accountId);
+    if (!targets.some((a) => a.id === accountId)) {
+      throw new Error(`Account "${accountId}" is the caller's own profile; pick another account`);
+    }
+    return account;
   }
+  const pool = targets.filter(isActive);
+  if (pool.length === 0) {
+    throw new Error("No other active account is registered to run on");
+  }
+  return pool[Math.min(Math.floor(random() * pool.length), pool.length - 1)];
 }
 var startInput = {
-  account: external_exports.string().min(1).describe("Registry id of the account to run on (never your own)."),
+  account: external_exports.string().min(1).optional().describe(
+    "Registry id of the account to run on (never your own); omitted: a random active one."
+  ),
   prompt: external_exports.string().min(1).max(2e5).describe("The full task brief for the run."),
   cwd: external_exports.string().min(1).describe("Absolute path of the project directory."),
   model: external_exports.string().min(1).optional(),
-  preset: external_exports.string().min(1).optional().describe('Tool preset, for example "os-apply".'),
+  preset: external_exports.string().min(1).optional().describe('Tool preset: "readonly" (default) or "edit".'),
   allowed_tools: external_exports.array(external_exports.string().min(1).max(300).regex(TOOL_ITEM, "invalid tool rule")).max(100).optional(),
   max_turns: external_exports.number().int().positive().max(1e3).optional(),
   worktree: external_exports.boolean().optional().describe("Run in a fresh git worktree; default true in a repo."),
-  change: external_exports.string().min(1).max(200).optional().describe("OpenSpec change name, locks it."),
+  lock_key: external_exports.string().min(1).max(200).optional().describe("Stops two concurrent runs in the same repo with the same key."),
   setup: external_exports.string().min(1).max(2e3).optional().describe("Shell command run in a new worktree.")
 };
 var runIdInput = { run_id: external_exports.string().min(1).max(64) };
 function createHandlers(deps = {}) {
   const env = deps.env ?? process.env;
+  const random = deps.random ?? Math.random;
   const runOpts = () => ({
     parentEnv: env,
     ...deps.supervisorEntry !== void 0 ? { supervisorEntry: deps.supervisorEntry } : {}
   });
   return {
     async start(input2) {
-      await assertTarget(env, input2.account);
-      const account = await getAccount(input2.account);
+      const account = await chooseAccount(env, input2.account, random);
       if (!isAbsolute2(input2.cwd) || !statSync(input2.cwd, { throwIfNoEntry: false })?.isDirectory()) {
         throw new Error("cwd must be an absolute path of an existing directory");
       }
@@ -38240,11 +38161,12 @@ function createHandlers(deps = {}) {
         ...input2.preset !== void 0 ? { preset: input2.preset } : {},
         ...input2.allowed_tools !== void 0 ? { allowed_tools: input2.allowed_tools } : {},
         ...input2.max_turns !== void 0 ? { max_turns: input2.max_turns } : {},
-        ...input2.change !== void 0 ? { change: input2.change } : {},
+        ...input2.lock_key !== void 0 ? { lock_key: input2.lock_key } : {},
         ...input2.setup !== void 0 ? { setup: input2.setup } : {}
       });
       return {
         run_id: meta3.id,
+        account: account.id,
         status: meta3.status,
         ...meta3.run_branch !== void 0 ? { run_branch: meta3.run_branch } : {}
       };
@@ -38260,16 +38182,6 @@ function createHandlers(deps = {}) {
         return { id: meta3.id, status: meta3.status, message: "still running" };
       }
       return { ...runSummary(input2.run_id) };
-    },
-    async send(input2) {
-      const previous = loadMeta(input2.run_id);
-      await assertTarget(env, previous.account);
-      const meta3 = await sendToRun(input2.run_id, input2.prompt, runOpts());
-      return {
-        run_id: meta3.id,
-        status: meta3.status,
-        ...meta3.run_branch !== void 0 ? { run_branch: meta3.run_branch } : {}
-      };
     },
     async cancel(input2) {
       loadMeta(input2.run_id);
@@ -38296,7 +38208,7 @@ function createHandlers(deps = {}) {
       if (meta3.status === "running") {
         throw new Error(`Run ${meta3.id} is still running; cancel it before cleanup`);
       }
-      if (input2.action !== "discard" && meta3.worktree !== void 0 && existsSync5(meta3.worktree) && await worktreeDirty(meta3.worktree)) {
+      if (input2.action !== "discard" && meta3.worktree !== void 0 && existsSync4(meta3.worktree) && await worktreeDirty(meta3.worktree)) {
         throw new Error(
           `The worktree of run ${meta3.id} has uncommitted changes; commit or copy them, or call wingman_cleanup with action "discard" to drop them`
         );
@@ -38325,7 +38237,7 @@ function buildServer(deps = {}) {
   server.registerTool(
     "wingman_start",
     {
-      description: `Start a detached run of Claude Code on another registered account. Returns run_id and status only. ${LOGS_WARNING}`,
+      description: `Start a one-shot detached run of Claude Code on another registered account (random active one when account is omitted); to give more work, start a new run. Returns run_id, account and status only. ${LOGS_WARNING}`,
       inputSchema: startInput
     },
     wrap(h.start)
@@ -38345,14 +38257,6 @@ function buildServer(deps = {}) {
       inputSchema: runIdInput
     },
     wrap(h.result)
-  );
-  server.registerTool(
-    "wingman_send",
-    {
-      description: `Continue a finished run on the same account with a new prompt; returns a new run_id. Refused while running or after failed_no_report. ${LOGS_WARNING}`,
-      inputSchema: { ...runIdInput, prompt: external_exports.string().min(1).max(2e5) }
-    },
-    wrap(h.send)
   );
   server.registerTool(
     "wingman_cancel",

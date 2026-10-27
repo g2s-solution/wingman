@@ -3,12 +3,13 @@ import { existsSync, statSync } from 'node:fs';
 import { isAbsolute } from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
+import type { Account } from './types.js';
 import { TOOL_ITEM } from './guard.js';
 import { maskSecrets, safeSummary } from './mask.js';
-import { getAccount, targetsFor } from './registry.js';
+import { getAccount, isActive, targetsFor } from './registry.js';
 import { reconcile } from './reconcile.js';
 import { listRuns, readMeta, runSummary } from './runs.js';
-import { cancelRun, sendToRun, startRun, type StartRunOptions } from './runner.js';
+import { cancelRun, startRun, type StartRunOptions } from './runner.js';
 import { callerProfile } from './self.js';
 import { TERMINAL_STATUSES, type RunMeta } from './types.js';
 import { removeWorktree, worktreeDirty } from './worktree.js';
@@ -16,6 +17,8 @@ import { removeWorktree, worktreeDirty } from './worktree.js';
 export interface ServerDeps {
   /** The caller's environment: decides the caller profile and the depth. */
   env?: NodeJS.ProcessEnv;
+  /** Random source for picking an account; defaults to Math.random. */
+  random?: () => number;
   /** Script the supervisor is started from; defaults to the running entry. */
   supervisorEntry?: string;
 }
@@ -65,33 +68,57 @@ function currentBranch(cwd: string): Promise<string | undefined> {
   });
 }
 
-async function assertTarget(env: NodeJS.ProcessEnv, accountId: string): Promise<void> {
-  await getAccount(accountId);
+async function chooseAccount(
+  env: NodeJS.ProcessEnv,
+  accountId: string | undefined,
+  random: () => number,
+): Promise<Account> {
   const targets = await targetsFor(callerProfile(env));
-  if (!targets.some((a) => a.id === accountId)) {
-    throw new Error(`Account "${accountId}" is the caller's own profile; pick another account`);
+  if (accountId !== undefined) {
+    const account = await getAccount(accountId);
+    if (!targets.some((a) => a.id === accountId)) {
+      throw new Error(`Account "${accountId}" is the caller's own profile; pick another account`);
+    }
+    return account;
   }
+  const pool = targets.filter(isActive);
+  if (pool.length === 0) {
+    throw new Error('No other active account is registered to run on');
+  }
+  return pool[Math.min(Math.floor(random() * pool.length), pool.length - 1)]!;
 }
 
 const startInput = {
-  account: z.string().min(1).describe('Registry id of the account to run on (never your own).'),
+  account: z
+    .string()
+    .min(1)
+    .optional()
+    .describe(
+      'Registry id of the account to run on (never your own); omitted: a random active one.',
+    ),
   prompt: z.string().min(1).max(200_000).describe('The full task brief for the run.'),
   cwd: z.string().min(1).describe('Absolute path of the project directory.'),
   model: z.string().min(1).optional(),
-  preset: z.string().min(1).optional().describe('Tool preset, for example "os-apply".'),
+  preset: z.string().min(1).optional().describe('Tool preset: "readonly" (default) or "edit".'),
   allowed_tools: z
     .array(z.string().min(1).max(300).regex(TOOL_ITEM, 'invalid tool rule'))
     .max(100)
     .optional(),
   max_turns: z.number().int().positive().max(1000).optional(),
   worktree: z.boolean().optional().describe('Run in a fresh git worktree; default true in a repo.'),
-  change: z.string().min(1).max(200).optional().describe('OpenSpec change name, locks it.'),
+  lock_key: z
+    .string()
+    .min(1)
+    .max(200)
+    .optional()
+    .describe('Stops two concurrent runs in the same repo with the same key.'),
   setup: z.string().min(1).max(2000).optional().describe('Shell command run in a new worktree.'),
 };
 const runIdInput = { run_id: z.string().min(1).max(64) };
 
 export function createHandlers(deps: ServerDeps = {}) {
   const env = deps.env ?? process.env;
+  const random = deps.random ?? Math.random;
   const runOpts = (): Partial<StartRunOptions> => ({
     parentEnv: env,
     ...(deps.supervisorEntry !== undefined ? { supervisorEntry: deps.supervisorEntry } : {}),
@@ -99,8 +126,7 @@ export function createHandlers(deps: ServerDeps = {}) {
 
   return {
     async start(input: z.infer<z.ZodObject<typeof startInput>>): Promise<Json> {
-      await assertTarget(env, input.account);
-      const account = await getAccount(input.account);
+      const account = await chooseAccount(env, input.account, random);
       if (
         !isAbsolute(input.cwd) ||
         !statSync(input.cwd, { throwIfNoEntry: false })?.isDirectory()
@@ -122,11 +148,12 @@ export function createHandlers(deps: ServerDeps = {}) {
         ...(input.preset !== undefined ? { preset: input.preset } : {}),
         ...(input.allowed_tools !== undefined ? { allowed_tools: input.allowed_tools } : {}),
         ...(input.max_turns !== undefined ? { max_turns: input.max_turns } : {}),
-        ...(input.change !== undefined ? { change: input.change } : {}),
+        ...(input.lock_key !== undefined ? { lock_key: input.lock_key } : {}),
         ...(input.setup !== undefined ? { setup: input.setup } : {}),
       });
       return {
         run_id: meta.id,
+        account: account.id,
         status: meta.status,
         ...(meta.run_branch !== undefined ? { run_branch: meta.run_branch } : {}),
       };
@@ -144,17 +171,6 @@ export function createHandlers(deps: ServerDeps = {}) {
         return { id: meta.id, status: meta.status, message: 'still running' };
       }
       return { ...runSummary(input.run_id) };
-    },
-
-    async send(input: { run_id: string; prompt: string }): Promise<Json> {
-      const previous = loadMeta(input.run_id);
-      await assertTarget(env, previous.account);
-      const meta = await sendToRun(input.run_id, input.prompt, runOpts());
-      return {
-        run_id: meta.id,
-        status: meta.status,
-        ...(meta.run_branch !== undefined ? { run_branch: meta.run_branch } : {}),
-      };
     },
 
     async cancel(input: { run_id: string }): Promise<Json> {
@@ -227,7 +243,7 @@ export function buildServer(deps: ServerDeps = {}): McpServer {
   server.registerTool(
     'wingman_start',
     {
-      description: `Start a detached run of Claude Code on another registered account. Returns run_id and status only. ${LOGS_WARNING}`,
+      description: `Start a one-shot detached run of Claude Code on another registered account (random active one when account is omitted); to give more work, start a new run. Returns run_id, account and status only. ${LOGS_WARNING}`,
       inputSchema: startInput,
     },
     wrap(h.start),
@@ -247,14 +263,6 @@ export function buildServer(deps: ServerDeps = {}): McpServer {
       inputSchema: runIdInput,
     },
     wrap(h.result),
-  );
-  server.registerTool(
-    'wingman_send',
-    {
-      description: `Continue a finished run on the same account with a new prompt; returns a new run_id. Refused while running or after failed_no_report. ${LOGS_WARNING}`,
-      inputSchema: { ...runIdInput, prompt: z.string().min(1).max(200_000) },
-    },
-    wrap(h.send),
   );
   server.registerTool(
     'wingman_cancel',

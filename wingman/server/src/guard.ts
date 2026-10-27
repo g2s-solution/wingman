@@ -1,30 +1,34 @@
-export type Preset = 'os-apply';
+export type Preset = 'readonly' | 'edit';
+export const DEFAULT_PRESET: Preset = 'readonly';
 
 export const STATUS_VALUES = ['done', 'partial', 'blocked', 'needs_input'] as const;
 export type ReportedStatus = (typeof STATUS_VALUES)[number];
 
 export const PRESETS: Record<Preset, { allowed: readonly string[] }> = {
-  'os-apply': {
+  readonly: {
+    allowed: [
+      'Read',
+      'Glob',
+      'Grep',
+      'Bash(git log:*)',
+      'Bash(git diff:*)',
+      'Bash(git status:*)',
+      'Bash(git show:*)',
+      'Bash(date:*)',
+    ],
+  },
+  edit: {
     allowed: [
       'Agent',
       'Skill',
       'Edit',
       'Write',
       'Read',
-      'Bash(git status:*)',
-      'Bash(git add:*)',
-      'Bash(git commit:*)',
-      'Bash(git diff:*)',
-      'Bash(git log:*)',
-      'Bash(git show:*)',
-      'Bash(git rev-parse:*)',
-      'Bash(git branch --show-current)',
-      'Bash(git ls-files:*)',
-      'Bash(git mv:*)',
-      'Bash(git rm:*)',
-      'Bash(git restore:*)',
+      'Glob',
+      'Grep',
+      'Bash(git:*)',
       'Bash(node:*)',
-      'Bash(openspec:*)',
+      'Bash(npm:*)',
       'Bash(date:*)',
     ],
   },
@@ -78,13 +82,14 @@ export interface ToolSelection {
 
 export function resolveTools(sel: ToolSelection): { allowed: string[]; disallowed: string[] } {
   const disallowed = baseDisallowed();
-  let allowed: string[] = [];
+  let allowed: string[];
   if (sel.allowed_tools !== undefined) {
     assertToolItems(sel.allowed_tools, 'allowed_tools');
     allowed = [...sel.allowed_tools];
-  } else if (sel.preset !== undefined) {
-    const preset = PRESETS[sel.preset as Preset];
-    if (!preset) throw new Error(`Unknown preset "${sel.preset}"`);
+  } else {
+    const name = sel.preset ?? DEFAULT_PRESET;
+    const preset = Object.hasOwn(PRESETS, name) ? PRESETS[name as Preset] : undefined;
+    if (!preset) throw new Error(`Unknown preset "${name}"`);
     allowed = [...preset.allowed];
   }
   allowed = allowed.filter((name) => !disallowed.includes(name));

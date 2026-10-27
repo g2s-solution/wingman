@@ -12,14 +12,13 @@
  * wall-clock timeout signal the whole group.
  */
 import { randomUUID } from 'node:crypto';
-import { closeSync, existsSync, mkdirSync, openSync, realpathSync, rmSync } from 'node:fs';
+import { closeSync, mkdirSync, openSync, realpathSync, rmSync } from 'node:fs';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { relative, join, isAbsolute } from 'node:path';
 import { claudeAdapter, getAdapter, isRateLimitRejected } from './adapters/claude.js';
 import { guardPrompt, parseStatusLine, resolveTools } from './guard.js';
 import { runDir, wingmanHome } from './paths.js';
-import { getAccount } from './registry.js';
 import {
   appendEvent,
   createRun,
@@ -34,7 +33,6 @@ import { reconcile } from './reconcile.js';
 import { assertCanStart, currentDepth } from './self.js';
 import { changedSince, takeSnapshot } from './snapshot.js';
 import {
-  activeUsersOf,
   baseBranches,
   createWorktree,
   defaultExec,
@@ -42,7 +40,6 @@ import {
   removeWorktree,
   runSetup,
   setLockOwner,
-  takeOverLock,
   type ExecFn,
 } from './worktree.js';
 import {
@@ -81,7 +78,7 @@ export interface StartRunOptions {
   allowed_tools?: string[];
   max_turns?: number;
   worktree?: boolean;
-  change?: string;
+  lock_key?: string;
   parentEnv?: NodeJS.ProcessEnv;
   adapter?: Adapter;
   /** Wall-clock limit for the agent; a hung child is killed and the run is `failed`. */
@@ -420,7 +417,7 @@ export async function startRun(opts: StartRunOptions): Promise<RunMeta> {
     prompt_chars: opts.prompt.length,
     ...(top !== undefined ? { repo: top } : {}),
     ...(callerBranch !== undefined ? { branch: callerBranch } : {}),
-    ...(opts.change !== undefined ? { change: opts.change } : {}),
+    ...(opts.lock_key !== undefined ? { lock_key: opts.lock_key } : {}),
     ...(opts.preset !== undefined ? { preset: opts.preset } : {}),
   });
 
@@ -434,7 +431,7 @@ export async function startRun(opts: StartRunOptions): Promise<RunMeta> {
         runId: meta.id,
         env: parentEnv,
         exec,
-        ...(opts.change !== undefined ? { change: opts.change } : {}),
+        ...(opts.lock_key !== undefined ? { lock_key: opts.lock_key } : {}),
         ...(opts.sleep ? { sleep: opts.sleep } : {}),
         ...(opts.fetch_timeout_ms !== undefined ? { fetchTimeoutMs: opts.fetch_timeout_ms } : {}),
         ...(opts.worktree_timeout_ms !== undefined
@@ -550,102 +547,6 @@ function spawnRun(
     throw err;
   }
   return readMeta(meta.id);
-}
-
-export async function sendToRun(
-  runId: string,
-  prompt: string,
-  opts: Partial<StartRunOptions> = {},
-): Promise<RunMeta> {
-  const previous = reconcile(readMeta(runId));
-  if (previous.status === 'running') throw new Error(`Run ${runId} is still running`);
-  if (previous.status === 'failed_no_report') {
-    throw new Error(`Run ${runId} ended without a report and cannot be continued`);
-  }
-  let cwd = previous.run_cwd ?? previous.cwd;
-  if (previous.worktree) {
-    cwd = previous.run_cwd ?? previous.worktree;
-    if (!existsSync(previous.worktree) || !existsSync(cwd)) {
-      throw new Error(
-        `The worktree of run ${runId} no longer exists; start a new run instead of continuing it`,
-      );
-    }
-    const busy = activeUsersOf(previous.worktree, previous.id);
-    if (busy.length > 0) {
-      throw new Error(`The worktree of run ${runId} is in use by run ${busy[0]!.id}`);
-    }
-  }
-  const parentEnv = opts.parentEnv ?? process.env;
-  assertCanStart(parentEnv);
-  const account = await getAccount(previous.account);
-  const adapter = opts.adapter ?? getAdapter(account.provider);
-  const depth = currentDepth(parentEnv) + 1;
-  const preset = opts.preset ?? previous.preset;
-  const tools = resolveTools({
-    ...(preset !== undefined ? { preset } : {}),
-    ...(opts.allowed_tools !== undefined ? { allowed_tools: opts.allowed_tools } : {}),
-  });
-  const meta = createRun({
-    account: account.id,
-    cwd: previous.cwd,
-    run_cwd: cwd,
-    session_id: previous.session_id,
-    depth,
-    prompt_chars: prompt.length,
-    ...(previous.repo !== undefined ? { repo: previous.repo } : {}),
-    ...(previous.branch !== undefined ? { branch: previous.branch } : {}),
-    ...(previous.run_branch !== undefined ? { run_branch: previous.run_branch } : {}),
-    ...(previous.worktree !== undefined ? { worktree: previous.worktree } : {}),
-    ...(previous.change !== undefined ? { change: previous.change } : {}),
-    ...(preset !== undefined ? { preset } : {}),
-  });
-  if (previous.repo !== undefined && previous.branch !== undefined) {
-    const snapshot = await takeSnapshot(
-      opts.exec ?? defaultExec,
-      previous.repo,
-      previous.branch,
-    ).catch(() => undefined);
-    if (snapshot) {
-      meta.ref_snapshot = snapshot;
-      writeMeta(meta);
-    }
-  }
-  let lockPath: string | undefined;
-  if (previous.change !== undefined && previous.repo !== undefined && previous.worktree) {
-    try {
-      lockPath = takeOverLock(previous.repo, previous.change, previous.id, meta.id);
-    } catch (err) {
-      rmSync(runDir(meta.id), { recursive: true, force: true });
-      throw err;
-    }
-  }
-  const spec: StartSpec = {
-    prompt,
-    cwd,
-    allowed_tools: tools.allowed,
-    disallowed_tools: tools.disallowed,
-    session_id: previous.session_id,
-    append_system_prompt: guardPrompt(),
-    resume: true,
-    ...(opts.model !== undefined ? { model: opts.model } : {}),
-    ...(opts.max_turns !== undefined ? { max_turns: opts.max_turns } : {}),
-  };
-  return spawnRun(
-    meta,
-    { account, ...pickRunOpts(opts) },
-    adapter,
-    spec,
-    depth,
-    parentEnv,
-    lockPath,
-  );
-}
-
-function pickRunOpts(opts: Partial<StartRunOptions>): Partial<StartRunOptions> {
-  const out: Partial<StartRunOptions> = {};
-  if (opts.timeout_ms !== undefined) out.timeout_ms = opts.timeout_ms;
-  if (opts.supervisorEntry !== undefined) out.supervisorEntry = opts.supervisorEntry;
-  return out;
 }
 
 export interface CancelResult {

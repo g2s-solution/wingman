@@ -4,8 +4,7 @@ import { existsSync, rmSync } from 'node:fs';
 import { createRun, readMeta, updateStatus, writeMeta } from '../src/runs.js';
 import { reconcile } from '../src/reconcile.js';
 import { createHandlers } from '../src/tools.js';
-import { saveAccounts } from '../src/registry.js';
-import { cancelRun, sendToRun } from '../src/runner.js';
+import { cancelRun } from '../src/runner.js';
 import type { RunMeta } from '../src/types.js';
 import { tmp } from './helpers.js';
 
@@ -63,26 +62,21 @@ describe('reconcile', () => {
 });
 
 describe('tool paths reconcile without waitForRun', () => {
-  it('status, result, list, cancel, cleanup and send see a dead run as failed_no_report', async () => {
+  it('status, result, list, cancel and cleanup see a dead run as failed_no_report', async () => {
     const h = createHandlers({ env: { PATH: process.env.PATH } });
-    const ids = [1, 2, 3, 4, 5].map(() => running({ pid: deadPid() }).id);
+    const ids = [1, 2, 3, 4].map(() => running({ pid: deadPid() }).id);
     expect(h.status({ run_id: ids[0]! }).status).toBe('failed_no_report');
     expect(h.result({ run_id: ids[1]! }).status).toBe('failed_no_report');
     expect((await h.cancel({ run_id: ids[2]! })).reason).toMatch(/failed_no_report/);
     expect((await h.cleanup({ run_id: ids[3]!, action: 'discard' })).run_id).toBe(ids[3]);
-    await expect(h.send({ run_id: ids[4]!, prompt: 'x' })).rejects.toThrow();
-    expect(readMeta(ids[4]!).status).toBe('failed_no_report');
     const listed = (h.list({}).runs as { id: string; status: string }[]).map((r) => r.status);
     expect(listed.every((st) => st === 'failed_no_report')).toBe(true);
   });
 
-  it('cancelRun and sendToRun reconcile too', async () => {
+  it('cancelRun reconciles too', async () => {
     const a = running({ pid: deadPid() });
     expect(await cancelRun(a.id)).toMatchObject({ cancelled: false });
     expect(readMeta(a.id).status).toBe('failed_no_report');
-    const b = running({ pid: deadPid() });
-    await saveAccounts({ accounts: [] });
-    await expect(sendToRun(b.id, 'x')).rejects.toThrow(/cannot be continued/);
     expect(existsSync(home)).toBe(true);
   });
 });

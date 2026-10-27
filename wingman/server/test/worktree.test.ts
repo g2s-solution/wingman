@@ -144,7 +144,7 @@ describe('lock', () => {
       repo,
       callerBranch: 'feat/l',
       runId: meta.id,
-      change: 'add-x',
+      lock_key: 'add-x',
       sleep: noSleep,
     });
     writeMeta({ ...meta, worktree: first.path });
@@ -153,15 +153,15 @@ describe('lock', () => {
         repo,
         callerBranch: 'feat/l',
         runId: 'other',
-        change: 'add-x',
+        lock_key: 'add-x',
         sleep: noSleep,
       }),
-    ).rejects.toThrow(/already being applied/);
+    ).rejects.toThrow(/already held/);
     const second = await createWorktree({
       repo,
       callerBranch: 'feat/l',
       runId: 'third',
-      change: 'add-y',
+      lock_key: 'add-y',
       sleep: noSleep,
     });
     expect(existsSync(second.path)).toBe(true);
@@ -171,7 +171,7 @@ describe('lock', () => {
       repo,
       callerBranch: 'feat/l',
       runId: 'fourth',
-      change: 'add-x',
+      lock_key: 'add-x',
       sleep: noSleep,
     });
     expect(existsSync(again.path)).toBe(true);
@@ -184,20 +184,20 @@ describe('lock', () => {
       repo,
       callerBranch: 'feat/s',
       runId: 'dead1',
-      change: 'c',
+      lock_key: 'c',
       sleep: noSleep,
     });
     const dead = spawnSync(process.execPath, ['-e', '0']);
     expect(dead.pid).toBeGreaterThan(0);
     writeFileSync(
       first.lockPath as string,
-      JSON.stringify({ pid: dead.pid, run_id: 'dead1', repo, change: 'c' }),
+      JSON.stringify({ pid: dead.pid, run_id: 'dead1', repo, lock_key: 'c' }),
     );
     const second = await createWorktree({
       repo,
       callerBranch: 'feat/s',
       runId: 'live2',
-      change: 'c',
+      lock_key: 'c',
       sleep: noSleep,
     });
     expect(existsSync(second.path)).toBe(true);
@@ -217,13 +217,13 @@ describe('setup and prune', () => {
   it('prunes worktrees of terminal runs and dead pids, keeps live ones', async () => {
     const repo = makeRepo('main');
     git(repo, 'switch', '-q', '-c', 'feat/p');
-    const mk = async (change: string): Promise<{ id: string; path: string }> => {
+    const mk = async (key: string): Promise<{ id: string; path: string }> => {
       const m = createRun({ account: 'a', cwd: repo, session_id: 's', depth: 1, prompt_chars: 1 });
       const wt = await createWorktree({
         repo,
         callerBranch: 'feat/p',
         runId: m.id,
-        change,
+        lock_key: key,
         sleep: noSleep,
       });
       writeMeta({ ...readMeta(m.id), worktree: wt.path, pid: process.pid });
@@ -244,7 +244,7 @@ describe('setup and prune', () => {
 });
 
 describe('stale lock reclaim (L2)', () => {
-  const info = (run_id: string, pid: number) => ({ pid, run_id, repo: '/r', change: 'c' });
+  const info = (run_id: string, pid: number) => ({ pid, run_id, repo: '/r', lock_key: 'c' });
 
   it('reclaims a dead lock once and leaves no stale files behind', () => {
     const path = join(wingmanHome(), 'locks', 'k.lock');
@@ -252,7 +252,7 @@ describe('stale lock reclaim (L2)', () => {
     acquireLock(path, info('old', dead));
     acquireLock(path, info('first', process.pid));
     expect(() => acquireLock(path, info('second', process.pid))).toThrow(
-      /already being applied by run first/,
+      /already held by run first/,
     );
     expect(readdirSync(join(wingmanHome(), 'locks'))).toEqual(['k.lock']);
   });
@@ -262,7 +262,7 @@ describe('stale lock reclaim (L2)', () => {
     const dead = spawnSync(process.execPath, ['-e', '0']).pid;
     acquireLock(path, info('old', dead));
     acquireLock(path, info('winner', process.pid));
-    expect(() => acquireLock(path, info('loser', process.pid))).toThrow(/already being applied/);
+    expect(() => acquireLock(path, info('loser', process.pid))).toThrow(/already held/);
     expect(JSON.parse(readFileSync(path, 'utf8')).run_id).toBe('winner');
   });
 });

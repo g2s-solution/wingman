@@ -6,6 +6,8 @@ export interface Account {
   provider: string;
   /** default 'claude' */
   command: string;
+  /** Absent or 'active' means usable; anything else disables the account. */
+  status?: string;
 }
 
 export type RunStatus =
@@ -55,7 +57,7 @@ export interface RunMeta {
   worktree?: string;
   /** Refs and local config as they were when the run started. */
   ref_snapshot?: RefSnapshot;
-  /** Toplevel of the caller's repository; keys the change lock. */
+  /** Toplevel of the caller's repository; keys the run lock. */
   repo?: string;
   /** Directory the agent runs in: the worktree plus the caller's offset inside the repo. */
   run_cwd?: string;
@@ -70,7 +72,7 @@ export interface RunMeta {
   permission_denials: string[];
   rate_limit?: RateLimitInfo;
   depth: number;
-  change?: string;
+  lock_key?: string;
   preset?: string;
   prompt_chars: number;
 }
@@ -98,7 +100,6 @@ export interface StartSpec {
   max_turns?: number;
   session_id: string;
   append_system_prompt: string;
-  resume?: boolean;
 }
 
 export interface Adapter {

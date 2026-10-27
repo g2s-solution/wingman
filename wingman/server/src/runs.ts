@@ -67,7 +67,7 @@ const metaSchema = z.object({
     })
     .optional(),
   depth: z.number(),
-  change: z.string().optional(),
+  lock_key: z.string().optional(),
   preset: z.string().optional(),
   prompt_chars: z.number(),
 }) satisfies z.ZodType<RunMeta>;

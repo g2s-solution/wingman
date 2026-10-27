@@ -44,7 +44,7 @@ function opts(mode: string, extra: Partial<StartRunOptions>, exports = ''): Star
     cwd: tmp('cwd'),
     parentEnv: env(),
     supervisorEntry: entry,
-    preset: 'os-apply',
+    preset: 'edit',
     sleep: () => Promise.resolve(),
     ...extra,
   };

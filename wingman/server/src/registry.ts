@@ -11,6 +11,7 @@ const accountSchema = z.object({
   config_dir: z.string().min(1),
   provider: z.string().min(1).default('claude'),
   command: z.string().min(1).default('claude'),
+  status: z.string().min(1).optional(),
 });
 
 const registrySchema = z.object({ accounts: z.array(accountSchema) });
@@ -90,4 +91,8 @@ export async function targetsFor(callerProfileDir: string): Promise<Account[]> {
     if ((await canonical(account.config_dir)) !== caller) result.push(account);
   }
   return result;
+}
+
+export function isActive(account: Account): boolean {
+  return account.status === undefined || account.status === 'active';
 }

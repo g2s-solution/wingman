@@ -4,11 +4,9 @@ import { existsSync, readFileSync, readdirSync, readlinkSync, rmSync, statSync }
 import { join } from 'node:path';
 import { runDir, worktreesDir } from '../src/paths.js';
 import { readMeta, runSummary, writeMeta } from '../src/runs.js';
-import { saveAccounts } from '../src/registry.js';
 import {
   cancelRun,
   mapOutcome,
-  sendToRun,
   startRun,
   waitForRun,
   type StartRunOptions,
@@ -66,7 +64,7 @@ function ctx(mode: string, extra: Partial<StartRunOptions> = {}, extraExports = 
     cwd: tmp('cwd'),
     parentEnv: parentEnv(),
     supervisorEntry: entry,
-    preset: 'os-apply',
+    preset: 'edit',
     ...extra,
   };
   return { log, opts };
@@ -92,7 +90,6 @@ describe('status mapping', () => {
     expect(argv[argv.indexOf('--session-id') + 1]).toBe(meta.session_id);
     expect(argv).toContain('--allowedTools');
     expect(argv).toContain('--permission-prompts');
-    expect(argv).not.toContain('--resume');
     expect(meta.rate_limit?.status).toBe('allowed');
   });
 
@@ -324,7 +321,7 @@ describe('worktree runs', () => {
     const { opts, log } = ctx('hang', {
       cwd: join(repo, 'sub'),
       worktree: true,
-      change: 'add-thing',
+      lock_key: 'add-thing',
       sleep: noSleep,
     });
     const first = await startRun(opts);
@@ -335,56 +332,9 @@ describe('worktree runs', () => {
       await new Promise((r) => setTimeout(r, 400));
       const rec = readLog(log)[0]!;
       expect(rec.cwd).toBe(join(first.worktree as string, 'sub'));
-      await expect(startRun({ ...opts, sleep: noSleep })).rejects.toThrow(/already being applied/);
+      await expect(startRun({ ...opts, sleep: noSleep })).rejects.toThrow(/already held/);
     } finally {
       await cancelRun(first.id);
-    }
-  });
-});
-
-describe('resume', () => {
-  async function registerAccount(meta: RunMeta, command: string): Promise<void> {
-    await saveAccounts({
-      accounts: [
-        {
-          id: meta.account,
-          label: 'T',
-          config_dir: join(home, 'cfg-target'),
-          provider: 'claude',
-          command,
-        },
-      ],
-    });
-  }
-
-  it('resumes the same session on the same account', async () => {
-    const { opts, log } = ctx('ok');
-    const first = await finish(await startRun(opts));
-    await registerAccount(first, opts.account.command);
-    const second = await sendToRun(first.id, 'continue', {
-      parentEnv: parentEnv(),
-      supervisorEntry: entry,
-    });
-    expect(second.id).not.toBe(first.id);
-    expect(second.session_id).toBe(first.session_id);
-    expect(second.account).toBe(first.account);
-    await finish(second);
-    const argv = readLog(log)[1]!.argv;
-    expect(argv[argv.indexOf('--resume') + 1]).toBe(first.session_id);
-    expect(argv).not.toContain('--session-id');
-  });
-
-  it('is refused for failed_no_report and for a running run', async () => {
-    const { opts } = ctx('no_result');
-    const failed = await finish(await startRun(opts));
-    expect(failed.status).toBe('failed_no_report');
-    await registerAccount(failed, opts.account.command);
-    await expect(sendToRun(failed.id, 'again')).rejects.toThrow(/cannot be continued/);
-    const running = await startRun(ctx('hang').opts);
-    try {
-      await expect(sendToRun(running.id, 'again')).rejects.toThrow(/still running/);
-    } finally {
-      await cancelRun(running.id);
     }
   });
 });
