@@ -10,7 +10,7 @@ cd wingman/wingman/server
 npm ci
 ```
 
-Node 22 or newer. Tests use a fake `claude` binary and a temporary `WINGMAN_HOME`; they never call the real CLI or touch your `~/.wingman`.
+Node 22 or newer is supported; CI runs the quality gate on Node 26 and the tests on Node 22. Tests use a fake `claude` binary and a temporary `WINGMAN_HOME`; they never call the real CLI or touch your `~/.wingman`.
 
 ## Before a pull request
 
