@@ -438,6 +438,38 @@ describe('account selection', () => {
     await expect(h.start({ prompt: 'x', cwd: tmp('cwd') })).rejects.toThrow(/No other active/);
   });
 
+  it('role swap: each profile in a shared registry only picks the other one', async () => {
+    const ok = launcher('ok');
+    const otherDir = join(home, 'cfg-main');
+    await saveAccounts({
+      accounts: [
+        { ...acct('second', callerDir), command: ok.command },
+        { ...acct('main', otherDir), command: ok.command },
+      ],
+    });
+    expect(await pick(() => 0)).toBe('main');
+    expect(await pick(() => 0.99)).toBe('main');
+    const asMain = async (): Promise<string> => {
+      const env = { ...callerEnv(), CLAUDE_CONFIG_DIR: otherDir };
+      const h = createHandlers({ env, supervisorEntry: entry, random: () => 0.99 });
+      const res = await h.start({ prompt: 'x', cwd: tmp('cwd') });
+      await settle(res.run_id as string);
+      return res.account as string;
+    };
+    expect(await asMain()).toBe('second');
+  });
+
+  it('a start inside a delegated run is refused even with another account registered', async () => {
+    const ok = launcher('ok');
+    await saveAccounts({ accounts: [{ ...acct('other', join(home, 'c1')), command: ok.command }] });
+    const env = { ...callerEnv(), WINGMAN_DEPTH: '1' };
+    const h = createHandlers({ env, supervisorEntry: entry, random: () => 0 });
+    await expect(h.start({ prompt: 'x', cwd: tmp('cwd') })).rejects.toThrow(/WINGMAN_DEPTH/);
+    await expect(h.start({ account: 'other', prompt: 'x', cwd: tmp('cwd') })).rejects.toThrow(
+      /WINGMAN_DEPTH/,
+    );
+  });
+
   it('an explicit account still works and the own profile is refused', async () => {
     const ok = launcher('ok');
     await saveAccounts({
