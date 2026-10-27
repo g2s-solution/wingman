@@ -2985,7 +2985,7 @@ var require_compile = __commonJS({
       const schOrFunc = root.refs[ref];
       if (schOrFunc)
         return schOrFunc;
-      let _sch = resolve3.call(this, root, ref);
+      let _sch = resolve4.call(this, root, ref);
       if (_sch === void 0) {
         const schema = (_a3 = root.localRefs) === null || _a3 === void 0 ? void 0 : _a3[ref];
         const { schemaId } = this.opts;
@@ -3012,7 +3012,7 @@ var require_compile = __commonJS({
     function sameSchemaEnv(s1, s2) {
       return s1.schema === s2.schema && s1.root === s2.root && s1.baseId === s2.baseId;
     }
-    function resolve3(root, ref) {
+    function resolve4(root, ref) {
       let sch;
       while (typeof (sch = this.refs[ref]) == "string")
         ref = sch;
@@ -3876,7 +3876,7 @@ var require_fast_uri = __commonJS({
       }
       return uri;
     }
-    function resolve3(baseURI, relativeURI, options) {
+    function resolve4(baseURI, relativeURI, options) {
       const schemelessOptions = options ? Object.assign({ scheme: "null" }, options) : { scheme: "null" };
       const {
         parsed: baseParsed,
@@ -4267,7 +4267,7 @@ var require_fast_uri = __commonJS({
     var fastUri = {
       SCHEMES,
       normalize,
-      resolve: resolve3,
+      resolve: resolve4,
       resolveComponent,
       equal,
       serialize,
@@ -12326,7 +12326,7 @@ var recursive = /* @__PURE__ */ new WeakMap();
 var NONE = 0;
 var ASSUMED = 1;
 var PROVEN = 2;
-function isRecursive(inst, stack, resolve3) {
+function isRecursive(inst, stack, resolve4) {
   const cached2 = recursive.get(inst);
   if (cached2 !== void 0)
     return cached2 ? PROVEN : NONE;
@@ -12336,7 +12336,7 @@ function isRecursive(inst, stack, resolve3) {
   let result = NONE;
   const check2 = (child) => {
     if (result !== PROVEN && child?._zod) {
-      const answer = isRecursive(child, stack, resolve3);
+      const answer = isRecursive(child, stack, resolve4);
       if (answer > result)
         result = answer;
     }
@@ -12347,7 +12347,7 @@ function isRecursive(inst, stack, resolve3) {
       const desc = Object.getOwnPropertyDescriptor(sh, key);
       if (spread && !desc.enumerable)
         continue;
-      const child = desc.get ? ASSUMED : desc.value?._zod ? isRecursive(desc.value, stack, resolve3) : NONE;
+      const child = desc.get ? ASSUMED : desc.value?._zod ? isRecursive(desc.value, stack, resolve4) : NONE;
       if (child > answer)
         answer = child;
     }
@@ -12411,7 +12411,7 @@ function isRecursive(inst, stack, resolve3) {
       break;
     // `$ZodLazy` caches its inner on the def, so a resolved edge is followed exactly
     case "lazy": {
-      const inner = def._cachedInner ?? (resolve3 ? inst._zod.innerType : void 0);
+      const inner = def._cachedInner ?? (resolve4 ? inst._zod.innerType : void 0);
       merge2(inner ? isRecursive(inner, stack, false) : ASSUMED);
       break;
     }
@@ -28600,12 +28600,12 @@ var StdioServerTransport = class {
     this.onclose?.();
   }
   send(message) {
-    return new Promise((resolve3) => {
+    return new Promise((resolve4) => {
       const json2 = serializeMessage(message);
       if (this._stdout.write(json2)) {
-        resolve3();
+        resolve4();
       } else {
-        this._stdout.once("drain", resolve3);
+        this._stdout.once("drain", resolve4);
       }
     });
   }
@@ -28616,7 +28616,7 @@ import { randomUUID } from "node:crypto";
 import { closeSync as closeSync3, mkdirSync as mkdirSync3, openSync as openSync3, realpathSync as realpathSync3, rmSync as rmSync3 } from "node:fs";
 import { spawn as spawn2 } from "node:child_process";
 import { createInterface } from "node:readline";
-import { relative, join as join6, isAbsolute } from "node:path";
+import { relative, join as join7, isAbsolute as isAbsolute2 } from "node:path";
 
 // src/guard.ts
 var DEFAULT_PRESET = "readonly";
@@ -28861,6 +28861,43 @@ function getAdapter(provider) {
   throw new Error(`No adapter for provider "${provider}"`);
 }
 
+// src/mask.ts
+var MASK = "[MASKED]";
+var PEM = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?-----[\s\S]*?(?:-----END [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?-----|$)/g;
+var URL_CREDENTIALS = /\b([a-z][a-z0-9+.-]{0,39}:\/\/)[^\s/]+@/gi;
+var AUTH_SCHEME = /(\bAuthorization["']?\s*[:=]\s*["']?)(Basic|Digest|Negotiate|NTLM)\s+[^\s"',;]+/gi;
+var JWT = /(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*/g;
+var BEARER = /\b(Bearer)\s+[A-Za-z0-9._~+/=-]+/gi;
+var KEY_SHAPES = [
+  /\bsk-[A-Za-z0-9_-]{16,}/g,
+  /\bgithub_pat_[A-Za-z0-9_]{16,}/g,
+  /\bgh[pousr]_[A-Za-z0-9]{16,}/g,
+  /\bglpat-[A-Za-z0-9_-]{16,}/g,
+  /\bxox[baprs]-[A-Za-z0-9-]{10,}/g,
+  /\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g
+];
+var ASSIGNMENT = /((?:password|passwd|secret|token|api[_-]?key|credentials?|private[_-]?key|(?<![A-Za-z])auth(?![A-Za-z]))[A-Za-z0-9_.-]{0,128})(["']?\s*[:=]\s*)("[^"\n]*"|'[^'\n]*'|[^\s"',;&}]+)/gi;
+function maskSecrets(text) {
+  let out = text.replace(PEM, MASK);
+  out = out.replace(URL_CREDENTIALS, `$1${MASK}@`);
+  out = out.replace(AUTH_SCHEME, `$1$2 ${MASK}`);
+  out = out.replace(JWT, MASK);
+  out = out.replace(BEARER, `$1 ${MASK}`);
+  for (const re of KEY_SHAPES) out = out.replace(re, MASK);
+  out = out.replace(ASSIGNMENT, (_m, key, sep, value) => {
+    const quote = value[0] === '"' || value[0] === "'" ? value[0] : "";
+    return `${key}${sep}${quote}${MASK}${quote}`;
+  });
+  return out;
+}
+function capText(text, max) {
+  if (text.length <= max) return text;
+  return `${text.slice(0, max)}\u2026 [truncated ${text.length - max} chars]`;
+}
+function safeSummary(text, max = 4e3) {
+  return capText(maskSecrets(text), max);
+}
+
 // src/paths.ts
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -28891,43 +28928,6 @@ import {
   appendFileSync
 } from "node:fs";
 import { join as join2 } from "node:path";
-
-// src/mask.ts
-var MASK = "[MASKED]";
-var PEM = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?-----[\s\S]*?(?:-----END [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?-----|$)/g;
-var URL_CREDENTIALS = /\b([a-z][a-z0-9+.-]*:\/\/)[^\s/]+@/gi;
-var AUTH_SCHEME = /(\bAuthorization["']?\s*[:=]\s*["']?)(Basic|Digest|Negotiate|NTLM)\s+[^\s"',;]+/gi;
-var JWT = /\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*/g;
-var BEARER = /\b(Bearer)\s+[A-Za-z0-9._~+/=-]+/gi;
-var KEY_SHAPES = [
-  /\bsk-[A-Za-z0-9_-]{16,}/g,
-  /\bgithub_pat_[A-Za-z0-9_]{16,}/g,
-  /\bgh[pousr]_[A-Za-z0-9]{16,}/g,
-  /\bglpat-[A-Za-z0-9_-]{16,}/g,
-  /\bxox[baprs]-[A-Za-z0-9-]{10,}/g,
-  /\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g
-];
-var ASSIGNMENT = /([A-Za-z0-9_.-]*(?:password|passwd|secret|token|api[_-]?key|credentials?|private[_-]?key|(?<![A-Za-z])auth(?![A-Za-z]))[A-Za-z0-9_.-]*)(["']?\s*[:=]\s*)("[^"\n]*"|'[^'\n]*'|[^\s"',;&}]+)/gi;
-function maskSecrets(text) {
-  let out = text.replace(PEM, MASK);
-  out = out.replace(URL_CREDENTIALS, `$1${MASK}@`);
-  out = out.replace(AUTH_SCHEME, `$1$2 ${MASK}`);
-  out = out.replace(JWT, MASK);
-  out = out.replace(BEARER, `$1 ${MASK}`);
-  for (const re of KEY_SHAPES) out = out.replace(re, MASK);
-  out = out.replace(ASSIGNMENT, (_m, key, sep, value) => {
-    const quote = value[0] === '"' || value[0] === "'" ? value[0] : "";
-    return `${key}${sep}${quote}${MASK}${quote}`;
-  });
-  return out;
-}
-function capText(text, max) {
-  if (text.length <= max) return text;
-  return `${text.slice(0, max)}\u2026 [truncated ${text.length - max} chars]`;
-}
-function safeSummary(text, max = 4e3) {
-  return capText(maskSecrets(text), max);
-}
 
 // src/types.ts
 var TERMINAL_STATUSES = [
@@ -28964,7 +28964,12 @@ var metaSchema = external_exports.object({
   branch: external_exports.string().optional(),
   run_branch: external_exports.string().optional(),
   worktree: external_exports.string().optional(),
-  ref_snapshot: external_exports.object({ refs: external_exports.array(external_exports.string()), refs_hash: external_exports.string(), config_hash: external_exports.string() }).optional(),
+  ref_snapshot: external_exports.object({
+    refs: external_exports.array(external_exports.string()),
+    refs_hash: external_exports.string(),
+    config_hash: external_exports.string(),
+    hooks_hash: external_exports.string().optional()
+  }).optional(),
   repo: external_exports.string().optional(),
   run_cwd: external_exports.string().optional(),
   session_id: external_exports.string(),
@@ -29136,7 +29141,9 @@ function runSummary(id, page = {}) {
     const start = Math.min(Math.max(page.offset ?? 0, 0), masked.length);
     let end = Math.min(start + limit, masked.length);
     const last = masked.charCodeAt(end - 1);
-    if (end < masked.length && end > start && last >= 55296 && last <= 56319) end -= 1;
+    if (end < masked.length && end > start && last >= 55296 && last <= 56319) {
+      end = end - 1 > start ? end - 1 : end + 1;
+    }
     summary.result = masked.slice(start, end);
     summary.result_total_chars = masked.length;
     summary.result_offset = start;
@@ -29277,6 +29284,8 @@ function assertCanStart(env = process.env, limit = 1) {
 
 // src/snapshot.ts
 import { createHash as createHash2 } from "node:crypto";
+import { existsSync as existsSync4, readFileSync as readFileSync4, readdirSync as readdirSync4, statSync } from "node:fs";
+import { isAbsolute, join as join6, resolve as resolve2 } from "node:path";
 
 // src/worktree.ts
 import { spawn } from "node:child_process";
@@ -29297,10 +29306,9 @@ import {
 } from "node:fs";
 import { join as join5 } from "node:path";
 var PROXY_VARS = ["HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"];
-var FETCH_ATTEMPTS = 5;
 var TIMED_OUT = 124;
 var MAX_OUTPUT = 16 * 1024 * 1024;
-var defaultExec = (file2, args, { cwd, env, timeoutMs }) => new Promise((resolve3) => {
+var defaultExec = (file2, args, { cwd, env, timeoutMs }) => new Promise((resolve4) => {
   let stdout = "";
   let stderr = "";
   let timedOut = false;
@@ -29320,7 +29328,7 @@ var defaultExec = (file2, args, { cwd, env, timeoutMs }) => new Promise((resolve
     if (hardStop) clearTimeout(hardStop);
     if (timedOut) stderr = `${stderr}
 timed out after ${timeoutMs}ms`.trim();
-    resolve3({ code: timedOut ? TIMED_OUT : code, stdout, stderr });
+    resolve4({ code: timedOut ? TIMED_OUT : code, stdout, stderr });
   };
   child.stdout?.on("data", (d) => {
     if (stdout.length < MAX_OUTPUT) stdout += d.toString("utf8");
@@ -29345,7 +29353,6 @@ timed out after ${timeoutMs}ms`.trim();
     }, timeoutMs);
   }
 });
-var DEFAULT_FETCH_TIMEOUT_MS = 12e4;
 var DEFAULT_ADD_TIMEOUT_MS = 6e4;
 var DEFAULT_SETUP_TIMEOUT_MS = 6e5;
 var START_BUDGET_MS = 15 * 60 * 1e3;
@@ -29369,7 +29376,7 @@ function readLock(path) {
     return void 0;
   }
 }
-function acquireLock(path, info, ownedBy) {
+function acquireLock(path, info) {
   mkdirSync2(locksDir(), { recursive: true, mode: 448 });
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
@@ -29383,7 +29390,7 @@ function acquireLock(path, info, ownedBy) {
     } catch (err) {
       if (err.code !== "EEXIST") throw err;
       const held = readLock(path);
-      if (held && held.run_id !== ownedBy && isSameProcess(held.pid, held.start_time)) {
+      if (held && isSameProcess(held.pid, held.start_time)) {
         throw new Error(
           `Lock key "${info.lock_key}" is already held by run ${held.run_id} (pid ${held.pid})`,
           { cause: err }
@@ -29418,7 +29425,14 @@ function setLockOwner(lockPath, pid) {
   const startTime = readStartTime(pid);
   if (startTime !== void 0) next.start_time = startTime;
   else delete next.start_time;
-  writeFileSync2(lockPath, JSON.stringify(next), { mode: 384 });
+  const tmp = `${lockPath}.${randomBytes2(4).toString("hex")}.tmp`;
+  try {
+    writeFileSync2(tmp, JSON.stringify(next), { mode: 384 });
+    renameSync2(tmp, lockPath);
+  } catch (err) {
+    rmSync2(tmp, { force: true });
+    throw err;
+  }
 }
 function releaseLocksOf(runId) {
   if (!existsSync3(locksDir())) return;
@@ -29427,30 +29441,14 @@ function releaseLocksOf(runId) {
     if (readLock(path)?.run_id === runId) rmSync2(path, { force: true });
   }
 }
-async function withRetry(exec, sleep, file2, args, opts, deadline) {
-  const attemptOpts = () => {
-    if (deadline === void 0) return opts;
+async function execWithinBudget(exec, args, opts, deadline) {
+  let timeoutMs = opts.timeoutMs;
+  if (deadline !== void 0) {
     const left = deadline - Date.now();
-    if (left <= 0) return void 0;
-    return { ...opts, timeoutMs: Math.min(opts.timeoutMs ?? left, left) };
-  };
-  const budgetGone = {
-    code: TIMED_OUT,
-    stdout: "",
-    stderr: "start budget exhausted"
-  };
-  const first = attemptOpts();
-  if (!first) return budgetGone;
-  let result = await exec(file2, args, first);
-  for (let attempt = 1; attempt < FETCH_ATTEMPTS && result.code !== 0; attempt++) {
-    if (!`${result.stdout}
-${result.stderr}`.includes("503")) break;
-    await sleep(2e3);
-    const next = attemptOpts();
-    if (!next) break;
-    result = await exec(file2, args, next);
+    if (left <= 0) return { code: TIMED_OUT, stdout: "", stderr: "start budget exhausted" };
+    timeoutMs = Math.min(timeoutMs, left);
   }
-  return result;
+  return exec("git", args, { ...opts, timeoutMs });
 }
 async function baseBranches(exec, cwd, env) {
   const names = ["main", "master"];
@@ -29463,7 +29461,6 @@ async function baseBranches(exec, cwd, env) {
 }
 async function createWorktree(opts) {
   const exec = opts.exec ?? defaultExec;
-  const sleep = opts.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
   const env = withoutProxy(opts.env ?? process.env);
   const { repo, callerBranch, runId } = opts;
   if (!callerBranch || callerBranch === "HEAD") {
@@ -29484,38 +29481,20 @@ async function createWorktree(opts) {
     acquireLock(lockPath, info);
   }
   try {
-    const warnings = [];
-    const fetched = await withRetry(
-      exec,
-      sleep,
-      "git",
-      ["fetch", "origin"],
-      {
-        cwd: repo,
-        env,
-        timeoutMs: opts.fetchTimeoutMs ?? DEFAULT_FETCH_TIMEOUT_MS
-      },
-      opts.deadline
-    );
-    if (fetched.code !== 0) {
-      warnings.push(`git fetch failed (code ${fetched.code}); worktree cut from local HEAD`);
-    }
     mkdirSync2(worktreesDir(), { recursive: true, mode: 448 });
     chmodSync2(worktreesDir(), 448);
     const path = join5(worktreesDir(), runId);
     const branch = opts.createBranch === false ? void 0 : fromBase ? `wingman/${runId}` : `${callerBranch}-wm-${runId}`;
-    const added = await withRetry(
+    const added = await execWithinBudget(
       exec,
-      sleep,
-      "git",
       branch === void 0 ? ["worktree", "add", "--detach", path, "HEAD"] : ["worktree", "add", "-b", branch, path, "HEAD"],
       { cwd: repo, env, timeoutMs: opts.addTimeoutMs ?? DEFAULT_ADD_TIMEOUT_MS },
       opts.deadline
     );
     if (added.code !== 0) {
-      throw new Error(`git worktree add failed: ${added.stderr.trim().slice(0, 500)}`);
+      throw new Error(`git worktree add failed: ${safeSummary(added.stderr.trim(), 500)}`);
     }
-    const info = { path, warnings };
+    const info = { path };
     if (branch !== void 0) info.branch = branch;
     if (lockPath) info.lockPath = lockPath;
     return info;
@@ -29527,7 +29506,8 @@ async function createWorktree(opts) {
 async function runSetup(worktree, command, env = process.env, timeoutMs = DEFAULT_SETUP_TIMEOUT_MS) {
   if (!command) return { ok: true, output: "" };
   const result = await defaultExec("sh", ["-c", command], { cwd: worktree, env, timeoutMs });
-  return { ok: result.code === 0, output: `${result.stdout}${result.stderr}`.slice(-2e3) };
+  const output2 = maskSecrets(`${result.stdout}${result.stderr}`).slice(-2e3);
+  return { ok: result.code === 0, output: output2 };
 }
 function activeUsersOf(worktree, exceptRunId) {
   return listRuns().filter((m) => m.id !== exceptRunId && m.worktree === worktree).map((m) => reconcile(m)).filter((m) => !TERMINAL_STATUSES.includes(m.status));
@@ -29606,6 +29586,22 @@ async function git(exec, repo, args) {
   });
   return res.code === 0 ? res.stdout : void 0;
 }
+function hashHooks(hooksDir) {
+  if (!existsSync4(hooksDir)) return sha("");
+  const lines = [];
+  for (const name of readdirSync4(hooksDir).sort()) {
+    if (name.endsWith(".sample")) continue;
+    try {
+      const path = join6(hooksDir, name);
+      if (!statSync(path).isFile()) continue;
+      const content = readFileSync4(path);
+      lines.push(`${name} ${content.length} ${createHash2("sha256").update(content).digest("hex")}`);
+    } catch {
+      lines.push(`${name} unreadable`);
+    }
+  }
+  return sha(lines.join("\n"));
+}
 async function observe(exec, repo, refs) {
   const listed = await git(exec, repo, [
     "for-each-ref",
@@ -29613,8 +29609,11 @@ async function observe(exec, repo, refs) {
     ...refs
   ]);
   const config2 = await git(exec, repo, ["config", "--local", "--list"]);
-  if (listed === void 0 || config2 === void 0) return void 0;
-  return { refs_hash: sha(listed), config_hash: sha(config2) };
+  const common = await git(exec, repo, ["rev-parse", "--git-common-dir"]);
+  if (listed === void 0 || config2 === void 0 || common === void 0) return void 0;
+  const commonDir = common.trim();
+  const hooksDir = join6(isAbsolute(commonDir) ? commonDir : resolve2(repo, commonDir), "hooks");
+  return { refs_hash: sha(listed), config_hash: sha(config2), hooks_hash: hashHooks(hooksDir) };
 }
 async function takeSnapshot(exec, repo, callerBranch) {
   const names = /* @__PURE__ */ new Set([...await baseBranches(exec, repo, process.env), callerBranch]);
@@ -29628,6 +29627,9 @@ async function changedSince(exec, repo, snapshot) {
   const changed = [];
   if (seen.refs_hash !== snapshot.refs_hash) changed.push("refs");
   if (seen.config_hash !== snapshot.config_hash) changed.push("config");
+  if (snapshot.hooks_hash !== void 0 && seen.hooks_hash !== snapshot.hooks_hash) {
+    changed.push("hooks");
+  }
   return changed;
 }
 
@@ -29677,8 +29679,13 @@ function mapOutcome(input2) {
   return { status: parseStatusLine(text) ?? "needs_input", text };
 }
 var CLEAN_STATUSES = ["done", "partial", "blocked", "needs_input"];
+var CHANGE_NOTES = {
+  refs: "the base branch or caller branch ref",
+  config: "the local git config",
+  hooks: "the git hooks directory"
+};
 function flagGuardrail(outcome, changed) {
-  const what = changed.map((c) => c === "refs" ? "the base branch or caller branch ref" : "the local git config").join(" and ");
+  const what = changed.map((c) => CHANGE_NOTES[c]).join(" and ");
   const note = `[wingman] guardrail: ${what} changed while this run was active (the run, or you, moved it). Review with git before trusting this result.`;
   return {
     status: CLEAN_STATUSES.includes(outcome.status) ? "needs_caller" : outcome.status,
@@ -29747,12 +29754,12 @@ async function runSupervisor(runId) {
   child.on("error", (err) => {
     spawnError = err.message;
   });
-  const end = await new Promise((resolve3) => {
+  const end = await new Promise((resolve4) => {
     let settled = false;
     const settle2 = (code, signal) => {
       if (settled) return;
       settled = true;
-      resolve3({ code, signal });
+      resolve4({ code, signal });
     };
     child.on("close", (code, signal) => settle2(code, signal));
     child.on("exit", (code, signal) => {
@@ -29831,7 +29838,7 @@ async function gitOut(exec, cwd, args) {
 function launchSupervisor(meta3, payload, env, entry) {
   const dir = runDir(meta3.id);
   mkdirSync3(dir, { recursive: true, mode: 448 });
-  const fd = openSync3(join6(dir, "events.jsonl"), "a", 384);
+  const fd = openSync3(join7(dir, "events.jsonl"), "a", 384);
   let child;
   try {
     child = spawn2(process.execPath, [entry, "--supervise", meta3.id], {
@@ -29930,14 +29937,12 @@ async function startRun(opts) {
         deadline,
         createBranch: opts.create_branch ?? mayCommit,
         ...opts.lock_key !== void 0 ? { lock_key: opts.lock_key } : {},
-        ...opts.sleep ? { sleep: opts.sleep } : {},
-        ...opts.fetch_timeout_ms !== void 0 ? { fetchTimeoutMs: opts.fetch_timeout_ms } : {},
         ...opts.worktree_timeout_ms !== void 0 ? { addTimeoutMs: opts.worktree_timeout_ms } : {}
       });
       lockPath = wt.lockPath;
       meta3.worktree = wt.path;
       if (wt.branch !== void 0) meta3.run_branch = wt.branch;
-      runCwd = offset ? join6(wt.path, offset) : wt.path;
+      runCwd = offset ? join7(wt.path, offset) : wt.path;
       meta3.run_cwd = runCwd;
       patchRunning(meta3.id, {
         worktree: wt.path,
@@ -29953,8 +29958,11 @@ async function startRun(opts) {
           adapter.buildEnv(parentEnv, opts.account, depth),
           Math.min(opts.setup_timeout_ms ?? DEFAULT_SETUP_TIMEOUT_MS, left)
         );
-        if (!setup.ok)
-          throw new Error(`Worktree setup command failed: ${setup.output.slice(-300)}`);
+        if (!setup.ok) {
+          throw new Error(
+            `Worktree setup command failed: ${maskSecrets(setup.output).slice(-300)}`
+          );
+        }
       }
     }
   } catch (err) {
@@ -29987,7 +29995,7 @@ async function startRun(opts) {
 }
 function offsetInRepo(repo, cwd) {
   const rel = relative(realpathSync3(repo), realpathSync3(cwd));
-  if (rel === ".." || rel.startsWith("../") || isAbsolute(rel)) {
+  if (rel === ".." || rel.startsWith("../") || isAbsolute2(rel)) {
     throw new Error("cwd resolves outside its git repository");
   }
   return rel;
@@ -30004,8 +30012,19 @@ async function discardStart(meta3, exec) {
     }
     await removeWorktree(meta3.id, exec).catch(() => void 0);
   }
+  await deleteRunBranch(meta3, exec);
   releaseLocksOf(meta3.id);
   rmSync3(runDir(meta3.id), { recursive: true, force: true });
+}
+async function deleteRunBranch(meta3, exec) {
+  const branch = meta3.run_branch;
+  if (!branch || !meta3.repo) return;
+  if (branch !== `wingman/${meta3.id}` && !branch.endsWith(`-wm-${meta3.id}`)) return;
+  await exec("git", ["branch", "-D", branch], {
+    cwd: meta3.repo,
+    env: withoutProxy(process.env),
+    timeoutMs: DEFAULT_ADD_TIMEOUT_MS
+  }).catch(() => void 0);
 }
 function spawnRun(meta3, opts, adapter, spec, depth, parentEnv, lockPath) {
   const { command, args } = adapter.buildCommand(opts.account, spec);
@@ -30077,8 +30096,8 @@ async function cancelRun(runId) {
 
 // src/tools.ts
 import { execFile } from "node:child_process";
-import { existsSync as existsSync4, statSync } from "node:fs";
-import { isAbsolute as isAbsolute2 } from "node:path";
+import { existsSync as existsSync5, statSync as statSync2 } from "node:fs";
+import { isAbsolute as isAbsolute3 } from "node:path";
 
 // node_modules/zod/v3/helpers/util.js
 var util;
@@ -36054,7 +36073,7 @@ var Protocol = class {
           return;
         }
         const pollInterval = task2.pollInterval ?? this._options?.defaultTaskPollInterval ?? 1e3;
-        await new Promise((resolve3) => setTimeout(resolve3, pollInterval));
+        await new Promise((resolve4) => setTimeout(resolve4, pollInterval));
         options?.signal?.throwIfAborted();
       }
     } catch (error62) {
@@ -36071,7 +36090,7 @@ var Protocol = class {
    */
   request(request, resultSchema, options) {
     const { relatedRequestId, resumptionToken, onresumptiontoken, task, relatedTask } = options ?? {};
-    return new Promise((resolve3, reject) => {
+    return new Promise((resolve4, reject) => {
       const earlyReject = (error62) => {
         reject(error62);
       };
@@ -36149,7 +36168,7 @@ var Protocol = class {
           if (!parseResult.success) {
             reject(parseResult.error);
           } else {
-            resolve3(parseResult.data);
+            resolve4(parseResult.data);
           }
         } catch (error62) {
           reject(error62);
@@ -36411,12 +36430,12 @@ var Protocol = class {
       }
     } catch {
     }
-    return new Promise((resolve3, reject) => {
+    return new Promise((resolve4, reject) => {
       if (signal.aborted) {
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
         return;
       }
-      const timeoutId = setTimeout(resolve3, interval);
+      const timeoutId = setTimeout(resolve4, interval);
       signal.addEventListener("abort", () => {
         clearTimeout(timeoutId);
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
@@ -37556,7 +37575,7 @@ var McpServer = class {
     let task = createTaskResult.task;
     const pollInterval = task.pollInterval ?? 5e3;
     while (task.status !== "completed" && task.status !== "failed" && task.status !== "cancelled") {
-      await new Promise((resolve3) => setTimeout(resolve3, pollInterval));
+      await new Promise((resolve4) => setTimeout(resolve4, pollInterval));
       const updatedTask = await extra.taskStore.getTask(taskId);
       if (!updatedTask) {
         throw new McpError(ErrorCode.InternalError, `Task ${taskId} not found during polling`);
@@ -38124,10 +38143,45 @@ var EMPTY_COMPLETION_RESULT = {
   }
 };
 
+// package.json
+var package_default = {
+  name: "wingman-server",
+  version: "0.1.1",
+  private: true,
+  type: "module",
+  engines: {
+    node: ">=22"
+  },
+  scripts: {
+    build: "node esbuild.config.mjs",
+    test: "vitest run",
+    coverage: "vitest run --coverage",
+    lint: "eslint .",
+    format: "prettier --check .",
+    typecheck: "tsc --noEmit",
+    check: "npm run typecheck && npm run lint && npm run format && npm run build && npm test"
+  },
+  dependencies: {
+    "@modelcontextprotocol/sdk": "1.32.2",
+    zod: "4.6.7"
+  },
+  devDependencies: {
+    "@eslint/js": "10.0.1",
+    "@types/node": "22.20.5",
+    "@vitest/coverage-v8": "5.0.5",
+    esbuild: "0.28.2",
+    eslint: "10.13.0",
+    prettier: "3.9.10",
+    typescript: "6.0.3",
+    "typescript-eslint": "8.72.1",
+    vitest: "5.0.5"
+  }
+};
+
 // src/registry.ts
 import { randomBytes as randomBytes3 } from "node:crypto";
 import { chmod, mkdir, realpath, rename, writeFile, readFile, unlink } from "node:fs/promises";
-import { dirname, resolve as resolve2 } from "node:path";
+import { dirname, resolve as resolve3 } from "node:path";
 var accountSchema = external_exports.object({
   id: external_exports.string().min(1),
   label: external_exports.string().min(1),
@@ -38192,7 +38246,7 @@ async function canonical2(dir) {
   try {
     return await realpath(dir);
   } catch {
-    return resolve2(dir);
+    return resolve3(dir);
   }
 }
 async function targetsFor(callerProfileDir) {
@@ -38237,12 +38291,12 @@ function loadMeta(runId) {
   return reconcile(meta3);
 }
 function currentBranch(cwd) {
-  return new Promise((resolve3) => {
+  return new Promise((resolve4) => {
     execFile(
       "git",
       ["rev-parse", "--abbrev-ref", "HEAD"],
       { cwd, timeout: GIT_TIMEOUT_MS },
-      (err, stdout) => resolve3(err ? void 0 : stdout.trim() || void 0)
+      (err, stdout) => resolve4(err ? void 0 : stdout.trim() || void 0)
     );
   });
 }
@@ -38298,7 +38352,7 @@ function createHandlers(deps = {}) {
   return {
     async start(input2) {
       const account = await chooseAccount(env, input2.account, random);
-      if (!isAbsolute2(input2.cwd) || !statSync(input2.cwd, { throwIfNoEntry: false })?.isDirectory()) {
+      if (!isAbsolute3(input2.cwd) || !statSync2(input2.cwd, { throwIfNoEntry: false })?.isDirectory()) {
         throw new Error("cwd must be an absolute path of an existing directory");
       }
       const branch = await currentBranch(input2.cwd);
@@ -38369,7 +38423,7 @@ function createHandlers(deps = {}) {
       if (meta3.status === "running") {
         throw new Error(`Run ${meta3.id} is still running; cancel it before cleanup`);
       }
-      if (input2.action !== "discard" && meta3.worktree !== void 0 && existsSync4(meta3.worktree) && await worktreeDirty(meta3.worktree)) {
+      if (input2.action !== "discard" && meta3.worktree !== void 0 && existsSync5(meta3.worktree) && await worktreeDirty(meta3.worktree)) {
         throw new Error(
           `The worktree of run ${meta3.id} has uncommitted changes; commit or copy them, or call wingman_cleanup with action "discard" to drop them`
         );
@@ -38386,7 +38440,7 @@ function createHandlers(deps = {}) {
 }
 var LOGS_WARNING = "Never read run logs or events.jsonl; use only the output of these tools.";
 function buildServer(deps = {}) {
-  const server = new McpServer({ name: "wingman", version: "0.1.0" });
+  const server = new McpServer({ name: "wingman", version: package_default.version });
   const h = createHandlers(deps);
   const wrap = (fn) => async (args) => {
     try {
@@ -38398,7 +38452,7 @@ function buildServer(deps = {}) {
   server.registerTool(
     "wingman_start",
     {
-      description: `Start a one-shot detached run of Claude Code on another registered account (random active one when account is omitted); to give more work, start a new run. Returns run_id, account and status only. ${LOGS_WARNING}`,
+      description: `Start a one-shot detached run of Claude Code on another registered account (random active one when account is omitted); to give more work, start a new run. Returns run_id, account and status only. The preset "edit" runs arbitrary code under the target account and the deny rules are advisory, not a sandbox; "setup" is an arbitrary shell command run as the caller's user, outside the presets. ${LOGS_WARNING}`,
       inputSchema: startInput
     },
     wrap(h.start)

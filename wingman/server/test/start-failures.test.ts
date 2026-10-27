@@ -29,7 +29,6 @@ let entry: string;
 let home: string;
 let saved: string | undefined;
 const env = (): NodeJS.ProcessEnv => ({ PATH: process.env.PATH, HOME: process.env.HOME });
-const noSleep = (): Promise<void> => Promise.resolve();
 
 beforeAll(async () => {
   work = tmp('bundle');
@@ -60,7 +59,6 @@ function startOpts(command: string, extra: Partial<StartRunOptions>): StartRunOp
     parentEnv: env(),
     supervisorEntry: entry,
     preset: 'edit',
-    sleep: noSleep,
     ...extra,
   };
 }
@@ -194,6 +192,59 @@ describe('timeouts and clean failed starts (M6, L3)', () => {
   });
 });
 
+describe('failed start cleanup', () => {
+  const branches = (repo: string): string[] =>
+    git(repo, 'branch', '--format=%(refname:short)').split('\n').sort();
+
+  it('a failed setup deletes the new run branch and no other branch', async () => {
+    const repo = makeRepo('main');
+    git(repo, 'switch', '-q', '-c', 'feat/own');
+    git(repo, 'branch', 'feat/own-wm-other');
+    const before = branches(repo);
+    await expect(
+      startRun(startOpts(launcher('ok').command, { cwd: repo, worktree: true, setup: 'exit 3' })),
+    ).rejects.toThrow(/setup command failed/);
+    expect(branches(repo)).toEqual(before);
+  });
+
+  it('a failed spawn deletes the new run branch', async () => {
+    const repo = makeRepo('main');
+    const before = branches(repo);
+    await expect(
+      startRun(
+        startOpts(launcher('ok').command, { cwd: repo, worktree: true, supervisorEntry: '' }),
+      ),
+    ).rejects.toThrow(/supervisor/i);
+    expect(branches(repo)).toEqual(before);
+  });
+
+  it('the setup error never shows a token that straddles the 300 char cut', async () => {
+    const repo = makeRepo('main');
+    git(repo, 'switch', '-q', '-c', 'feat/mask');
+    const secret = ['gh', 'p_', 'Q1'.repeat(18)].join('');
+    // the token starts 310 chars from the end of the output: slice(-300) would keep its tail only
+    const output = `${'w'.repeat(400)} ${secret} ${'v'.repeat(309 - secret.length)}`;
+    const err = await startRun(
+      startOpts(launcher('ok').command, {
+        cwd: repo,
+        worktree: true,
+        setup: `printf '%s' '${output}'; exit 3`,
+      }),
+    ).catch((e: Error) => e);
+    expect((err as Error).message).toMatch(/setup command failed/);
+    expect((err as Error).message).not.toContain('Q1Q1');
+  });
+
+  it('runSetup masks the whole output before keeping its tail', async () => {
+    const secret = ['gh', 'p_', 'Q1'.repeat(18)].join('');
+    // the token starts 2010 chars from the end: slice(-2000) alone would keep its tail only
+    const output = `${secret} ${'w'.repeat(2009 - secret.length)}`;
+    const res = await runSetup(tmp('x'), `printf '%s' '${output}'`, env());
+    expect(res.output).not.toContain('Q1Q1');
+    expect(res.output.length).toBeLessThanOrEqual(2000);
+  });
+});
+
 describe('uncommitted changes (L4)', () => {
   it('cleanup refuses accept on a dirty worktree, allows discard; prune skips it', async () => {
     const { first } = await finishedWorktreeRun();
@@ -223,7 +274,7 @@ describe('start budget and terminal runs', () => {
     expect(START_BUDGET_MS).toBeLessThan(DEFAULT_NO_PID_GRACE_MS);
   });
 
-  it('git steps and setup are cut to the remaining start budget', async () => {
+  it('worktree add and setup are cut to the remaining start budget, and nothing fetches', async () => {
     const repo = makeRepo('main');
     git(repo, 'switch', '-q', '-c', 'feat/b');
     const seen: Record<string, number | undefined> = {};
@@ -244,7 +295,7 @@ describe('start budget and terminal runs', () => {
         }),
       ),
     ).rejects.toThrow(/setup command failed|start budget/);
-    expect(seen.fetch).toBeLessThanOrEqual(1500);
+    expect(seen.fetch).toBeUndefined();
     expect(seen.add).toBeLessThanOrEqual(1500);
     expect(Date.now() - started).toBeLessThan(10000);
     expect(readdirSync(join(home, 'runs'))).toEqual([]);

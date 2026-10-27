@@ -15,6 +15,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
+import { maskSecrets, safeSummary } from './mask.js';
 import { runDir, wingmanHome, worktreesDir } from './paths.js';
 import { groupMembers, isAlive, isSameProcess, readStartTime } from './proc.js';
 import { reconcile } from './reconcile.js';
@@ -24,7 +25,6 @@ import { TERMINAL_STATUSES, type RunMeta } from './types.js';
 export { isAlive, isSameProcess, readStartTime };
 
 const PROXY_VARS = ['HTTPS_PROXY', 'https_proxy', 'HTTP_PROXY', 'http_proxy'];
-const FETCH_ATTEMPTS = 5;
 
 export interface ExecResult {
   code: number;
@@ -99,20 +99,16 @@ export interface CreateWorktreeOptions {
   /** Create a run branch (default). False gives a detached worktree for runs that never commit. */
   createBranch?: boolean;
   exec?: ExecFn;
-  sleep?: (ms: number) => Promise<void>;
   env?: NodeJS.ProcessEnv;
-  /** Per attempt; default 120s. */
-  fetchTimeoutMs?: number;
   /** Default 60s. */
   addTimeoutMs?: number;
-  /** Epoch ms by which the start phase must be over; later attempts are cut short or skipped. */
+  /** Epoch ms by which the start phase must be over; `git worktree add` is cut short or skipped. */
   deadline?: number;
 }
 
-export const DEFAULT_FETCH_TIMEOUT_MS = 120_000;
 export const DEFAULT_ADD_TIMEOUT_MS = 60_000;
 export const DEFAULT_SETUP_TIMEOUT_MS = 600_000;
-/** Cap on the whole start phase (fetch, worktree add, setup); reconcile's no-pid grace is longer. */
+/** Cap on the whole start phase (worktree add, setup); reconcile's no-pid grace is longer. */
 export const START_BUDGET_MS = 15 * 60 * 1000;
 
 export interface WorktreeInfo {
@@ -120,7 +116,6 @@ export interface WorktreeInfo {
   /** Absent for a detached worktree. */
   branch?: string;
   lockPath?: string;
-  warnings: string[];
 }
 
 export interface LockInfo {
@@ -161,7 +156,7 @@ function readLock(path: string): LockInfo | undefined {
  * Creates the lock with O_EXCL. A stale lock is reclaimed by renaming it to a unique name first,
  * so of several reclaimers only the one whose rename succeeds goes on to create the new lock.
  */
-export function acquireLock(path: string, info: LockInfo, ownedBy?: string): void {
+export function acquireLock(path: string, info: LockInfo): void {
   mkdirSync(locksDir(), { recursive: true, mode: 0o700 });
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
@@ -175,7 +170,7 @@ export function acquireLock(path: string, info: LockInfo, ownedBy?: string): voi
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
       const held = readLock(path);
-      if (held && held.run_id !== ownedBy && isSameProcess(held.pid, held.start_time)) {
+      if (held && isSameProcess(held.pid, held.start_time)) {
         throw new Error(
           `Lock key "${info.lock_key}" is already held by run ${held.run_id} (pid ${held.pid})`,
           { cause: err },
@@ -213,7 +208,15 @@ export function setLockOwner(lockPath: string, pid: number): void {
   const startTime = readStartTime(pid);
   if (startTime !== undefined) next.start_time = startTime;
   else delete next.start_time;
-  writeFileSync(lockPath, JSON.stringify(next), { mode: 0o600 });
+  // rename keeps a concurrent reclaimer from ever reading a half-written lock
+  const tmp = `${lockPath}.${randomBytes(4).toString('hex')}.tmp`;
+  try {
+    writeFileSync(tmp, JSON.stringify(next), { mode: 0o600 });
+    renameSync(tmp, lockPath);
+  } catch (err) {
+    rmSync(tmp, { force: true });
+    throw err;
+  }
 }
 
 export function releaseLocksOf(runId: string): void {
@@ -224,36 +227,20 @@ export function releaseLocksOf(runId: string): void {
   }
 }
 
-async function withRetry(
+/** Runs `git` under the start budget: each call gets at most the time left, none once it is gone. */
+async function execWithinBudget(
   exec: ExecFn,
-  sleep: (ms: number) => Promise<void>,
-  file: string,
   args: string[],
-  opts: { cwd: string; env: NodeJS.ProcessEnv; timeoutMs?: number },
+  opts: { cwd: string; env: NodeJS.ProcessEnv; timeoutMs: number },
   deadline?: number,
 ): Promise<ExecResult> {
-  const attemptOpts = (): typeof opts | undefined => {
-    if (deadline === undefined) return opts;
+  let timeoutMs = opts.timeoutMs;
+  if (deadline !== undefined) {
     const left = deadline - Date.now();
-    if (left <= 0) return undefined;
-    return { ...opts, timeoutMs: Math.min(opts.timeoutMs ?? left, left) };
-  };
-  const budgetGone: ExecResult = {
-    code: TIMED_OUT,
-    stdout: '',
-    stderr: 'start budget exhausted',
-  };
-  const first = attemptOpts();
-  if (!first) return budgetGone;
-  let result = await exec(file, args, first);
-  for (let attempt = 1; attempt < FETCH_ATTEMPTS && result.code !== 0; attempt++) {
-    if (!`${result.stdout}\n${result.stderr}`.includes('503')) break;
-    await sleep(2000);
-    const next = attemptOpts();
-    if (!next) break;
-    result = await exec(file, args, next);
+    if (left <= 0) return { code: TIMED_OUT, stdout: '', stderr: 'start budget exhausted' };
+    timeoutMs = Math.min(timeoutMs, left);
   }
-  return result;
+  return exec('git', args, { ...opts, timeoutMs });
 }
 
 export async function baseBranches(
@@ -272,7 +259,6 @@ export async function baseBranches(
 
 export async function createWorktree(opts: CreateWorktreeOptions): Promise<WorktreeInfo> {
   const exec = opts.exec ?? defaultExec;
-  const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const env = withoutProxy(opts.env ?? process.env);
   const { repo, callerBranch, runId } = opts;
 
@@ -296,23 +282,6 @@ export async function createWorktree(opts: CreateWorktreeOptions): Promise<Workt
   }
 
   try {
-    const warnings: string[] = [];
-    const fetched = await withRetry(
-      exec,
-      sleep,
-      'git',
-      ['fetch', 'origin'],
-      {
-        cwd: repo,
-        env,
-        timeoutMs: opts.fetchTimeoutMs ?? DEFAULT_FETCH_TIMEOUT_MS,
-      },
-      opts.deadline,
-    );
-    if (fetched.code !== 0) {
-      warnings.push(`git fetch failed (code ${fetched.code}); worktree cut from local HEAD`);
-    }
-
     mkdirSync(worktreesDir(), { recursive: true, mode: 0o700 });
     chmodSync(worktreesDir(), 0o700);
     const path = join(worktreesDir(), runId);
@@ -323,10 +292,8 @@ export async function createWorktree(opts: CreateWorktreeOptions): Promise<Workt
         : fromBase
           ? `wingman/${runId}`
           : `${callerBranch}-wm-${runId}`;
-    const added = await withRetry(
+    const added = await execWithinBudget(
       exec,
-      sleep,
-      'git',
       branch === undefined
         ? ['worktree', 'add', '--detach', path, 'HEAD']
         : ['worktree', 'add', '-b', branch, path, 'HEAD'],
@@ -334,9 +301,9 @@ export async function createWorktree(opts: CreateWorktreeOptions): Promise<Workt
       opts.deadline,
     );
     if (added.code !== 0) {
-      throw new Error(`git worktree add failed: ${added.stderr.trim().slice(0, 500)}`);
+      throw new Error(`git worktree add failed: ${safeSummary(added.stderr.trim(), 500)}`);
     }
-    const info: WorktreeInfo = { path, warnings };
+    const info: WorktreeInfo = { path };
     if (branch !== undefined) info.branch = branch;
     if (lockPath) info.lockPath = lockPath;
     return info;
@@ -354,7 +321,9 @@ export async function runSetup(
 ): Promise<{ ok: boolean; output: string }> {
   if (!command) return { ok: true, output: '' };
   const result = await defaultExec('sh', ['-c', command], { cwd: worktree, env, timeoutMs });
-  return { ok: result.code === 0, output: `${result.stdout}${result.stderr}`.slice(-2000) };
+  // mask the whole output before keeping its tail: a cut inside a secret would hide it from the patterns
+  const output = maskSecrets(`${result.stdout}${result.stderr}`).slice(-2000);
+  return { ok: result.code === 0, output };
 }
 
 /** Non-terminal runs, other than `exceptRunId`, that are working in `worktree`. */

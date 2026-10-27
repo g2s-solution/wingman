@@ -34,7 +34,6 @@ const parentEnv = (extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv => ({
   HOME: process.env.HOME,
   ...extra,
 });
-const noSleep = (): Promise<void> => Promise.resolve();
 
 beforeAll(async () => {
   work = tmp('bundle');
@@ -348,7 +347,6 @@ describe('worktree runs', () => {
       cwd: join(repo, 'sub'),
       worktree: true,
       lock_key: 'add-thing',
-      sleep: noSleep,
     });
     const first = await startRun(opts);
     try {
@@ -358,7 +356,7 @@ describe('worktree runs', () => {
       await new Promise((r) => setTimeout(r, 400));
       const rec = readLog(log)[0]!;
       expect(rec.cwd).toBe(join(first.worktree as string, 'sub'));
-      await expect(startRun({ ...opts, sleep: noSleep })).rejects.toThrow(/already held/);
+      await expect(startRun({ ...opts })).rejects.toThrow(/already held/);
     } finally {
       await cancelRun(first.id);
     }

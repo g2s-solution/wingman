@@ -46,6 +46,8 @@ export interface RefSnapshot {
   refs: string[];
   refs_hash: string;
   config_hash: string;
+  /** Absent in snapshots written before hooks were tracked. */
+  hooks_hash?: string;
 }
 
 export interface RunMeta {

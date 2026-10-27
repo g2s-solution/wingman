@@ -34,6 +34,8 @@ const base = {
   prompt_chars: 10,
 };
 
+const LONE_SURROGATE = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/;
+
 describe('runs', () => {
   const saved = process.env.WINGMAN_HOME;
   let home: string;
@@ -217,6 +219,29 @@ describe('runs', () => {
     }
   });
 
+  it('pages emoji with limit 1 to the end: every page advances and the pages join back', () => {
+    const meta = createRun(base);
+    const text = `a\u{1F600}b\u{1F680}\u{1F600}`;
+    writeResult(meta.id, text);
+    let joined = '';
+    let offset: number | undefined = 0;
+    let pages = 0;
+    while (offset !== undefined) {
+      const s = runSummary(meta.id, { offset, limit: 1 });
+      expect(s.result?.length).toBeGreaterThan(0);
+      if (s.result_next_offset !== undefined) {
+        expect(s.result_next_offset).toBeGreaterThan(s.result_offset ?? 0);
+      }
+      // no page ends or starts in the middle of a pair
+      expect(s.result).not.toMatch(LONE_SURROGATE);
+      joined += s.result ?? '';
+      offset = s.result_next_offset;
+      pages += 1;
+      expect(pages).toBeLessThan(20);
+    }
+    expect(joined).toBe(text);
+  });
+
   it('clamps limit and offset and omits next_offset on the last page', () => {
     const meta = createRun(base);
     writeResult(meta.id, 'q'.repeat(100));
@@ -227,6 +252,14 @@ describe('runs', () => {
     expect(past.result).toBe('');
     expect(past.result_offset).toBe(100);
     expect(past.result_next_offset).toBeUndefined();
+  });
+
+  it('keeps hooks_hash in the snapshot and still reads a meta that has none', () => {
+    const snap = { refs: ['refs/heads/main'], refs_hash: 'a', config_hash: 'b' };
+    const old = createRun({ ...base, ref_snapshot: snap });
+    expect(readMeta(old.id).ref_snapshot).toEqual(snap);
+    const fresh = createRun({ ...base, ref_snapshot: { ...snap, hooks_hash: 'c' } });
+    expect(readMeta(fresh.id).ref_snapshot?.hooks_hash).toBe('c');
   });
 
   it('a run without result.md has no result and no paging fields', () => {

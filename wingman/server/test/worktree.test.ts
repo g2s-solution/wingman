@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { wingmanHome } from '../src/paths.js';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { worktreesDir } from '../src/paths.js';
 import { groupMembers } from '../src/proc.js';
 import type { RunMeta } from '../src/types.js';
@@ -10,16 +10,17 @@ import { createRun, readMeta, updateStatus, writeMeta } from '../src/runs.js';
 import {
   acquireLock,
   createWorktree,
+  defaultExec,
   pruneOrphans,
   removeWorktree,
   runSetup,
+  setLockOwner,
   type ExecFn,
 } from '../src/worktree.js';
 import { git, makeRepo, tmp } from './helpers.js';
 
 let home: string;
 let saved: string | undefined;
-const noSleep = (): Promise<void> => Promise.resolve();
 
 beforeEach(() => {
   saved = process.env.WINGMAN_HOME;
@@ -44,7 +45,7 @@ describe('createWorktree', () => {
   it('from a base branch cuts a wingman/<id> branch and leaves the base branch alone', async () => {
     const repo = makeRepo('main');
     const head = git(repo, 'rev-parse', 'HEAD');
-    const wt = await createWorktree({ repo, callerBranch: 'main', runId: 'r1', sleep: noSleep });
+    const wt = await createWorktree({ repo, callerBranch: 'main', runId: 'r1' });
     expect(wt.branch).toBe('wingman/r1');
     expect(git(wt.path, 'rev-parse', 'HEAD')).toBe(head);
     expect(git(repo, 'rev-parse', 'main')).toBe(head);
@@ -59,7 +60,6 @@ describe('createWorktree', () => {
       callerBranch: 'main',
       runId: 'r2',
       createBranch: false,
-      sleep: noSleep,
     });
     expect(wt.branch).toBeUndefined();
     expect(git(wt.path, 'rev-parse', '--abbrev-ref', 'HEAD')).toBe('HEAD');
@@ -70,7 +70,7 @@ describe('createWorktree', () => {
     const repo = makeRepo('trunk');
     git(repo, 'update-ref', 'refs/remotes/origin/trunk', 'HEAD');
     git(repo, 'symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/trunk');
-    const wt = await createWorktree({ repo, callerBranch: 'trunk', runId: 'r1', sleep: noSleep });
+    const wt = await createWorktree({ repo, callerBranch: 'trunk', runId: 'r1' });
     expect(wt.branch).toBe('wingman/r1');
   });
 
@@ -85,37 +85,28 @@ describe('createWorktree', () => {
       repo,
       callerBranch: 'feat/x',
       runId: 'abc123',
-      sleep: noSleep,
     });
     expect(wt.path).toBe(join(worktreesDir(), 'abc123'));
     expect(wt.branch).toBe('feat/x-wm-abc123');
     expect(git(wt.path, 'rev-parse', 'HEAD')).toBe(head);
     expect(existsSync(join(wt.path, 'change.txt'))).toBe(true);
     expect(git(repo, 'rev-parse', '--abbrev-ref', 'HEAD')).toBe('feat/x');
-    expect(wt.warnings.join(' ')).toMatch(/fetch failed/);
   });
 
-  it('retries on 503 with proxy variables removed, and a failed fetch is only a warning', async () => {
+  it('never fetches, and runs git with the proxy variables removed', async () => {
     const repo = makeRepo('main');
     git(repo, 'switch', '-q', '-c', 'feat/y');
     const calls: { args: string[]; env: NodeJS.ProcessEnv }[] = [];
-    let fetches = 0;
     const exec: ExecFn = async (file, args, opts) => {
       calls.push({ args, env: opts.env });
-      if (args[0] === 'fetch') {
-        fetches++;
-        return { code: 128, stdout: '', stderr: 'RPC failed; HTTP 503' };
-      }
       const res = spawnSync(file, args, { cwd: opts.cwd, env: opts.env, encoding: 'utf8' });
       return { code: res.status ?? 1, stdout: res.stdout, stderr: res.stderr };
     };
-    const sleeps: number[] = [];
     const wt = await createWorktree({
       repo,
       callerBranch: 'feat/y',
-      runId: 'r503',
+      runId: 'rnf',
       exec,
-      sleep: async (ms) => void sleeps.push(ms),
       env: {
         PATH: process.env.PATH,
         HTTPS_PROXY: 'p',
@@ -125,8 +116,8 @@ describe('createWorktree', () => {
         NO_PROXY: 'n',
       },
     });
-    expect(fetches).toBe(5);
-    expect(sleeps).toHaveLength(4);
+    expect(calls.some((c) => c.args[0] === 'fetch')).toBe(false);
+    expect(calls.some((c) => c.args[0] === 'worktree' && c.args[1] === 'add')).toBe(true);
     for (const call of calls) {
       expect(call.env.HTTPS_PROXY).toBeUndefined();
       expect(call.env.https_proxy).toBeUndefined();
@@ -135,23 +126,42 @@ describe('createWorktree', () => {
       expect(call.env.NO_PROXY).toBe('n');
     }
     expect(existsSync(wt.path)).toBe(true);
-    expect(wt.warnings.join(' ')).toMatch(/fetch failed/);
+    expect('warnings' in wt).toBe(false);
   });
 
-  it('does not retry a non-503 failure', async () => {
+  it('does not retry a failed worktree add, and masks a secret in its stderr', async () => {
     const repo = makeRepo('main');
     git(repo, 'switch', '-q', '-c', 'feat/z');
-    let fetches = 0;
+    const secret = ['gh', 'p_', 'Q'.repeat(36)].join('');
+    let adds = 0;
     const exec: ExecFn = async (file, args, opts) => {
-      if (args[0] === 'fetch') {
-        fetches++;
-        return { code: 128, stdout: '', stderr: 'no remote' };
+      if (args[0] === 'worktree' && args[1] === 'add') {
+        adds++;
+        // the secret starts 480 chars into the message, so a 500 char cut would split it
+        return {
+          code: 128,
+          stdout: '',
+          stderr: `${'e'.repeat(479)} ${secret} RPC failed; HTTP 503`,
+        };
       }
-      const res = spawnSync(file, args, { cwd: opts.cwd, env: opts.env, encoding: 'utf8' });
-      return { code: res.status ?? 1, stdout: res.stdout, stderr: res.stderr };
+      return defaultExec(file, args, opts);
     };
-    await createWorktree({ repo, callerBranch: 'feat/z', runId: 'rn', exec, sleep: noSleep });
-    expect(fetches).toBe(1);
+    const err = await createWorktree({ repo, callerBranch: 'feat/z', runId: 'rn', exec }).catch(
+      (e: Error) => e,
+    );
+    expect(err).toBeInstanceOf(Error);
+    expect(adds).toBe(1);
+    expect((err as Error).message).not.toContain('QQQQQQ');
+    expect((err as Error).message).toContain('[MASKED]');
+  });
+
+  it('skips git worktree add once the start budget is gone', async () => {
+    const repo = makeRepo('main');
+    git(repo, 'switch', '-q', '-c', 'feat/d');
+    await expect(
+      createWorktree({ repo, callerBranch: 'feat/d', runId: 'rd', deadline: Date.now() - 1 }),
+    ).rejects.toThrow(/start budget exhausted/);
+    expect(existsSync(join(worktreesDir(), 'rd'))).toBe(false);
   });
 });
 
@@ -165,7 +175,6 @@ describe('lock', () => {
       callerBranch: 'feat/l',
       runId: meta.id,
       lock_key: 'add-x',
-      sleep: noSleep,
     });
     writeMeta({ ...meta, worktree: first.path });
     await expect(
@@ -174,7 +183,6 @@ describe('lock', () => {
         callerBranch: 'feat/l',
         runId: 'other',
         lock_key: 'add-x',
-        sleep: noSleep,
       }),
     ).rejects.toThrow(/already held/);
     const second = await createWorktree({
@@ -182,7 +190,6 @@ describe('lock', () => {
       callerBranch: 'feat/l',
       runId: 'third',
       lock_key: 'add-y',
-      sleep: noSleep,
     });
     expect(existsSync(second.path)).toBe(true);
     await removeWorktree(meta.id);
@@ -192,9 +199,26 @@ describe('lock', () => {
       callerBranch: 'feat/l',
       runId: 'fourth',
       lock_key: 'add-x',
-      sleep: noSleep,
     });
     expect(existsSync(again.path)).toBe(true);
+  });
+
+  it('setLockOwner rewrites the lock by rename and leaves no temp file', async () => {
+    const repo = makeRepo('main');
+    git(repo, 'switch', '-q', '-c', 'feat/o');
+    const wt = await createWorktree({
+      repo,
+      callerBranch: 'feat/o',
+      runId: 'own1',
+      lock_key: 'k',
+    });
+    const lock = wt.lockPath as string;
+    const inode = statSync(lock).ino;
+    setLockOwner(lock, process.ppid);
+    expect(JSON.parse(readFileSync(lock, 'utf8')).pid).toBe(process.ppid);
+    expect(statSync(lock).ino).not.toBe(inode);
+    expect(statSync(lock).mode & 0o777).toBe(0o600);
+    expect(readdirSync(dirname(lock)).filter((f) => f.endsWith('.tmp'))).toEqual([]);
   });
 
   it('reclaims a lock held by a dead pid', async () => {
@@ -205,7 +229,6 @@ describe('lock', () => {
       callerBranch: 'feat/s',
       runId: 'dead1',
       lock_key: 'c',
-      sleep: noSleep,
     });
     const dead = spawnSync(process.execPath, ['-e', '0']);
     expect(dead.pid).toBeGreaterThan(0);
@@ -218,7 +241,6 @@ describe('lock', () => {
       callerBranch: 'feat/s',
       runId: 'live2',
       lock_key: 'c',
-      sleep: noSleep,
     });
     expect(existsSync(second.path)).toBe(true);
   });
@@ -244,7 +266,6 @@ describe('setup and prune', () => {
         callerBranch: 'feat/p',
         runId: m.id,
         lock_key: key,
-        sleep: noSleep,
       });
       writeMeta({ ...readMeta(m.id), worktree: wt.path, pid: process.pid });
       return { id: m.id, path: wt.path };
@@ -269,7 +290,7 @@ describe('pruneOrphans keep and remove rules', () => {
     patch: Partial<RunMeta> = {},
   ): Promise<{ id: string; path: string }> {
     const m = createRun({ account: 'a', cwd: repo, session_id: 's', depth: 1, prompt_chars: 1 });
-    const wt = await createWorktree({ repo, callerBranch: 'feat/k', runId: m.id, sleep: noSleep });
+    const wt = await createWorktree({ repo, callerBranch: 'feat/k', runId: m.id });
     writeMeta({ ...readMeta(m.id), worktree: wt.path, ...patch });
     return { id: m.id, path: wt.path };
   }
