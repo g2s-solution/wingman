@@ -89,6 +89,26 @@ For a task that changes files, ask for it explicitly (for example "... and fix i
 
 Claude is told to prefer wingman over its built-in Agent tool when you ask for a subagent, delegation or an independent review ("use a subagent to ..."). The plugin does this with the skill description and a `SessionStart` hook that prints a static instruction (`wingman/hooks/session-start.json`) into each session; the hook runs no other code. To avoid the hook, empty `hooks/hooks.json` in your installed copy of the plugin, or set `disableAllHooks` in your Claude Code settings (which turns off every hook, not only this one). It falls back to the built-in tool, and says so, when wingman is unavailable, the target is rate limited, or the task needs to run tests under `readonly`.
 
+## Check your setup
+
+`wingman doctor` checks the registry and the profiles. It reads local files only, changes nothing, and never prints credentials:
+
+```sh
+node <plugin dir>/wingman/bin/wingman doctor            # offline checks
+node <plugin dir>/wingman/bin/wingman doctor --online   # also asks each profile who is signed in
+node <plugin dir>/wingman/bin/wingman doctor --json     # machine-readable list of {id, level, message}
+```
+
+It checks the state directory and `accounts.json` (modes 0700 and 0600, valid JSON, no duplicate ids), each account's `config_dir` and launcher, the shared items `another-login.sh` links from your default profile, and the installed wingman plugin version of each profile.
+
+- `[ok]`: fine (some are informational, such as an unshared item or a target without the plugin).
+- `[warn]`: works, but worth a look (loose modes, a forked shared item, a version mismatch, no second account yet).
+- `[fail]`: something is broken (missing `config_dir`, launcher not found or not executable, broken link, invalid registry). The exit code is 1 when there is a `fail`, 0 otherwise, 2 for bad arguments.
+
+`--online` runs `auth status --json` for you and for each account (20 s timeout) and prints only whether it is signed in, the auth method, and whether the account differs from yours. A profile whose `CLAUDE_CONFIG_DIR` stopped taking effect shows up as `different account from the caller: no`. Emails and organisation ids are compared by hash and never printed.
+
+The `add-account` skill walks through adding a second account and reading this output; `new-agent` runs the tasks.
+
 ## Presets, worktrees and branches
 
 | | `readonly` (default) | `edit-files` | `edit` |
