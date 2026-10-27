@@ -27,6 +27,12 @@ It runs typecheck, lint, prettier, a build, the tests with a coverage gate of 80
 - Add a test for a behavior change; keep the tests deterministic (poll for conditions instead of fixed sleeps).
 - Never put real tokens, keys or personal data in code, tests, logs or issues. Build fake secrets from fragments at runtime in tests.
 
+## Project files
+
+- `CODE_OF_CONDUCT.md`: how we treat each other.
+- `docs/RELEASING.md`: the release checklist.
+- `.github/pull_request_template.md`: the pull request template; fill it in.
+
 ## Design
 
 Read `DESIGN.md` before changing guardrails, the run lifecycle or the tool contracts. Security-sensitive changes (masking, environment allowlist, worktree and lock handling, process cancellation, `another-login.sh`) deserve an independent review; see `SECURITY.md` for what counts.

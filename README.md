@@ -128,6 +128,19 @@ Run state lives in `~/.wingman/runs/<id>/`. Do not read `events.jsonl`: it holds
 | status `needs_caller` | the run changed your base branch, branch ref, repo config or git hooks, or needs a plugin change | inspect with `git log --oneline` and `git diff`; start a new run |
 | `wingman_cleanup` refuses | the run is still running, or the worktree has uncommitted changes | cancel it, or commit or discard the changes (`action: discard`) |
 
+## Where wingman keeps data
+
+- State lives in `~/.wingman`, or in `WINGMAN_HOME` when set. Directories are created with mode 0700 and files with 0600.
+- `accounts.json` is the account registry.
+- `runs/<id>/` holds `meta.json`, `result.md` and `events.jsonl`. `events.jsonl` is the raw event stream of the agent and may contain sensitive values: wingman never returns it, and you should not read or share it.
+- Automatic trimming, and nothing else:
+  - when a run finishes, `events.jsonl` is cut to its last 20 MiB (whole lines only);
+  - when a top-level wingman server starts, `events.jsonl` of runs that ended more than 14 days ago is deleted;
+  - when a top-level wingman server starts, the worktree of a run is removed if the run is over (finished more than a day ago, or found dead), its worktree has no uncommitted changes and no process of the run is still alive.
+- Run directories, `meta.json` and `result.md` are **not** deleted automatically, and wingman has no command for it yet (a `wingman gc` is planned, see `ROADMAP.md`). To remove old runs by hand, delete `~/.wingman/runs/<id>` of runs that are finished and no longer needed.
+- `worktrees/` holds one git worktree per run. `wingman_cleanup` (`accept` or `discard`) removes the worktree and releases its lock. It keeps the `wingman/<runid>` branch in your repository: delete it yourself with `git branch -D` when you no longer need it.
+- `locks/` holds one small lock file per `lock_key` in use. It is removed when the run is cleaned up, and a lock left by a dead process is reclaimed the next time the same key is used.
+
 ## Limits
 
 - The deny rules are advisory: the `edit` preset allows `node` and `npm`, which run arbitrary code. `setup` is an arbitrary shell command run as your user, outside the presets. Neither is a sandbox.
@@ -142,6 +155,7 @@ Run state lives in `~/.wingman/runs/<id>/`. Do not read `events.jsonl`: it holds
 - `DESIGN.md`: concepts, lifecycle and guardrails.
 - `ROADMAP.md`: what is done and planned. `docs/history/`: the original build notes.
 - `CONTRIBUTING.md`, `SECURITY.md`, `CHANGELOG.md`.
+- `CODE_OF_CONDUCT.md`, `docs/RELEASING.md`.
 
 ## License
 
