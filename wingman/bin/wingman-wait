@@ -1,197 +1,24 @@
 #!/usr/bin/env node
 // usage: wingman-wait <run_id> [--timeout-ms N] [--poll-ms N] [--grace-ms N]
-// Prints one line, `WINGMAN_RUN <id> <status>`, and nothing else on stdout.
+// Same as `wingman wait ...`: prints one line, `WINGMAN_RUN <id> <status>`, and nothing else on stdout.
 // Exit: 0 done|partial, 1 other terminal status, 2 unknown run or bad usage, 3 timeout.
 'use strict';
-const { chmodSync, existsSync, readdirSync, readFileSync, renameSync, writeFileSync } = require('node:fs');
-const { homedir } = require('node:os');
-const { dirname, join } = require('node:path');
+const { spawn } = require('node:child_process');
+const { existsSync } = require('node:fs');
+const { join } = require('node:path');
 
-// Keep in sync with TERMINAL_STATUSES in wingman/server/src/types.ts.
-const TERMINAL = new Set([
-  'done',
-  'partial',
-  'blocked',
-  'needs_input',
-  'needs_caller',
-  'failed',
-  'failed_no_report',
-  'rate_limited',
-  'cancelled',
-]);
-
-function usage(msg) {
-  process.stderr.write(`wingman-wait: ${msg}\nusage: wingman-wait <run_id> [--timeout-ms N] [--poll-ms N] [--grace-ms N]\n`);
+const bundle = join(__dirname, '..', 'server', 'dist', 'index.js');
+if (!existsSync(bundle)) {
+  process.stderr.write(`Error: ${bundle} not found; the plugin is not built\n`);
   process.exit(2);
 }
-
-const args = process.argv.slice(2);
-let id;
-const opt = { timeout: 0, poll: 1000, grace: 5000 };
-const flags = { '--timeout-ms': 'timeout', '--poll-ms': 'poll', '--grace-ms': 'grace' };
-for (let i = 0; i < args.length; i++) {
-  const a = args[i];
-  if (a in flags) {
-    const n = Number(args[++i]);
-    if (!Number.isFinite(n) || n < 0) usage(`${a} needs a non-negative number`);
-    opt[flags[a]] = n;
-  } else if (a.startsWith('-') || id !== undefined) {
-    usage(`unexpected argument ${a}`);
-  } else {
-    id = a;
-  }
-}
-if (id === undefined) usage('run_id is required');
-if (!/^[A-Za-z0-9_-]{1,64}$/.test(id)) usage('invalid run_id');
-opt.poll = Math.max(opt.poll, 10);
-
-const home = process.env.WINGMAN_HOME || join(homedir(), '.wingman');
-const metaPath = join(home, 'runs', id, 'meta.json');
-
-function finish(status) {
-  process.stdout.write(`WINGMAN_RUN ${id} ${status}\n`);
-  process.exit(status === 'done' || status === 'partial' ? 0 : 1);
-}
-
-function alive(pid) {
-  try {
-    process.kill(pid, 0);
-  } catch (e) {
-    return e.code === 'EPERM';
-  }
-  return true;
-}
-
-// Same rule as isSameProcess in wingman/server/src/proc.ts: a recorded start time that differs from
-// the live process's means the pid was reused.
-function sameProcess(pid, startTime) {
-  if (!alive(pid)) return false;
-  if (typeof startTime !== 'string') return true;
-  try {
-    const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
-    const actual = stat.slice(stat.lastIndexOf(')') + 2).split(' ')[19];
-    return actual === undefined || actual === startTime;
-  } catch {
-    return true;
-  }
-}
-
-// Same rule as reconcile in wingman/server/src/reconcile.ts (default grace 20 minutes).
-const NO_PID_GRACE_MS = Number(process.env.WINGMAN_NO_PID_GRACE_MS) > 0
-  ? Number(process.env.WINGMAN_NO_PID_GRACE_MS)
-  : 20 * 60 * 1000;
-
-function supervisorGone(meta) {
-  if (Number.isInteger(meta.pid) && meta.pid > 0) return !sameProcess(meta.pid, meta.pid_start_time);
-  return Date.now() - Date.parse(meta.created_at) > NO_PID_GRACE_MS;
-}
-
-// Same rule as hasOrphanedGroup/terminateOrphanedGroup in wingman/server/src/proc.ts: the agent
-// shares the supervisor's process group and can outlive it. Only a dead leader with a surviving
-// group qualifies (a pid is never reused while it is still a group id).
-function groupMembers(pgid) {
-  const out = [];
-  let names;
-  try {
-    names = readdirSync('/proc');
-  } catch {
-    return out;
-  }
-  for (const name of names) {
-    if (!/^\d+$/.test(name)) continue;
-    try {
-      const rest = readFileSync(`/proc/${name}/stat`, 'utf8').split(') ').pop().split(' ');
-      if (rest[0] !== 'Z' && Number(rest[2]) === pgid) out.push(Number(name));
-    } catch {
-      // the process ended while scanning
-    }
-  }
-  return out;
-}
-
-function hasOrphanedGroup(pgid) {
-  if (!Number.isInteger(pgid) || pgid <= 1 || alive(pgid)) return false;
-  const members = groupMembers(pgid);
-  return members.length > 0 && !members.includes(process.pid);
-}
-
-function terminateOrphanedGroup(pgid) {
-  if (!hasOrphanedGroup(pgid)) return;
-  try {
-    process.kill(-pgid, 'SIGTERM');
-  } catch {
-    return;
-  }
-  const end = Date.now() + 3000;
-  while (Date.now() < end && groupMembers(pgid).length > 0) {
-    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
-  }
-  if (!hasOrphanedGroup(pgid)) return;
-  try {
-    process.kill(-pgid, 'SIGKILL');
-  } catch {
-    // already gone
-  }
-}
-
-// Same text as reconcile in wingman/server/src/reconcile.ts.
-const NO_RESULT_TEXT = '[wingman] the run ended without a result message (supervisor gone)';
-
-function writeAtomic(path, data) {
-  const tmp = `${path}.${process.pid}.tmp`;
-  writeFileSync(tmp, data, { mode: 0o600 });
-  chmodSync(tmp, 0o600);
-  renameSync(tmp, path);
-}
-
-// Persist failed_no_report so every other tool sees the same status.
-function persistFailedNoReport() {
-  try {
-    const meta = JSON.parse(readFileSync(metaPath, 'utf8'));
-    if (meta.status !== 'running') return typeof meta.status === 'string' ? meta.status : 'failed_no_report';
-    if (Number.isInteger(meta.pid)) terminateOrphanedGroup(meta.pid);
-    const resultPath = join(dirname(metaPath), 'result.md');
-    if (!existsSync(resultPath)) writeAtomic(resultPath, NO_RESULT_TEXT);
-    meta.status = 'failed_no_report';
-    meta.exit_code = null;
-    meta.finished_at = meta.finished_at || new Date().toISOString();
-    writeAtomic(metaPath, `${JSON.stringify(meta, null, 2)}\n`);
-  } catch {
-    // the run dir may be gone or read-only; still report the status
-  }
-  return 'failed_no_report';
-}
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-async function main() {
-  const start = Date.now();
-  let deadSince = 0;
-  let unreadable = 0;
-  for (;;) {
-    let meta;
-    try {
-      meta = JSON.parse(readFileSync(metaPath, 'utf8'));
-      unreadable = 0;
-    } catch (e) {
-      if (e.code === 'ENOENT') usage(`unknown run ${id}`);
-      // meta.json may be mid-write; tolerate a few torn reads
-      if (++unreadable > 5) usage(`unreadable meta for run ${id}`);
-    }
-    if (meta) {
-      const status = typeof meta.status === 'string' ? meta.status : '';
-      if (TERMINAL.has(status)) finish(status);
-      if (status !== 'running') usage(`unreadable meta for run ${id}`);
-      if (supervisorGone(meta)) {
-        deadSince ||= Date.now();
-        if (Date.now() - deadSince >= opt.grace) finish(persistFailedNoReport());
-      } else {
-        deadSince = 0;
-      }
-    }
-    if (opt.timeout > 0 && Date.now() - start >= opt.timeout) process.exit(3);
-    await sleep(opt.poll);
-  }
-}
-
-main();
+const child = spawn(process.execPath, [bundle, 'wait', ...process.argv.slice(2)], {
+  stdio: 'inherit',
+});
+// a caller that stops the waiter must stop the real process too
+for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => child.kill(sig));
+child.on('error', (err) => {
+  process.stderr.write(`Error: ${err.message}\n`);
+  process.exit(2);
+});
+child.on('exit', (code) => process.exit(code === null ? 1 : code));

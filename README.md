@@ -19,7 +19,7 @@ you:    get the findings; nothing in your checkout changed
 - Claude Code with plugin support (tested with 2.1.311) on the machine of the session that delegates (the *caller*).
 - Node.js 22 or newer (runs the bundled MCP server; CI tests on 22 and 26), `git`, `bash`.
 - A second Claude login: a claude.ai plan, a Console account or an API key. It must be different from the account of your caller session.
-- Linux. On macOS the login script works (it falls back to `python3` where `realpath -m` is missing), but run supervision, the pid-reuse check and the orphan-process kill read `/proc` and are not available or tested there.
+- Linux. On macOS the login script works (it falls back to `python3` where `realpath -m` is missing), but run supervision, the pid-reuse check and the orphan-process kill use `ps` there instead of `/proc` (unit-tested with canned `ps` output, not yet run on a real Mac).
 
 Terms used in these docs: the **caller** is the session you type in, the **target** is the account that runs the task, a **profile** is a Claude config directory (`CLAUDE_CONFIG_DIR`), and a **run** is one delegated task.
 
@@ -137,7 +137,14 @@ Run state lives in `~/.wingman/runs/<id>/`. Do not read `events.jsonl`: it holds
   - when a run finishes, `events.jsonl` is cut to its last 20 MiB (whole lines only);
   - when a top-level wingman server starts, `events.jsonl` of runs that ended more than 14 days ago is deleted;
   - when a top-level wingman server starts, the worktree of a run is removed if the run is over (finished more than a day ago, or found dead), its worktree has no uncommitted changes and no process of the run is still alive.
-- Run directories, `meta.json` and `result.md` are **not** deleted automatically, and wingman has no command for it yet (a `wingman gc` is planned, see `ROADMAP.md`). To remove old runs by hand, delete `~/.wingman/runs/<id>` of runs that are finished and no longer needed.
+- Run directories, `meta.json` and `result.md` are **not** deleted automatically. `wingman gc` removes them on demand; it is manual for now, nothing runs it for you:
+
+  ```sh
+  node <plugin dir>/wingman/bin/wingman gc --older-than-days 30
+  node <plugin dir>/wingman/bin/wingman gc --dry-run   # same counts, changes nothing
+  ```
+
+  It deletes the whole directory of runs that are over and finished more than N days ago (default 30), never a run that is still running (a dead one is first ended as `failed_no_report`), and keeps a run whose worktree still exists. It also prunes orphan worktrees as the server does at start and removes lock files whose owner process is gone or whose run no longer exists. It never deletes git branches. It prints counts only and exits 0 (2 on bad arguments).
 - `worktrees/` holds one git worktree per run. `wingman_cleanup` (`accept` or `discard`) removes the worktree and releases its lock. It keeps the `wingman/<runid>` branch in your repository: delete it yourself with `git branch -D` when you no longer need it.
 - `locks/` holds one small lock file per `lock_key` in use. It is removed when the run is cleaned up, and a lock left by a dead process is reclaimed the next time the same key is used.
 

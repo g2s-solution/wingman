@@ -18,7 +18,7 @@ import { join } from 'node:path';
 import { maskSecrets, safeSummary } from './mask.js';
 import { runDir, wingmanHome, worktreesDir } from './paths.js';
 import { groupMembers, isAlive, isSameProcess, readStartTime } from './proc.js';
-import { reconcile } from './reconcile.js';
+import { reconcile, supervisorGone } from './reconcile.js';
 import { listRuns, readMeta } from './runs.js';
 import { TERMINAL_STATUSES, type RunMeta } from './types.js';
 
@@ -132,7 +132,7 @@ export function withoutProxy(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   return copy;
 }
 
-function locksDir(): string {
+export function locksDir(): string {
   return join(wingmanHome(), 'locks');
 }
 
@@ -143,7 +143,7 @@ function lockPathFor(repo: string, lockKey: string): string {
   return join(locksDir(), `${key.slice(0, 24)}.lock`);
 }
 
-function readLock(path: string): LockInfo | undefined {
+export function readLock(path: string): LockInfo | undefined {
   try {
     const parsed = JSON.parse(readFileSync(path, 'utf8')) as LockInfo;
     return typeof parsed.pid === 'number' ? parsed : undefined;
@@ -381,14 +381,16 @@ export async function removeWorktree(runId: string, exec: ExecFn = defaultExec):
  * supervisor is gone. Skips worktrees with uncommitted changes and worktrees another live run uses.
  */
 export async function pruneOrphans(
-  opts: { minAgeMs?: number; exec?: ExecFn } = {},
+  opts: { minAgeMs?: number; exec?: ExecFn; dryRun?: boolean } = {},
 ): Promise<string[]> {
   const removed: string[] = [];
   const minAge = opts.minAgeMs ?? 0;
+  const seen = new Set<string>();
   for (const listed of listRuns()) {
     if (!listed.worktree || !existsSync(listed.worktree) || !existsSync(runDir(listed.id)))
       continue;
-    const meta = reconcile(listed);
+    // a dry run must not persist anything, so it judges a dead run without ending it
+    const meta = opts.dryRun ? peekReconciled(listed) : reconcile(listed);
     const terminal = TERMINAL_STATUSES.includes(meta.status);
     const wasDead = listed.status === 'running' && terminal;
     if (!terminal) continue;
@@ -398,6 +400,13 @@ export async function pruneOrphans(
     // an agent can outlive its supervisor in the same process group
     if (meta.pid !== undefined && groupMembers(meta.pid).length > 0) continue;
     if (await worktreeDirty(meta.worktree as string, opts.exec)) continue;
+    if (opts.dryRun) {
+      // runs sharing one worktree would be removed together; count each worktree once
+      if (seen.has(meta.worktree as string)) continue;
+      seen.add(meta.worktree as string);
+      removed.push(meta.id);
+      continue;
+    }
     try {
       await removeWorktree(meta.id, opts.exec);
     } catch {
@@ -406,4 +415,14 @@ export async function pruneOrphans(
     removed.push(meta.id);
   }
   return removed;
+}
+
+/** The run as reconcile would leave it, without writing anything or touching the process group. */
+export function peekReconciled(meta: RunMeta): RunMeta {
+  if (meta.status !== 'running' || !supervisorGone(meta)) return meta;
+  return {
+    ...meta,
+    status: 'failed_no_report',
+    finished_at: meta.finished_at ?? new Date().toISOString(),
+  };
 }
