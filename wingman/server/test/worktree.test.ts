@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { wingmanHome } from '../src/paths.js';
 import { join } from 'node:path';
 import { worktreesDir } from '../src/paths.js';
+import { groupMembers } from '../src/proc.js';
+import type { RunMeta } from '../src/types.js';
 import { createRun, readMeta, updateStatus, writeMeta } from '../src/runs.js';
 import {
   acquireLock,
@@ -240,6 +242,78 @@ describe('setup and prune', () => {
     expect(existsSync(live.path)).toBe(true);
     expect(existsSync(done.path)).toBe(false);
     expect(readdirSync(worktreesDir())).toEqual([live.id]);
+  });
+});
+
+describe('pruneOrphans keep and remove rules', () => {
+  async function runWithWorktree(
+    repo: string,
+    patch: Partial<RunMeta> = {},
+  ): Promise<{ id: string; path: string }> {
+    const m = createRun({ account: 'a', cwd: repo, session_id: 's', depth: 1, prompt_chars: 1 });
+    const wt = await createWorktree({ repo, callerBranch: 'feat/k', runId: m.id, sleep: noSleep });
+    writeMeta({ ...readMeta(m.id), worktree: wt.path, ...patch });
+    return { id: m.id, path: wt.path };
+  }
+  const deadPid = (): number => spawnSync(process.execPath, ['-e', '0']).pid;
+  let repo: string;
+  beforeEach(() => {
+    repo = makeRepo('main');
+    git(repo, 'switch', '-q', '-c', 'feat/k');
+  });
+
+  it('keeps a terminal run younger than minAge, removes it once old enough', async () => {
+    const run = await runWithWorktree(repo);
+    updateStatus(run.id, 'done');
+    expect(await pruneOrphans({ minAgeMs: 3_600_000 })).toEqual([]);
+    expect(existsSync(run.path)).toBe(true);
+    expect(await pruneOrphans({ minAgeMs: 0 })).toEqual([run.id]);
+  });
+
+  it('keeps a dirty worktree', async () => {
+    const run = await runWithWorktree(repo);
+    updateStatus(run.id, 'done');
+    writeFileSync(join(run.path, 'wip.txt'), 'x');
+    expect(await pruneOrphans()).toEqual([]);
+    expect(existsSync(run.path)).toBe(true);
+  });
+
+  it('removes the worktree of a run whose supervisor died, whatever minAge says', async () => {
+    const run = await runWithWorktree(repo, { pid: deadPid() });
+    expect(await pruneOrphans({ minAgeMs: 3_600_000 })).toEqual([run.id]);
+    expect(existsSync(run.path)).toBe(false);
+  });
+
+  it('keeps a worktree another live run still uses', async () => {
+    const first = await runWithWorktree(repo);
+    updateStatus(first.id, 'done');
+    const live = createRun({ account: 'a', cwd: repo, session_id: 's', depth: 1, prompt_chars: 1 });
+    writeMeta({ ...readMeta(live.id), worktree: first.path, pid: process.pid });
+    expect(await pruneOrphans()).toEqual([]);
+    expect(existsSync(first.path)).toBe(true);
+  });
+
+  it('keeps a worktree while an agent of the dead supervisor group still runs', async () => {
+    const leader = spawn('sh', ['-c', 'sleep 60 >/dev/null 2>&1 & echo $!; exit 0'], {
+      detached: true,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    let out = '';
+    leader.stdout.on('data', (d) => (out += d));
+    await new Promise((r) => leader.on('close', r));
+    const agent = Number(out.trim());
+    const run = await runWithWorktree(repo, { pid: leader.pid as number });
+    updateStatus(run.id, 'failed_no_report');
+    try {
+      expect(await pruneOrphans()).toEqual([]);
+      expect(existsSync(run.path)).toBe(true);
+    } finally {
+      process.kill(agent, 'SIGKILL');
+    }
+    for (let i = 0; i < 50 && groupMembers(leader.pid as number).length > 0; i++) {
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    expect(await pruneOrphans()).toEqual([run.id]);
   });
 });
 

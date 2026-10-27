@@ -99,6 +99,26 @@ describe('wingman-wait', () => {
     expect(r.out).toBe('');
   });
 
+  it('writes the placeholder result.md and persists the status when it ends a dead run', () => {
+    writeMeta('r4b', { status: 'running', pid: deadPid() });
+    const r = run(['r4b', '--poll-ms', '20', '--grace-ms', '100']);
+    expect(r.out).toBe('WINGMAN_RUN r4b failed_no_report\n');
+    const dir = join(home, 'runs', 'r4b');
+    expect(readFileSync(join(dir, 'result.md'), 'utf8')).toBe(
+      '[wingman] the run ended without a result message (supervisor gone)',
+    );
+    expect(JSON.parse(readFileSync(join(dir, 'meta.json'), 'utf8')).status).toBe(
+      'failed_no_report',
+    );
+  });
+
+  it('keeps an existing result.md', () => {
+    writeMeta('r4c', { status: 'running', pid: deadPid() });
+    writeFileSync(join(home, 'runs', 'r4c', 'result.md'), 'partial text');
+    run(['r4c', '--poll-ms', '20', '--grace-ms', '100']);
+    expect(readFileSync(join(home, 'runs', 'r4c', 'result.md'), 'utf8')).toBe('partial text');
+  });
+
   it('reports failed_no_report after the grace when the pid is dead', () => {
     writeMeta('r4', { status: 'running', pid: deadPid() });
     const r = run(['r4', '--poll-ms', '20', '--grace-ms', '200']);

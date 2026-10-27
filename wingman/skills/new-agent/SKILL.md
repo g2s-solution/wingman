@@ -17,7 +17,8 @@ Run a task on another Claude account through the wingman MCP server. The run is 
 ## Steps
 
 1. **Task and account.** The rest of the line after `/new-agent` is the task. An optional `--account <id>` names the target. Without it, call `wingman_start` without `account`; the server picks a random eligible target.
-2. **Preset.** Choose it yourself and say which: `readonly` for lookup, review and analysis; `edit` when files must change.
+2. **Preset.** Choose it yourself and say which: `readonly` for lookup, review and analysis; `edit` when files must change. `edit` runs arbitrary code under the target account; its deny rules are advisory, not a sandbox, so use it only for tasks you would trust a subagent with.
+   A start inside a repo is refused on a base branch or a detached HEAD, whatever the preset: switch to a feature branch first. A `readonly` run also gets a worktree by default, which needs `wingman_cleanup` afterwards; pass `worktree: false` for a pure lookup that needs no isolation (`lock_key` needs a worktree).
 3. **Prompt.** The run has no conversation context, so write a self-contained prompt: goal, paths, constraints, expected output. For `edit`, run in a `worktree` from a feature branch (check `git rev-parse --abbrev-ref HEAD`, never the base branch) and commit what the run needs first; changes land on a run branch. Keep the returned `run_id` and run branch.
 4. **Wait without polling.** Start `${CLAUDE_PLUGIN_ROOT}/bin/wingman-wait <run_id>` with Bash `run_in_background`. It prints `WINGMAN_RUN <id> <status>` and wakes you on exit (0 for done/partial, 1 other terminal statuses, 2 unknown run, 3 timeout).
 5. **On wake, read `wingman_result`** (masked and capped). For `edit` runs, review the run branch from the main checkout:
@@ -31,7 +32,7 @@ Run a task on another Claude account through the wingman MCP server. The run is 
 - `done` / `partial`: review as in step 5; for `partial`, list what remains and offer a new run.
 - `blocked`: show the report and ask the user.
 - `needs_input`: relay the question; the answer goes into a new run with a fresh prompt.
-- `needs_caller`: something must be done in the caller session (for example a plugin install). Do it, then start a new run.
+- `needs_caller`: something must be done in the caller session: a plugin install or update, or a guardrail trip (the base branch, the caller branch ref or the git config changed while the run was active). For a plugin, do it and start a new run; for a guardrail note, inspect the refs with `git log --oneline` (never print config values) and decide with the user.
 - `rate_limited`: tell the user when the limit resets. The caller decides to wait or start a new run on another account; never reroute automatically.
 - `failed`: report it with the masked result and propose a new run or stop.
 - `failed_no_report`: the run ended without a result (for example killed by a DLP block). Inspect the run branch with `git log` and `git diff --stat` only, then start a new run or stop.

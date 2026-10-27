@@ -3,9 +3,9 @@
 // Prints one line, `WINGMAN_RUN <id> <status>`, and nothing else on stdout.
 // Exit: 0 done|partial, 1 other terminal status, 2 unknown run or bad usage, 3 timeout.
 'use strict';
-const { chmodSync, readFileSync, renameSync, writeFileSync } = require('node:fs');
+const { chmodSync, existsSync, readdirSync, readFileSync, renameSync, writeFileSync } = require('node:fs');
 const { homedir } = require('node:os');
-const { join } = require('node:path');
+const { dirname, join } = require('node:path');
 
 // Keep in sync with TERMINAL_STATUSES in wingman/server/src/types.ts.
 const TERMINAL = new Set([
@@ -86,18 +86,76 @@ function supervisorGone(meta) {
   return Date.now() - Date.parse(meta.created_at) > NO_PID_GRACE_MS;
 }
 
+// Same rule as hasOrphanedGroup/terminateOrphanedGroup in wingman/server/src/proc.ts: the agent
+// shares the supervisor's process group and can outlive it. Only a dead leader with a surviving
+// group qualifies (a pid is never reused while it is still a group id).
+function groupMembers(pgid) {
+  const out = [];
+  let names;
+  try {
+    names = readdirSync('/proc');
+  } catch {
+    return out;
+  }
+  for (const name of names) {
+    if (!/^\d+$/.test(name)) continue;
+    try {
+      const rest = readFileSync(`/proc/${name}/stat`, 'utf8').split(') ').pop().split(' ');
+      if (rest[0] !== 'Z' && Number(rest[2]) === pgid) out.push(Number(name));
+    } catch {
+      // the process ended while scanning
+    }
+  }
+  return out;
+}
+
+function hasOrphanedGroup(pgid) {
+  if (!Number.isInteger(pgid) || pgid <= 1 || alive(pgid)) return false;
+  const members = groupMembers(pgid);
+  return members.length > 0 && !members.includes(process.pid);
+}
+
+function terminateOrphanedGroup(pgid) {
+  if (!hasOrphanedGroup(pgid)) return;
+  try {
+    process.kill(-pgid, 'SIGTERM');
+  } catch {
+    return;
+  }
+  const end = Date.now() + 3000;
+  while (Date.now() < end && groupMembers(pgid).length > 0) {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
+  }
+  if (!hasOrphanedGroup(pgid)) return;
+  try {
+    process.kill(-pgid, 'SIGKILL');
+  } catch {
+    // already gone
+  }
+}
+
+// Same text as reconcile in wingman/server/src/reconcile.ts.
+const NO_RESULT_TEXT = '[wingman] the run ended without a result message (supervisor gone)';
+
+function writeAtomic(path, data) {
+  const tmp = `${path}.${process.pid}.tmp`;
+  writeFileSync(tmp, data, { mode: 0o600 });
+  chmodSync(tmp, 0o600);
+  renameSync(tmp, path);
+}
+
 // Persist failed_no_report so every other tool sees the same status.
 function persistFailedNoReport() {
   try {
     const meta = JSON.parse(readFileSync(metaPath, 'utf8'));
     if (meta.status !== 'running') return typeof meta.status === 'string' ? meta.status : 'failed_no_report';
+    if (Number.isInteger(meta.pid)) terminateOrphanedGroup(meta.pid);
+    const resultPath = join(dirname(metaPath), 'result.md');
+    if (!existsSync(resultPath)) writeAtomic(resultPath, NO_RESULT_TEXT);
     meta.status = 'failed_no_report';
     meta.exit_code = null;
     meta.finished_at = meta.finished_at || new Date().toISOString();
-    const tmp = `${metaPath}.${process.pid}.tmp`;
-    writeFileSync(tmp, `${JSON.stringify(meta, null, 2)}\n`, { mode: 0o600 });
-    chmodSync(tmp, 0o600);
-    renameSync(tmp, metaPath);
+    writeAtomic(metaPath, `${JSON.stringify(meta, null, 2)}\n`);
   } catch {
     // the run dir may be gone or read-only; still report the status
   }
