@@ -57,7 +57,7 @@ A bare name such as `claude-second` becomes `~/.claude-second`; a value containi
 
 The wingman MCP server never reads credentials: it only runs the launcher named in the registry. `CLAUDE_CONFIG_DIR` is not a documented Claude Code setting, so treat profile isolation as working but unsupported.
 
-The registry is a plain file (directory mode 0700, file mode 0600). You can edit it by hand:
+The registry is a plain file (directory mode 0700, file mode 0600). `another-login.sh` writes it through `wingman accounts add --upsert`, and that CLI is the normal way to change it (see "Manage accounts" below). The format, if you ever need to read or edit it by hand:
 
 ```json
 {
@@ -74,6 +74,22 @@ The registry is a plain file (directory mode 0700, file mode 0600). You can edit
 ```
 
 `command` defaults to `claude` (use that for a profile signed in with `claude auth login` only). The caller's own profile is never a target. `WINGMAN_HOME` moves the state directory (default `~/.wingman`).
+
+### Manage accounts
+
+Run these in a terminal: `node <plugin dir>/wingman/bin/wingman accounts <command>`.
+
+```sh
+wingman accounts list [--json]            # id, label, status, config_dir, command; marks your own profile
+wingman accounts add --id ID --config-dir DIR [--label L] [--command CMD] [--provider P] [--upsert]
+wingman accounts disable ID               # status disabled: never picked, and refused when named
+wingman accounts enable ID                # back to active
+wingman accounts remove ID --yes          # registry entry only; the profile directory and credentials are not touched
+```
+
+`add` needs an absolute `--config-dir` (a leading `~` is expanded), refuses a duplicate id unless `--upsert` (which keeps fields you set by hand, such as `status`), and refuses your own profile. `remove` without `--yes` only prints what it would do and exits 2. Exit codes: 0 ok, 2 usage or validation error, 1 unexpected error. The commands never read or write credentials.
+
+Claude can list the accounts through the read-only `wingman_accounts` tool, but no tool adds, changes or removes one: an entry's `command` is run by wingman, so only you, in a terminal, can change it.
 
 ## 3. Your first run
 
@@ -111,6 +127,7 @@ The skill drives these; you can also call them directly.
 | `wingman_result` | the final report, masked, in pages (`offset`, `limit`; default 4000, max 8000 characters): keep calling with `result_next_offset` until it is absent |
 | `wingman_cancel` | stop a run |
 | `wingman_list` | recent runs |
+| `wingman_accounts` | the registered accounts: id, label, status, `is_caller`, provider (read-only; no command or paths; accounts are changed only with the `wingman accounts` CLI) |
 | `wingman_cleanup` | remove a run's worktree (`accept` refuses uncommitted changes); the run branch, when there is one, is kept |
 
 Run state lives in `~/.wingman/runs/<id>/`. Do not read `events.jsonl`: it holds raw tool output.
@@ -119,7 +136,7 @@ Run state lives in `~/.wingman/runs/<id>/`. Do not read `events.jsonl`: it holds
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `No other active account is registered to run on` | empty registry, only the caller's own profile, or accounts whose status is not `active` | run `another-login.sh` for a second profile, or fix `~/.wingman/accounts.json` |
+| `No other active account is registered to run on` | empty registry, only the caller's own profile, or accounts whose status is not `active` | run `another-login.sh` for a second profile, or check `wingman accounts list` and `wingman accounts enable <id>` |
 | `Unknown account "x". Registered accounts: ...` | the id is not in the registry | use one of the listed ids |
 | `... is the caller's own profile` | you named your own account as the target | pick another account |
 | the run ends `failed_no_report`, or the report says "Not logged in" | the target's login expired or its launcher cannot find its key | run `<launcher> auth status`; sign in again with `another-login.sh --force` |

@@ -15,7 +15,9 @@ Swapping roles needs no feature: start `claude` under another profile and that p
 
 ## Account registry
 
-`~/.wingman/accounts.json`. It never holds credentials; login stays in each profile's own config dir. In v0.1 it lists the profiles; the caller names one by `id` or omits it and the server picks one at random among eligible targets (see Account selection). Selection policy, tags and scope arrive in v0.5, and a registry CLI in v0.3 (see ROADMAP).
+`~/.wingman/accounts.json`. It never holds credentials; login stays in each profile's own config dir. It lists the profiles; the caller names one by `id` or omits it and the server picks one at random among eligible targets (see Account selection). Selection policy, tags and scope arrive in v0.5 (see ROADMAP).
+
+The CLI `wingman accounts list|add|disable|enable|remove` is the normal way to change it (`another-login.sh` calls `accounts add --upsert`); every write goes through the atomic `saveAccounts` (directory 0700, file 0600) and never touches credentials or profile directories. Status values are `active` (also when the field is absent) and `disabled`. The MCP tool `wingman_accounts` is read-only (id, label, status, `is_caller`, provider; no command, no paths) and no tool mutates the registry: an entry's `command` is executed by the runner, so a prompt-injected session must not be able to add one. Mutations stay in the CLI, run by the Human in a terminal.
 
 | field | meaning |
 |---|---|
@@ -63,7 +65,7 @@ A run ends in one of: `done`, `partial`, `blocked`, `needs_input`, `needs_caller
 
 ## Tools (MCP server `wingman`)
 
-v0.1: `wingman_start`, `wingman_status`, `wingman_result`, `wingman_cancel`, `wingman_list`, `wingman_cleanup` (accept or discard: removes the worktree and lock, keeps the run branch when there is one). Later: `wingman_accounts`. Start takes optional `account` (random eligible target when omitted; an explicit one must be registered, active and not the caller's own profile), `prompt`, `lock_key`, `setup`, `cwd`, `model`, `preset` or `allowed_tools`, `max_turns`, `worktree`. `allowed_tools` items must match a conservative pattern and may not start with `-`, so an item can never read as a CLI flag. A start from a base branch (main, master, the origin HEAD target) is allowed with a worktree, which is the default in a repo: the run gets its own `wingman/<runid>` branch. Only `worktree:false` on a base branch is refused; a detached HEAD is refused with or without a worktree.
+v0.1: `wingman_start`, `wingman_status`, `wingman_result`, `wingman_cancel`, `wingman_list`, `wingman_cleanup` (accept or discard: removes the worktree and lock, keeps the run branch when there is one), and the read-only `wingman_accounts` (see Account registry). Start takes optional `account` (random eligible target when omitted; an explicit one must be registered, active and not the caller's own profile), `prompt`, `lock_key`, `setup`, `cwd`, `model`, `preset` or `allowed_tools`, `max_turns`, `worktree`. `allowed_tools` items must match a conservative pattern and may not start with `-`, so an item can never read as a CLI flag. A start from a base branch (main, master, the origin HEAD target) is allowed with a worktree, which is the default in a repo: the run gets its own `wingman/<runid>` branch. Only `worktree:false` on a base branch is refused; a detached HEAD is refused with or without a worktree.
 
 ## Guardrails (in the server, not left to each brief)
 
