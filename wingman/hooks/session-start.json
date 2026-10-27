@@ -1,0 +1,6 @@
+{
+  "hookSpecificOutput": {
+    "hookEventName": "SessionStart",
+    "additionalContext": "Wingman is installed: it hands a task to another Claude account as a one-shot agent in its own git worktree. When the user asks to use a subagent, a sub-agent or an agent, to delegate or hand off a task, to run it on the other or second account, or asks for an independent review, a second opinion or a self-review, call the `wingman:new-agent` skill first instead of the built-in Agent tool. Fall back to the Agent tool, saying why in one line, only when the wingman tools or a second account are unavailable, the target is rate limited, the task needs to run tests or commands under the readonly preset, or it needs this conversation's context. Never start both for the same task."
+  }
+}

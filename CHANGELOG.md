@@ -2,6 +2,10 @@
 
 Versions are the plugin version in `wingman/.claude-plugin/plugin.json`. Claude Code only updates an installed plugin when this number changes.
 
+## 0.1.5
+
+- The plugin adds a `SessionStart` hook that injects a short instruction into each session: when you ask for a subagent, delegation or an independent review, Claude calls `wingman:new-agent` before the built-in Agent tool. The hook only prints a static file (`hooks/session-start.json`); it runs no other code.
+
 ## 0.1.4
 
 - Skill `new-agent`: its description now tells Claude to prefer this skill over the built-in Agent tool when the user asks for a subagent, delegation or an independent review, with a short list of when to fall back to the Agent tool.
