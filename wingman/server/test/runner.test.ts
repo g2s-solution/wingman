@@ -373,23 +373,30 @@ describe('waitForRun', () => {
   });
 });
 
+async function until(cond: () => boolean, what: string, ms = 45_000): Promise<void> {
+  const deadline = Date.now() + ms;
+  while (!cond()) {
+    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
+    await new Promise((r) => setTimeout(r, 50));
+  }
+}
+
 describe('agent outliving a killed supervisor', () => {
   it('reconcile takes down the orphaned process group', async () => {
     const started = await startRun(ctx('hang').opts);
     const pid = started.pid as number;
-    for (let i = 0; i < 100 && groupMembers(pid).length < 2; i++) {
-      await new Promise((r) => setTimeout(r, 50));
-    }
-    expect(groupMembers(pid).length).toBeGreaterThanOrEqual(2);
+    await until(() => groupMembers(pid).length >= 2, 'supervisor and agent in the group');
+    // the agent writes to a pipe to the supervisor: killing it mid-startup would EPIPE the agent
+    const events = join(runDir(started.id), 'events.jsonl');
+    await until(
+      () => existsSync(events) && readFileSync(events, 'utf8').includes('"type":"assistant"'),
+      'the agent to be idle after its first output',
+    );
     process.kill(pid, 'SIGKILL'); // only the supervisor: the agent stays in its group
-    for (let i = 0; i < 100 && isAlive(pid); i++) await new Promise((r) => setTimeout(r, 50));
+    await until(() => !isAlive(pid), 'the killed supervisor to be reaped');
     expect(groupMembers(pid).length).toBeGreaterThan(0);
 
-    const meta = reconcile(readMeta(started.id));
-    expect(meta.status).toBe('failed_no_report');
-    for (let i = 0; i < 100 && groupMembers(pid).length > 0; i++) {
-      await new Promise((r) => setTimeout(r, 100));
-    }
-    expect(groupMembers(pid)).toEqual([]);
-  });
+    expect(reconcile(readMeta(started.id)).status).toBe('failed_no_report');
+    await until(() => groupMembers(pid).length === 0, 'the orphaned group to be gone');
+  }, 90_000);
 });
