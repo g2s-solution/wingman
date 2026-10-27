@@ -12,10 +12,10 @@
  * wall-clock timeout signal the whole group.
  */
 import { randomUUID } from 'node:crypto';
-import { closeSync, existsSync, mkdirSync, openSync, rmSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, openSync, realpathSync, rmSync } from 'node:fs';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createInterface } from 'node:readline';
-import { relative, join } from 'node:path';
+import { relative, join, isAbsolute } from 'node:path';
 import { claudeAdapter, getAdapter, isRateLimitRejected } from './adapters/claude.js';
 import { guardPrompt, parseStatusLine, resolveTools } from './guard.js';
 import { runDir, wingmanHome } from './paths.js';
@@ -29,16 +29,18 @@ import {
   writeMeta,
   writeResult,
 } from './runs.js';
+import { isAlive, isSameProcess, readStartTime } from './proc.js';
+import { reconcile } from './reconcile.js';
 import { assertCanStart, currentDepth } from './self.js';
 import {
+  activeUsersOf,
+  createWorktree,
   defaultExec,
-  isAlive,
-  isSameProcess,
-  readStartTime,
+  releaseLocksOf,
   removeWorktree,
   runSetup,
   setLockOwner,
-  createWorktree,
+  takeOverLock,
   type ExecFn,
 } from './worktree.js';
 import {
@@ -78,6 +80,12 @@ export interface StartRunOptions {
   supervisorEntry?: string;
   exec?: ExecFn;
   sleep?: (ms: number) => Promise<void>;
+  /** Per `git fetch` attempt; default 120s. */
+  fetch_timeout_ms?: number;
+  /** `git worktree add`; default 60s. */
+  worktree_timeout_ms?: number;
+  /** The setup command; default 600s. */
+  setup_timeout_ms?: number;
 }
 
 interface SupervisorPayload {
@@ -311,14 +319,17 @@ export async function startRun(opts: StartRunOptions): Promise<RunMeta> {
   const callerBranch = repo
     ? await gitOut(exec, repo, ['rev-parse', '--abbrev-ref', 'HEAD'])
     : undefined;
+  const offset = repo ? offsetInRepo(repo, opts.cwd) : '';
 
   const sessionId = randomUUID();
   const meta = createRun({
     account: opts.account.id,
     cwd: opts.cwd,
+    run_cwd: opts.cwd,
     session_id: sessionId,
     depth,
     prompt_chars: opts.prompt.length,
+    ...(repo !== undefined ? { repo } : {}),
     ...(callerBranch !== undefined ? { branch: callerBranch } : {}),
     ...(opts.change !== undefined ? { change: opts.change } : {}),
     ...(opts.preset !== undefined ? { preset: opts.preset } : {}),
@@ -336,25 +347,30 @@ export async function startRun(opts: StartRunOptions): Promise<RunMeta> {
         exec,
         ...(opts.change !== undefined ? { change: opts.change } : {}),
         ...(opts.sleep ? { sleep: opts.sleep } : {}),
+        ...(opts.fetch_timeout_ms !== undefined ? { fetchTimeoutMs: opts.fetch_timeout_ms } : {}),
+        ...(opts.worktree_timeout_ms !== undefined
+          ? { addTimeoutMs: opts.worktree_timeout_ms }
+          : {}),
       });
       lockPath = wt.lockPath;
       meta.worktree = wt.path;
       meta.run_branch = wt.branch;
+      runCwd = offset ? join(wt.path, offset) : wt.path;
+      meta.run_cwd = runCwd;
       writeMeta(meta);
-      runCwd = join(wt.path, relative(repo, opts.cwd));
       if (opts.setup) {
         const setup = await runSetup(
           wt.path,
           opts.setup,
           adapter.buildEnv(parentEnv, opts.account, depth),
+          opts.setup_timeout_ms,
         );
         if (!setup.ok)
           throw new Error(`Worktree setup command failed: ${setup.output.slice(-300)}`);
       }
     }
   } catch (err) {
-    if (meta.worktree) await removeWorktree(meta.id, exec).catch(() => undefined);
-    rmSync(runDir(meta.id), { recursive: true, force: true });
+    await discardStart(meta, exec);
     throw err;
   }
 
@@ -368,7 +384,33 @@ export async function startRun(opts: StartRunOptions): Promise<RunMeta> {
     ...(opts.model !== undefined ? { model: opts.model } : {}),
     ...(opts.max_turns !== undefined ? { max_turns: opts.max_turns } : {}),
   };
-  return spawnRun(meta, opts, adapter, spec, depth, parentEnv, lockPath);
+  try {
+    return spawnRun(meta, opts, adapter, spec, depth, parentEnv, lockPath);
+  } catch (err) {
+    await discardStart(meta, exec);
+    throw err;
+  }
+}
+
+/** Offset of `cwd` inside `repo`, from realpaths so a symlinked cwd resolves to the same place. */
+function offsetInRepo(repo: string, cwd: string): string {
+  const rel = relative(realpathSync(repo), realpathSync(cwd));
+  if (rel === '..' || rel.startsWith('../') || isAbsolute(rel)) {
+    throw new Error('cwd resolves outside its git repository');
+  }
+  return rel;
+}
+
+/** Undoes a start that failed before the agent ran: worktree, lock and run directory. */
+async function discardStart(meta: RunMeta, exec: ExecFn): Promise<void> {
+  try {
+    updateStatus(meta.id, 'failed_no_report');
+  } catch {
+    // already terminal or run dir gone
+  }
+  if (meta.worktree) await removeWorktree(meta.id, exec).catch(() => undefined);
+  releaseLocksOf(meta.id);
+  rmSync(runDir(meta.id), { recursive: true, force: true });
 }
 
 function spawnRun(
@@ -405,6 +447,7 @@ function spawnRun(
     } catch {
       // already terminal
     }
+    releaseLocksOf(meta.id);
     throw err;
   }
   return readMeta(meta.id);
@@ -415,10 +458,23 @@ export async function sendToRun(
   prompt: string,
   opts: Partial<StartRunOptions> = {},
 ): Promise<RunMeta> {
-  const previous = readMeta(runId);
+  const previous = reconcile(readMeta(runId));
   if (previous.status === 'running') throw new Error(`Run ${runId} is still running`);
   if (previous.status === 'failed_no_report') {
     throw new Error(`Run ${runId} ended without a report and cannot be continued`);
+  }
+  let cwd = previous.run_cwd ?? previous.cwd;
+  if (previous.worktree) {
+    cwd = previous.run_cwd ?? previous.worktree;
+    if (!existsSync(previous.worktree) || !existsSync(cwd)) {
+      throw new Error(
+        `The worktree of run ${runId} no longer exists; start a new run instead of continuing it`,
+      );
+    }
+    const busy = activeUsersOf(previous.worktree, previous.id);
+    if (busy.length > 0) {
+      throw new Error(`The worktree of run ${runId} is in use by run ${busy[0]!.id}`);
+    }
   }
   const parentEnv = opts.parentEnv ?? process.env;
   assertCanStart(parentEnv);
@@ -430,19 +486,29 @@ export async function sendToRun(
     ...(preset !== undefined ? { preset } : {}),
     ...(opts.allowed_tools !== undefined ? { allowed_tools: opts.allowed_tools } : {}),
   });
-  const cwd = previous.worktree && existsSync(previous.worktree) ? previous.worktree : previous.cwd;
   const meta = createRun({
     account: account.id,
     cwd: previous.cwd,
+    run_cwd: cwd,
     session_id: previous.session_id,
     depth,
     prompt_chars: prompt.length,
+    ...(previous.repo !== undefined ? { repo: previous.repo } : {}),
     ...(previous.branch !== undefined ? { branch: previous.branch } : {}),
     ...(previous.run_branch !== undefined ? { run_branch: previous.run_branch } : {}),
     ...(previous.worktree !== undefined ? { worktree: previous.worktree } : {}),
     ...(previous.change !== undefined ? { change: previous.change } : {}),
     ...(preset !== undefined ? { preset } : {}),
   });
+  let lockPath: string | undefined;
+  if (previous.change !== undefined && previous.repo !== undefined && previous.worktree) {
+    try {
+      lockPath = takeOverLock(previous.repo, previous.change, previous.id, meta.id);
+    } catch (err) {
+      rmSync(runDir(meta.id), { recursive: true, force: true });
+      throw err;
+    }
+  }
   const spec: StartSpec = {
     prompt,
     cwd,
@@ -461,7 +527,7 @@ export async function sendToRun(
     spec,
     depth,
     parentEnv,
-    undefined,
+    lockPath,
   );
 }
 
@@ -481,7 +547,7 @@ export interface CancelResult {
 const sleepMs = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
 export async function cancelRun(runId: string): Promise<CancelResult> {
-  const meta = readMeta(runId);
+  const meta = reconcile(readMeta(runId));
   if (meta.status !== 'running') {
     return { cancelled: false, killed: false, reason: `run is already ${meta.status}` };
   }
@@ -524,14 +590,8 @@ export async function waitForRun(
   const pollMs = opts.pollMs ?? 500;
   const deadline = opts.timeoutMs === undefined ? Infinity : Date.now() + opts.timeoutMs;
   for (;;) {
-    const meta = readMeta(runId);
+    const meta = reconcile(readMeta(runId));
     if (TERMINAL_STATUSES.includes(meta.status)) return meta;
-    if (meta.pid !== undefined && !isSameProcess(meta.pid, meta.pid_start_time)) {
-      // the supervisor died without finalizing; re-read once in case it finished just now
-      const again = readMeta(runId);
-      if (TERMINAL_STATUSES.includes(again.status)) return again;
-      return updateStatus(runId, 'failed_no_report');
-    }
     if (Date.now() >= deadline) throw new Error(`Timed out waiting for run ${runId}`);
     await sleepMs(pollMs);
   }

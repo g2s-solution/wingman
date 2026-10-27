@@ -28613,10 +28613,10 @@ var StdioServerTransport = class {
 
 // src/runner.ts
 import { randomUUID } from "node:crypto";
-import { closeSync as closeSync3, existsSync as existsSync3, mkdirSync as mkdirSync3, openSync as openSync3, rmSync as rmSync2 } from "node:fs";
-import { spawn } from "node:child_process";
+import { closeSync as closeSync3, existsSync as existsSync4, mkdirSync as mkdirSync3, openSync as openSync3, realpathSync as realpathSync3, rmSync as rmSync2 } from "node:fs";
+import { spawn as spawn2 } from "node:child_process";
 import { createInterface } from "node:readline";
-import { relative, join as join5 } from "node:path";
+import { relative, join as join6, isAbsolute } from "node:path";
 
 // src/adapters/claude.ts
 var ALLOWED_ENV = /* @__PURE__ */ new Set([
@@ -28987,6 +28987,8 @@ var metaSchema = external_exports.object({
   branch: external_exports.string().optional(),
   run_branch: external_exports.string().optional(),
   worktree: external_exports.string().optional(),
+  repo: external_exports.string().optional(),
+  run_cwd: external_exports.string().optional(),
   session_id: external_exports.string(),
   status: statusSchema,
   created_at: external_exports.string(),
@@ -29134,66 +29136,8 @@ function runSummary(id) {
   return summary;
 }
 
-// src/self.ts
-import { realpathSync } from "node:fs";
-import { homedir as homedir2 } from "node:os";
-import { join as join3, resolve as resolve2 } from "node:path";
-function canonical2(dir) {
-  try {
-    return realpathSync(dir);
-  } catch {
-    return resolve2(dir);
-  }
-}
-function callerProfile(env = process.env) {
-  const configured = env.CLAUDE_CONFIG_DIR;
-  return canonical2(configured ? configured : join3(homedir2(), ".claude"));
-}
-function currentDepth(env = process.env) {
-  const raw = env.WINGMAN_DEPTH;
-  if (raw === void 0 || !/^\d+$/.test(raw.trim())) return 0;
-  return Number.parseInt(raw.trim(), 10);
-}
-function assertCanStart(env = process.env, limit = 1) {
-  const depth = currentDepth(env);
-  if (depth >= limit) {
-    throw new Error(
-      `Refusing to start a nested run: WINGMAN_DEPTH=${depth} has reached the limit of ${limit}`
-    );
-  }
-}
-
-// src/worktree.ts
-import { execFile } from "node:child_process";
-import { createHash } from "node:crypto";
-import {
-  chmodSync as chmodSync2,
-  closeSync as closeSync2,
-  existsSync as existsSync2,
-  mkdirSync as mkdirSync2,
-  openSync as openSync2,
-  readFileSync as readFileSync2,
-  readdirSync as readdirSync2,
-  realpathSync as realpathSync2,
-  rmSync,
-  unlinkSync as unlinkSync2,
-  writeFileSync as writeFileSync2
-} from "node:fs";
-import { join as join4 } from "node:path";
-var PROXY_VARS = ["HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"];
-var FETCH_ATTEMPTS = 5;
-var defaultExec = (file2, args, { cwd, env }) => new Promise((resolve3) => {
-  execFile(file2, args, { cwd, env, maxBuffer: 16 * 1024 * 1024 }, (err, stdout, stderr) => {
-    if (!err) return resolve3({ code: 0, stdout, stderr });
-    const code = typeof err.code === "number" ? err.code : 1;
-    resolve3({ code, stdout, stderr: stderr || err.message });
-  });
-});
-function withoutProxy(env) {
-  const copy = { ...env };
-  for (const name of PROXY_VARS) delete copy[name];
-  return copy;
-}
+// src/proc.ts
+import { readFileSync as readFileSync2 } from "node:fs";
 function readStartTime(pid) {
   try {
     const stat = readFileSync2(`/proc/${pid}/stat`, "utf8");
@@ -29217,22 +29161,155 @@ function isSameProcess(pid, startTime) {
   const actual = readStartTime(pid);
   return actual === void 0 || actual === startTime;
 }
+
+// src/reconcile.ts
+import { existsSync as existsSync2 } from "node:fs";
+import { join as join3 } from "node:path";
+var DEFAULT_NO_PID_GRACE_MS = 20 * 60 * 1e3;
+function graceMs(opts) {
+  if (opts.noPidGraceMs !== void 0) return opts.noPidGraceMs;
+  const raw = Number(process.env.WINGMAN_NO_PID_GRACE_MS);
+  return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_NO_PID_GRACE_MS;
+}
+function reconcile(meta3, opts = {}) {
+  if (meta3.status !== "running") return meta3;
+  if (meta3.pid !== void 0) {
+    if (isSameProcess(meta3.pid, meta3.pid_start_time)) return meta3;
+  } else {
+    const age = (opts.now ?? Date.now()) - Date.parse(meta3.created_at);
+    if (!(age > graceMs(opts))) return meta3;
+  }
+  const again = readMeta(meta3.id);
+  if (TERMINAL_STATUSES.includes(again.status)) return again;
+  if (!existsSync2(join3(runDir(meta3.id), "result.md"))) {
+    writeResult(meta3.id, "[wingman] the run ended without a result message (supervisor gone)");
+  }
+  try {
+    return updateStatus(meta3.id, "failed_no_report", { exit_code: null });
+  } catch {
+    return readMeta(meta3.id);
+  }
+}
+
+// src/self.ts
+import { realpathSync } from "node:fs";
+import { homedir as homedir2 } from "node:os";
+import { join as join4, resolve as resolve2 } from "node:path";
+function canonical2(dir) {
+  try {
+    return realpathSync(dir);
+  } catch {
+    return resolve2(dir);
+  }
+}
+function callerProfile(env = process.env) {
+  const configured = env.CLAUDE_CONFIG_DIR;
+  return canonical2(configured ? configured : join4(homedir2(), ".claude"));
+}
+function currentDepth(env = process.env) {
+  const raw = env.WINGMAN_DEPTH;
+  if (raw === void 0 || !/^\d+$/.test(raw.trim())) return 0;
+  return Number.parseInt(raw.trim(), 10);
+}
+function assertCanStart(env = process.env, limit = 1) {
+  const depth = currentDepth(env);
+  if (depth >= limit) {
+    throw new Error(
+      `Refusing to start a nested run: WINGMAN_DEPTH=${depth} has reached the limit of ${limit}`
+    );
+  }
+}
+
+// src/worktree.ts
+import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
+import {
+  chmodSync as chmodSync2,
+  closeSync as closeSync2,
+  existsSync as existsSync3,
+  mkdirSync as mkdirSync2,
+  openSync as openSync2,
+  readFileSync as readFileSync3,
+  readdirSync as readdirSync2,
+  realpathSync as realpathSync2,
+  rmSync,
+  unlinkSync as unlinkSync2,
+  writeFileSync as writeFileSync2
+} from "node:fs";
+import { join as join5 } from "node:path";
+var PROXY_VARS = ["HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"];
+var FETCH_ATTEMPTS = 5;
+var TIMED_OUT = 124;
+var MAX_OUTPUT = 16 * 1024 * 1024;
+var defaultExec = (file2, args, { cwd, env, timeoutMs }) => new Promise((resolve3) => {
+  let stdout = "";
+  let stderr = "";
+  let timedOut = false;
+  let settled = false;
+  let timer;
+  let hardStop;
+  const child = spawn(file2, args, {
+    cwd,
+    env,
+    detached: true,
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+  const settle2 = (code) => {
+    if (settled) return;
+    settled = true;
+    if (timer) clearTimeout(timer);
+    if (hardStop) clearTimeout(hardStop);
+    if (timedOut) stderr = `${stderr}
+timed out after ${timeoutMs}ms`.trim();
+    resolve3({ code: timedOut ? TIMED_OUT : code, stdout, stderr });
+  };
+  child.stdout?.on("data", (d) => {
+    if (stdout.length < MAX_OUTPUT) stdout += d.toString("utf8");
+  });
+  child.stderr?.on("data", (d) => {
+    if (stderr.length < MAX_OUTPUT) stderr += d.toString("utf8");
+  });
+  child.on("error", (err) => {
+    stderr = stderr || err.message;
+    settle2(typeof err.code === "number" ? err.code : 127);
+  });
+  child.on("close", (code) => settle2(code ?? 1));
+  if (timeoutMs !== void 0 && timeoutMs > 0) {
+    timer = setTimeout(() => {
+      timedOut = true;
+      try {
+        if (child.pid !== void 0) process.kill(-child.pid, "SIGKILL");
+      } catch {
+        child.kill("SIGKILL");
+      }
+      hardStop = setTimeout(() => settle2(TIMED_OUT), 1e3);
+    }, timeoutMs);
+  }
+});
+var DEFAULT_FETCH_TIMEOUT_MS = 12e4;
+var DEFAULT_ADD_TIMEOUT_MS = 6e4;
+var DEFAULT_SETUP_TIMEOUT_MS = 6e5;
+function withoutProxy(env) {
+  const copy = { ...env };
+  for (const name of PROXY_VARS) delete copy[name];
+  return copy;
+}
 function locksDir() {
-  return join4(wingmanHome(), "locks");
+  return join5(wingmanHome(), "locks");
 }
 function lockPathFor(repo, change) {
   const key = createHash("sha256").update(`${realpathSync2(repo)}\0${change}`).digest("hex");
-  return join4(locksDir(), `${key.slice(0, 24)}.lock`);
+  return join5(locksDir(), `${key.slice(0, 24)}.lock`);
 }
 function readLock(path) {
   try {
-    const parsed = JSON.parse(readFileSync2(path, "utf8"));
+    const parsed = JSON.parse(readFileSync3(path, "utf8"));
     return typeof parsed.pid === "number" ? parsed : void 0;
   } catch {
     return void 0;
   }
 }
-function acquireLock(path, info) {
+function acquireLock(path, info, ownedBy) {
   mkdirSync2(locksDir(), { recursive: true, mode: 448 });
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
@@ -29246,7 +29323,7 @@ function acquireLock(path, info) {
     } catch (err) {
       if (err.code !== "EEXIST") throw err;
       const held = readLock(path);
-      if (held && isSameProcess(held.pid, held.start_time)) {
+      if (held && held.run_id !== ownedBy && isSameProcess(held.pid, held.start_time)) {
         throw new Error(
           `Change "${info.change}" is already being applied by run ${held.run_id} (pid ${held.pid})`,
           { cause: err }
@@ -29260,6 +29337,14 @@ function acquireLock(path, info) {
   }
   throw new Error(`Could not acquire the lock for change "${info.change}"`);
 }
+function takeOverLock(repo, change, fromRunId, toRunId) {
+  const path = lockPathFor(repo, change);
+  const info = { pid: process.pid, run_id: toRunId, repo, change };
+  const startTime = readStartTime(process.pid);
+  if (startTime !== void 0) info.start_time = startTime;
+  acquireLock(path, info, fromRunId);
+  return path;
+}
 function setLockOwner(lockPath, pid) {
   const held = readLock(lockPath);
   if (!held) return;
@@ -29270,9 +29355,9 @@ function setLockOwner(lockPath, pid) {
   writeFileSync2(lockPath, JSON.stringify(next), { mode: 384 });
 }
 function releaseLocksOf(runId) {
-  if (!existsSync2(locksDir())) return;
+  if (!existsSync3(locksDir())) return;
   for (const entry of readdirSync2(locksDir())) {
-    const path = join4(locksDir(), entry);
+    const path = join5(locksDir(), entry);
     if (readLock(path)?.run_id === runId) rmSync(path, { force: true });
   }
 }
@@ -29321,20 +29406,24 @@ async function createWorktree(opts) {
   }
   try {
     const warnings = [];
-    const fetched = await withRetry(exec, sleep, "git", ["fetch", "origin"], { cwd: repo, env });
+    const fetched = await withRetry(exec, sleep, "git", ["fetch", "origin"], {
+      cwd: repo,
+      env,
+      timeoutMs: opts.fetchTimeoutMs ?? DEFAULT_FETCH_TIMEOUT_MS
+    });
     if (fetched.code !== 0) {
       warnings.push(`git fetch failed (code ${fetched.code}); worktree cut from local HEAD`);
     }
     mkdirSync2(worktreesDir(), { recursive: true, mode: 448 });
     chmodSync2(worktreesDir(), 448);
-    const path = join4(worktreesDir(), runId);
+    const path = join5(worktreesDir(), runId);
     const branch = `${callerBranch}-wm-${runId}`;
     const added = await withRetry(
       exec,
       sleep,
       "git",
       ["worktree", "add", "-b", branch, path, "HEAD"],
-      { cwd: repo, env }
+      { cwd: repo, env, timeoutMs: opts.addTimeoutMs ?? DEFAULT_ADD_TIMEOUT_MS }
     );
     if (added.code !== 0) {
       throw new Error(`git worktree add failed: ${added.stderr.trim().slice(0, 500)}`);
@@ -29347,38 +29436,71 @@ async function createWorktree(opts) {
     throw err;
   }
 }
-async function runSetup(worktree, command, env = process.env) {
+async function runSetup(worktree, command, env = process.env, timeoutMs = DEFAULT_SETUP_TIMEOUT_MS) {
   if (!command) return { ok: true, output: "" };
-  const result = await defaultExec("sh", ["-c", command], { cwd: worktree, env });
+  const result = await defaultExec("sh", ["-c", command], { cwd: worktree, env, timeoutMs });
   return { ok: result.code === 0, output: `${result.stdout}${result.stderr}`.slice(-2e3) };
+}
+function activeUsersOf(worktree, exceptRunId) {
+  return listRuns().filter((m) => m.id !== exceptRunId && m.worktree === worktree).map((m) => reconcile(m)).filter((m) => !TERMINAL_STATUSES.includes(m.status));
+}
+async function worktreeDirty(path, exec = defaultExec) {
+  const res = await exec("git", ["status", "--porcelain"], {
+    cwd: path,
+    env: withoutProxy(process.env),
+    timeoutMs: DEFAULT_ADD_TIMEOUT_MS
+  });
+  return res.code !== 0 || res.stdout.trim() !== "";
 }
 async function removeWorktree(runId, exec = defaultExec) {
   const meta3 = readMeta(runId);
-  if (meta3.worktree && existsSync2(meta3.worktree)) {
+  const sharing = meta3.worktree ? listRuns().filter((m) => m.worktree === meta3.worktree) : [];
+  if (meta3.worktree) {
+    const busy = activeUsersOf(meta3.worktree, runId);
+    if (busy.length > 0) {
+      throw new Error(
+        `Worktree of run ${runId} is still in use by run ${busy[0].id} (${busy[0].status})`
+      );
+    }
+  }
+  if (meta3.worktree && existsSync3(meta3.worktree)) {
     const env = withoutProxy(process.env);
     const removed = await exec("git", ["worktree", "remove", "--force", meta3.worktree], {
       cwd: meta3.cwd,
-      env
+      env,
+      timeoutMs: DEFAULT_ADD_TIMEOUT_MS
     });
     if (removed.code !== 0 && meta3.worktree.startsWith(worktreesDir())) {
       rmSync(meta3.worktree, { recursive: true, force: true });
     }
-    await exec("git", ["worktree", "prune"], { cwd: meta3.cwd, env });
+    await exec("git", ["worktree", "prune"], {
+      cwd: meta3.cwd,
+      env,
+      timeoutMs: DEFAULT_ADD_TIMEOUT_MS
+    });
   }
   releaseLocksOf(runId);
+  for (const m of sharing) releaseLocksOf(m.id);
 }
 async function pruneOrphans(opts = {}) {
   const removed = [];
   const minAge = opts.minAgeMs ?? 0;
-  for (const meta3 of listRuns()) {
-    if (!meta3.worktree || !existsSync2(meta3.worktree) || !existsSync2(runDir(meta3.id))) continue;
+  for (const listed of listRuns()) {
+    if (!listed.worktree || !existsSync3(listed.worktree) || !existsSync3(runDir(listed.id)))
+      continue;
+    const meta3 = reconcile(listed);
     const terminal = TERMINAL_STATUSES.includes(meta3.status);
-    const dead = meta3.pid !== void 0 && !isSameProcess(meta3.pid, meta3.pid_start_time);
-    if (!terminal && !dead) continue;
-    if (terminal && minAge > 0 && meta3.finished_at) {
+    const wasDead = listed.status === "running" && terminal;
+    if (!terminal) continue;
+    if (!wasDead && minAge > 0 && meta3.finished_at) {
       if (Date.now() - Date.parse(meta3.finished_at) < minAge) continue;
     }
-    await removeWorktree(meta3.id, opts.exec);
+    if (await worktreeDirty(meta3.worktree, opts.exec)) continue;
+    try {
+      await removeWorktree(meta3.id, opts.exec);
+    } catch {
+      continue;
+    }
     removed.push(meta3.id);
   }
   return removed;
@@ -29431,7 +29553,7 @@ async function runSupervisor(runId) {
   let finished;
   let timedOut = false;
   let spawnError;
-  const child = spawn(payload.command, payload.args, {
+  const child = spawn2(payload.command, payload.args, {
     cwd: payload.cwd,
     env: childEnv,
     stdio: ["ignore", "pipe", "pipe"]
@@ -29531,10 +29653,10 @@ async function gitOut(exec, cwd, args) {
 function launchSupervisor(meta3, payload, env, entry) {
   const dir = runDir(meta3.id);
   mkdirSync3(dir, { recursive: true, mode: 448 });
-  const fd = openSync3(join5(dir, "events.jsonl"), "a", 384);
+  const fd = openSync3(join6(dir, "events.jsonl"), "a", 384);
   let child;
   try {
-    child = spawn(process.execPath, [entry, "--supervise", meta3.id], {
+    child = spawn2(process.execPath, [entry, "--supervise", meta3.id], {
       detached: true,
       stdio: ["pipe", fd, fd],
       env,
@@ -29572,13 +29694,16 @@ async function startRun(opts) {
   });
   const repo = opts.worktree ? await gitOut(exec, opts.cwd, ["rev-parse", "--show-toplevel"]) : void 0;
   const callerBranch = repo ? await gitOut(exec, repo, ["rev-parse", "--abbrev-ref", "HEAD"]) : void 0;
+  const offset = repo ? offsetInRepo(repo, opts.cwd) : "";
   const sessionId = randomUUID();
   const meta3 = createRun({
     account: opts.account.id,
     cwd: opts.cwd,
+    run_cwd: opts.cwd,
     session_id: sessionId,
     depth,
     prompt_chars: opts.prompt.length,
+    ...repo !== void 0 ? { repo } : {},
     ...callerBranch !== void 0 ? { branch: callerBranch } : {},
     ...opts.change !== void 0 ? { change: opts.change } : {},
     ...opts.preset !== void 0 ? { preset: opts.preset } : {}
@@ -29594,26 +29719,29 @@ async function startRun(opts) {
         env: parentEnv,
         exec,
         ...opts.change !== void 0 ? { change: opts.change } : {},
-        ...opts.sleep ? { sleep: opts.sleep } : {}
+        ...opts.sleep ? { sleep: opts.sleep } : {},
+        ...opts.fetch_timeout_ms !== void 0 ? { fetchTimeoutMs: opts.fetch_timeout_ms } : {},
+        ...opts.worktree_timeout_ms !== void 0 ? { addTimeoutMs: opts.worktree_timeout_ms } : {}
       });
       lockPath = wt.lockPath;
       meta3.worktree = wt.path;
       meta3.run_branch = wt.branch;
+      runCwd = offset ? join6(wt.path, offset) : wt.path;
+      meta3.run_cwd = runCwd;
       writeMeta(meta3);
-      runCwd = join5(wt.path, relative(repo, opts.cwd));
       if (opts.setup) {
         const setup = await runSetup(
           wt.path,
           opts.setup,
-          adapter.buildEnv(parentEnv, opts.account, depth)
+          adapter.buildEnv(parentEnv, opts.account, depth),
+          opts.setup_timeout_ms
         );
         if (!setup.ok)
           throw new Error(`Worktree setup command failed: ${setup.output.slice(-300)}`);
       }
     }
   } catch (err) {
-    if (meta3.worktree) await removeWorktree(meta3.id, exec).catch(() => void 0);
-    rmSync2(runDir(meta3.id), { recursive: true, force: true });
+    await discardStart(meta3, exec);
     throw err;
   }
   const spec = {
@@ -29626,7 +29754,28 @@ async function startRun(opts) {
     ...opts.model !== void 0 ? { model: opts.model } : {},
     ...opts.max_turns !== void 0 ? { max_turns: opts.max_turns } : {}
   };
-  return spawnRun(meta3, opts, adapter, spec, depth, parentEnv, lockPath);
+  try {
+    return spawnRun(meta3, opts, adapter, spec, depth, parentEnv, lockPath);
+  } catch (err) {
+    await discardStart(meta3, exec);
+    throw err;
+  }
+}
+function offsetInRepo(repo, cwd) {
+  const rel = relative(realpathSync3(repo), realpathSync3(cwd));
+  if (rel === ".." || rel.startsWith("../") || isAbsolute(rel)) {
+    throw new Error("cwd resolves outside its git repository");
+  }
+  return rel;
+}
+async function discardStart(meta3, exec) {
+  try {
+    updateStatus(meta3.id, "failed_no_report");
+  } catch {
+  }
+  if (meta3.worktree) await removeWorktree(meta3.id, exec).catch(() => void 0);
+  releaseLocksOf(meta3.id);
+  rmSync2(runDir(meta3.id), { recursive: true, force: true });
 }
 function spawnRun(meta3, opts, adapter, spec, depth, parentEnv, lockPath) {
   const { command, args } = adapter.buildCommand(opts.account, spec);
@@ -29653,15 +29802,29 @@ function spawnRun(meta3, opts, adapter, spec, depth, parentEnv, lockPath) {
       updateStatus(meta3.id, "failed_no_report");
     } catch {
     }
+    releaseLocksOf(meta3.id);
     throw err;
   }
   return readMeta(meta3.id);
 }
 async function sendToRun(runId, prompt, opts = {}) {
-  const previous = readMeta(runId);
+  const previous = reconcile(readMeta(runId));
   if (previous.status === "running") throw new Error(`Run ${runId} is still running`);
   if (previous.status === "failed_no_report") {
     throw new Error(`Run ${runId} ended without a report and cannot be continued`);
+  }
+  let cwd = previous.run_cwd ?? previous.cwd;
+  if (previous.worktree) {
+    cwd = previous.run_cwd ?? previous.worktree;
+    if (!existsSync4(previous.worktree) || !existsSync4(cwd)) {
+      throw new Error(
+        `The worktree of run ${runId} no longer exists; start a new run instead of continuing it`
+      );
+    }
+    const busy = activeUsersOf(previous.worktree, previous.id);
+    if (busy.length > 0) {
+      throw new Error(`The worktree of run ${runId} is in use by run ${busy[0].id}`);
+    }
   }
   const parentEnv = opts.parentEnv ?? process.env;
   assertCanStart(parentEnv);
@@ -29673,19 +29836,29 @@ async function sendToRun(runId, prompt, opts = {}) {
     ...preset !== void 0 ? { preset } : {},
     ...opts.allowed_tools !== void 0 ? { allowed_tools: opts.allowed_tools } : {}
   });
-  const cwd = previous.worktree && existsSync3(previous.worktree) ? previous.worktree : previous.cwd;
   const meta3 = createRun({
     account: account.id,
     cwd: previous.cwd,
+    run_cwd: cwd,
     session_id: previous.session_id,
     depth,
     prompt_chars: prompt.length,
+    ...previous.repo !== void 0 ? { repo: previous.repo } : {},
     ...previous.branch !== void 0 ? { branch: previous.branch } : {},
     ...previous.run_branch !== void 0 ? { run_branch: previous.run_branch } : {},
     ...previous.worktree !== void 0 ? { worktree: previous.worktree } : {},
     ...previous.change !== void 0 ? { change: previous.change } : {},
     ...preset !== void 0 ? { preset } : {}
   });
+  let lockPath;
+  if (previous.change !== void 0 && previous.repo !== void 0 && previous.worktree) {
+    try {
+      lockPath = takeOverLock(previous.repo, previous.change, previous.id, meta3.id);
+    } catch (err) {
+      rmSync2(runDir(meta3.id), { recursive: true, force: true });
+      throw err;
+    }
+  }
   const spec = {
     prompt,
     cwd,
@@ -29704,7 +29877,7 @@ async function sendToRun(runId, prompt, opts = {}) {
     spec,
     depth,
     parentEnv,
-    void 0
+    lockPath
   );
 }
 function pickRunOpts(opts) {
@@ -29715,7 +29888,7 @@ function pickRunOpts(opts) {
 }
 var sleepMs = (ms) => new Promise((r) => setTimeout(r, ms));
 async function cancelRun(runId) {
-  const meta3 = readMeta(runId);
+  const meta3 = reconcile(readMeta(runId));
   if (meta3.status !== "running") {
     return { cancelled: false, killed: false, reason: `run is already ${meta3.status}` };
   }
@@ -29750,9 +29923,9 @@ async function cancelRun(runId) {
 }
 
 // src/tools.ts
-import { execFile as execFile2 } from "node:child_process";
-import { statSync } from "node:fs";
-import { isAbsolute } from "node:path";
+import { execFile } from "node:child_process";
+import { existsSync as existsSync5, statSync } from "node:fs";
+import { isAbsolute as isAbsolute2 } from "node:path";
 
 // node_modules/zod/v3/helpers/util.js
 var util;
@@ -37818,15 +37991,17 @@ function fail(err) {
   return { isError: true, content: [{ type: "text", text: safeSummary(message, 500) }] };
 }
 function loadMeta(runId) {
+  let meta3;
   try {
-    return readMeta(runId);
+    meta3 = readMeta(runId);
   } catch {
     throw new Error(`Unknown run id "${safeSummary(runId, 80)}"`);
   }
+  return reconcile(meta3);
 }
 function currentBranch(cwd) {
   return new Promise((resolve3) => {
-    execFile2(
+    execFile(
       "git",
       ["rev-parse", "--abbrev-ref", "HEAD"],
       { cwd, timeout: GIT_TIMEOUT_MS },
@@ -37864,7 +38039,7 @@ function createHandlers(deps = {}) {
     async start(input2) {
       await assertTarget(env, input2.account);
       const account = await getAccount(input2.account);
-      if (!isAbsolute(input2.cwd) || !statSync(input2.cwd, { throwIfNoEntry: false })?.isDirectory()) {
+      if (!isAbsolute2(input2.cwd) || !statSync(input2.cwd, { throwIfNoEntry: false })?.isDirectory()) {
         throw new Error("cwd must be an absolute path of an existing directory");
       }
       const branch = await currentBranch(input2.cwd);
@@ -37924,7 +38099,7 @@ function createHandlers(deps = {}) {
     },
     list(input2) {
       const limit = Math.min(input2.limit ?? LIST_DEFAULT, LIST_MAX);
-      const runs = listRuns().slice(0, limit).map((m) => ({
+      const runs = listRuns().slice(0, limit).map((m) => reconcile(m)).map((m) => ({
         id: m.id,
         account: m.account,
         status: m.status,
@@ -37937,6 +38112,11 @@ function createHandlers(deps = {}) {
       const meta3 = loadMeta(input2.run_id);
       if (meta3.status === "running") {
         throw new Error(`Run ${meta3.id} is still running; cancel it before cleanup`);
+      }
+      if (input2.action !== "discard" && meta3.worktree !== void 0 && existsSync5(meta3.worktree) && await worktreeDirty(meta3.worktree)) {
+        throw new Error(
+          `The worktree of run ${meta3.id} has uncommitted changes; commit or copy them, or call wingman_cleanup with action "discard" to drop them`
+        );
       }
       await removeWorktree(meta3.id);
       return {
@@ -38018,6 +38198,6 @@ function buildServer(deps = {}) {
 // src/index.ts
 var DAY_MS = 24 * 60 * 60 * 1e3;
 if (!maybeRunSupervisor(process.argv)) {
-  pruneOrphans({ minAgeMs: DAY_MS }).catch(() => void 0);
+  if (currentDepth() === 0) pruneOrphans({ minAgeMs: DAY_MS }).catch(() => void 0);
   await buildServer().connect(new StdioServerTransport());
 }

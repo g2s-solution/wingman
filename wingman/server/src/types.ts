@@ -46,6 +46,10 @@ export interface RunMeta {
   branch?: string;
   run_branch?: string;
   worktree?: string;
+  /** Toplevel of the caller's repository; keys the change lock. */
+  repo?: string;
+  /** Directory the agent runs in: the worktree plus the caller's offset inside the repo. */
+  run_cwd?: string;
   session_id: string;
   status: RunStatus;
   created_at: string;

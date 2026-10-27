@@ -156,9 +156,9 @@ describe('cancel', () => {
       const res = await cancelRun(meta.id);
       expect(res.cancelled).toBe(false);
       expect(res.killed).toBe(false);
-      expect(res.reason).toMatch(/reused|gone/);
+      expect(res.reason).toMatch(/failed_no_report/);
       expect(isAlive(bystander.pid as number)).toBe(true);
-      expect(readMeta(meta.id).status).toBe('running');
+      expect(readMeta(meta.id).status).toBe('failed_no_report');
     } finally {
       bystander.kill('SIGKILL');
     }

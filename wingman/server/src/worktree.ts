@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
   chmodSync,
@@ -15,8 +15,12 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import { runDir, wingmanHome, worktreesDir } from './paths.js';
+import { isAlive, isSameProcess, readStartTime } from './proc.js';
+import { reconcile } from './reconcile.js';
 import { listRuns, readMeta } from './runs.js';
-import { TERMINAL_STATUSES } from './types.js';
+import { TERMINAL_STATUSES, type RunMeta } from './types.js';
+
+export { isAlive, isSameProcess, readStartTime };
 
 const PROXY_VARS = ['HTTPS_PROXY', 'https_proxy', 'HTTP_PROXY', 'http_proxy'];
 const FETCH_ATTEMPTS = 5;
@@ -30,16 +34,60 @@ export interface ExecResult {
 export type ExecFn = (
   file: string,
   args: string[],
-  opts: { cwd: string; env: NodeJS.ProcessEnv },
+  opts: { cwd: string; env: NodeJS.ProcessEnv; timeoutMs?: number },
 ) => Promise<ExecResult>;
 
-export const defaultExec: ExecFn = (file, args, { cwd, env }) =>
+export const TIMED_OUT = 124;
+const MAX_OUTPUT = 16 * 1024 * 1024;
+
+/**
+ * Runs the command in its own process group so a timeout kills the whole tree (a `sh -c` setup
+ * command would otherwise leave grandchildren holding the output pipes open).
+ */
+export const defaultExec: ExecFn = (file, args, { cwd, env, timeoutMs }) =>
   new Promise((resolve) => {
-    execFile(file, args, { cwd, env, maxBuffer: 16 * 1024 * 1024 }, (err, stdout, stderr) => {
-      if (!err) return resolve({ code: 0, stdout, stderr });
-      const code = typeof err.code === 'number' ? err.code : 1;
-      resolve({ code, stdout, stderr: stderr || err.message });
+    let stdout = '';
+    let stderr = '';
+    let timedOut = false;
+    let settled = false;
+    let timer: NodeJS.Timeout | undefined;
+    let hardStop: NodeJS.Timeout | undefined;
+    const child = spawn(file, args, {
+      cwd,
+      env,
+      detached: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
     });
+    const settle = (code: number): void => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      if (hardStop) clearTimeout(hardStop);
+      if (timedOut) stderr = `${stderr}\ntimed out after ${timeoutMs}ms`.trim();
+      resolve({ code: timedOut ? TIMED_OUT : code, stdout, stderr });
+    };
+    child.stdout?.on('data', (d: Buffer) => {
+      if (stdout.length < MAX_OUTPUT) stdout += d.toString('utf8');
+    });
+    child.stderr?.on('data', (d: Buffer) => {
+      if (stderr.length < MAX_OUTPUT) stderr += d.toString('utf8');
+    });
+    child.on('error', (err: NodeJS.ErrnoException) => {
+      stderr = stderr || err.message;
+      settle(typeof err.code === 'number' ? err.code : 127);
+    });
+    child.on('close', (code) => settle(code ?? 1));
+    if (timeoutMs !== undefined && timeoutMs > 0) {
+      timer = setTimeout(() => {
+        timedOut = true;
+        try {
+          if (child.pid !== undefined) process.kill(-child.pid, 'SIGKILL');
+        } catch {
+          child.kill('SIGKILL');
+        }
+        hardStop = setTimeout(() => settle(TIMED_OUT), 1000);
+      }, timeoutMs);
+    }
   });
 
 export interface CreateWorktreeOptions {
@@ -50,7 +98,15 @@ export interface CreateWorktreeOptions {
   exec?: ExecFn;
   sleep?: (ms: number) => Promise<void>;
   env?: NodeJS.ProcessEnv;
+  /** Per attempt; default 120s. */
+  fetchTimeoutMs?: number;
+  /** Default 60s. */
+  addTimeoutMs?: number;
 }
+
+export const DEFAULT_FETCH_TIMEOUT_MS = 120_000;
+export const DEFAULT_ADD_TIMEOUT_MS = 60_000;
+export const DEFAULT_SETUP_TIMEOUT_MS = 600_000;
 
 export interface WorktreeInfo {
   path: string;
@@ -73,33 +129,6 @@ export function withoutProxy(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   return copy;
 }
 
-export function readStartTime(pid: number): string | undefined {
-  try {
-    const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
-    const rest = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
-    return rest[19];
-  } catch {
-    return undefined;
-  }
-}
-
-export function isAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (err) {
-    return (err as NodeJS.ErrnoException).code === 'EPERM';
-  }
-}
-
-/** True when pid is alive and, where /proc exposes it, still the process that started at `startTime`. */
-export function isSameProcess(pid: number, startTime: string | undefined): boolean {
-  if (!isAlive(pid)) return false;
-  if (startTime === undefined) return true;
-  const actual = readStartTime(pid);
-  return actual === undefined || actual === startTime;
-}
-
 function locksDir(): string {
   return join(wingmanHome(), 'locks');
 }
@@ -120,7 +149,7 @@ function readLock(path: string): LockInfo | undefined {
   }
 }
 
-function acquireLock(path: string, info: LockInfo): void {
+function acquireLock(path: string, info: LockInfo, ownedBy?: string): void {
   mkdirSync(locksDir(), { recursive: true, mode: 0o700 });
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
@@ -134,7 +163,7 @@ function acquireLock(path: string, info: LockInfo): void {
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
       const held = readLock(path);
-      if (held && isSameProcess(held.pid, held.start_time)) {
+      if (held && held.run_id !== ownedBy && isSameProcess(held.pid, held.start_time)) {
         throw new Error(
           `Change "${info.change}" is already being applied by run ${held.run_id} (pid ${held.pid})`,
           { cause: err },
@@ -150,6 +179,21 @@ function acquireLock(path: string, info: LockInfo): void {
   throw new Error(`Could not acquire the lock for change "${info.change}"`);
 }
 
+/** Re-points the change lock of a finished run at the run that continues it. */
+export function takeOverLock(
+  repo: string,
+  change: string,
+  fromRunId: string,
+  toRunId: string,
+): string {
+  const path = lockPathFor(repo, change);
+  const info: LockInfo = { pid: process.pid, run_id: toRunId, repo, change };
+  const startTime = readStartTime(process.pid);
+  if (startTime !== undefined) info.start_time = startTime;
+  acquireLock(path, info, fromRunId);
+  return path;
+}
+
 export function setLockOwner(lockPath: string, pid: number): void {
   const held = readLock(lockPath);
   if (!held) return;
@@ -160,7 +204,7 @@ export function setLockOwner(lockPath: string, pid: number): void {
   writeFileSync(lockPath, JSON.stringify(next), { mode: 0o600 });
 }
 
-function releaseLocksOf(runId: string): void {
+export function releaseLocksOf(runId: string): void {
   if (!existsSync(locksDir())) return;
   for (const entry of readdirSync(locksDir())) {
     const path = join(locksDir(), entry);
@@ -173,7 +217,7 @@ async function withRetry(
   sleep: (ms: number) => Promise<void>,
   file: string,
   args: string[],
-  opts: { cwd: string; env: NodeJS.ProcessEnv },
+  opts: { cwd: string; env: NodeJS.ProcessEnv; timeoutMs?: number },
 ): Promise<ExecResult> {
   let result = await exec(file, args, opts);
   for (let attempt = 1; attempt < FETCH_ATTEMPTS && result.code !== 0; attempt++) {
@@ -223,7 +267,11 @@ export async function createWorktree(opts: CreateWorktreeOptions): Promise<Workt
 
   try {
     const warnings: string[] = [];
-    const fetched = await withRetry(exec, sleep, 'git', ['fetch', 'origin'], { cwd: repo, env });
+    const fetched = await withRetry(exec, sleep, 'git', ['fetch', 'origin'], {
+      cwd: repo,
+      env,
+      timeoutMs: opts.fetchTimeoutMs ?? DEFAULT_FETCH_TIMEOUT_MS,
+    });
     if (fetched.code !== 0) {
       warnings.push(`git fetch failed (code ${fetched.code}); worktree cut from local HEAD`);
     }
@@ -237,7 +285,7 @@ export async function createWorktree(opts: CreateWorktreeOptions): Promise<Workt
       sleep,
       'git',
       ['worktree', 'add', '-b', branch, path, 'HEAD'],
-      { cwd: repo, env },
+      { cwd: repo, env, timeoutMs: opts.addTimeoutMs ?? DEFAULT_ADD_TIMEOUT_MS },
     );
     if (added.code !== 0) {
       throw new Error(`git worktree add failed: ${added.stderr.trim().slice(0, 500)}`);
@@ -255,43 +303,88 @@ export async function runSetup(
   worktree: string,
   command?: string,
   env: NodeJS.ProcessEnv = process.env,
+  timeoutMs: number = DEFAULT_SETUP_TIMEOUT_MS,
 ): Promise<{ ok: boolean; output: string }> {
   if (!command) return { ok: true, output: '' };
-  const result = await defaultExec('sh', ['-c', command], { cwd: worktree, env });
+  const result = await defaultExec('sh', ['-c', command], { cwd: worktree, env, timeoutMs });
   return { ok: result.code === 0, output: `${result.stdout}${result.stderr}`.slice(-2000) };
 }
 
+/** Non-terminal runs, other than `exceptRunId`, that are working in `worktree`. */
+export function activeUsersOf(worktree: string, exceptRunId: string): RunMeta[] {
+  return listRuns()
+    .filter((m) => m.id !== exceptRunId && m.worktree === worktree)
+    .map((m) => reconcile(m))
+    .filter((m) => !TERMINAL_STATUSES.includes(m.status));
+}
+
+/** True when the worktree has uncommitted changes, or when that cannot be determined. */
+export async function worktreeDirty(path: string, exec: ExecFn = defaultExec): Promise<boolean> {
+  const res = await exec('git', ['status', '--porcelain'], {
+    cwd: path,
+    env: withoutProxy(process.env),
+    timeoutMs: DEFAULT_ADD_TIMEOUT_MS,
+  });
+  return res.code !== 0 || res.stdout.trim() !== '';
+}
+
+/** Removes the run's worktree and releases its change lock; refuses while another run still uses the worktree. */
 export async function removeWorktree(runId: string, exec: ExecFn = defaultExec): Promise<void> {
   const meta = readMeta(runId);
+  const sharing = meta.worktree ? listRuns().filter((m) => m.worktree === meta.worktree) : [];
+  if (meta.worktree) {
+    const busy = activeUsersOf(meta.worktree, runId);
+    if (busy.length > 0) {
+      throw new Error(
+        `Worktree of run ${runId} is still in use by run ${busy[0]!.id} (${busy[0]!.status})`,
+      );
+    }
+  }
   if (meta.worktree && existsSync(meta.worktree)) {
     const env = withoutProxy(process.env);
     const removed = await exec('git', ['worktree', 'remove', '--force', meta.worktree], {
       cwd: meta.cwd,
       env,
+      timeoutMs: DEFAULT_ADD_TIMEOUT_MS,
     });
     if (removed.code !== 0 && meta.worktree.startsWith(worktreesDir())) {
       rmSync(meta.worktree, { recursive: true, force: true });
     }
-    await exec('git', ['worktree', 'prune'], { cwd: meta.cwd, env });
+    await exec('git', ['worktree', 'prune'], {
+      cwd: meta.cwd,
+      env,
+      timeoutMs: DEFAULT_ADD_TIMEOUT_MS,
+    });
   }
   releaseLocksOf(runId);
+  for (const m of sharing) releaseLocksOf(m.id);
 }
 
-/** Removes worktrees of runs that are terminal (and finished at least `minAgeMs` ago) or whose process is gone. */
+/**
+ * Removes worktrees of runs that are terminal (and finished at least `minAgeMs` ago) or whose
+ * supervisor is gone. Skips worktrees with uncommitted changes and worktrees another live run uses.
+ */
 export async function pruneOrphans(
   opts: { minAgeMs?: number; exec?: ExecFn } = {},
 ): Promise<string[]> {
   const removed: string[] = [];
   const minAge = opts.minAgeMs ?? 0;
-  for (const meta of listRuns()) {
-    if (!meta.worktree || !existsSync(meta.worktree) || !existsSync(runDir(meta.id))) continue;
+  for (const listed of listRuns()) {
+    if (!listed.worktree || !existsSync(listed.worktree) || !existsSync(runDir(listed.id)))
+      continue;
+    const meta = reconcile(listed);
     const terminal = TERMINAL_STATUSES.includes(meta.status);
-    const dead = meta.pid !== undefined && !isSameProcess(meta.pid, meta.pid_start_time);
-    if (!terminal && !dead) continue;
-    if (terminal && minAge > 0 && meta.finished_at) {
+    const wasDead = listed.status === 'running' && terminal;
+    if (!terminal) continue;
+    if (!wasDead && minAge > 0 && meta.finished_at) {
       if (Date.now() - Date.parse(meta.finished_at) < minAge) continue;
     }
-    await removeWorktree(meta.id, opts.exec);
+    if (await worktreeDirty(meta.worktree as string, opts.exec)) continue;
+    try {
+      await removeWorktree(meta.id, opts.exec);
+    } catch {
+      continue;
+    }
     removed.push(meta.id);
   }
   return removed;

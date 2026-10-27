@@ -1,15 +1,16 @@
 import { execFile } from 'node:child_process';
-import { statSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import { isAbsolute } from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { maskSecrets, safeSummary } from './mask.js';
 import { getAccount, targetsFor } from './registry.js';
+import { reconcile } from './reconcile.js';
 import { listRuns, readMeta, runSummary } from './runs.js';
 import { cancelRun, sendToRun, startRun, type StartRunOptions } from './runner.js';
 import { callerProfile } from './self.js';
 import { TERMINAL_STATUSES, type RunMeta } from './types.js';
-import { removeWorktree } from './worktree.js';
+import { removeWorktree, worktreeDirty } from './worktree.js';
 
 export interface ServerDeps {
   /** The caller's environment: decides the caller profile and the depth. */
@@ -43,11 +44,13 @@ function fail(err: unknown): { isError: true; content: { type: 'text'; text: str
 }
 
 function loadMeta(runId: string): RunMeta {
+  let meta: RunMeta;
   try {
-    return readMeta(runId);
+    meta = readMeta(runId);
   } catch {
     throw new Error(`Unknown run id "${safeSummary(runId, 80)}"`);
   }
+  return reconcile(meta);
 }
 
 function currentBranch(cwd: string): Promise<string | undefined> {
@@ -164,6 +167,7 @@ export function createHandlers(deps: ServerDeps = {}) {
       const limit = Math.min(input.limit ?? LIST_DEFAULT, LIST_MAX);
       const runs = listRuns()
         .slice(0, limit)
+        .map((m) => reconcile(m))
         .map((m) => ({
           id: m.id,
           account: m.account,
@@ -178,6 +182,16 @@ export function createHandlers(deps: ServerDeps = {}) {
       const meta = loadMeta(input.run_id);
       if (meta.status === 'running') {
         throw new Error(`Run ${meta.id} is still running; cancel it before cleanup`);
+      }
+      if (
+        input.action !== 'discard' &&
+        meta.worktree !== undefined &&
+        existsSync(meta.worktree) &&
+        (await worktreeDirty(meta.worktree))
+      ) {
+        throw new Error(
+          `The worktree of run ${meta.id} has uncommitted changes; commit or copy them, or call wingman_cleanup with action "discard" to drop them`,
+        );
       }
       await removeWorktree(meta.id);
       return {

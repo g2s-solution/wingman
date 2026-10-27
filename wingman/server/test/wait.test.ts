@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { tmp } from './helpers.js';
@@ -118,5 +118,31 @@ describe('wingman-wait', () => {
     writeMeta('r5', { status: 'partial', pid: 1 });
     expect(await exited).toBe(0);
     expect(out).toBe('WINGMAN_RUN r5 partial\n');
+  });
+
+  it('persists failed_no_report for a dead pid so other tools see it', () => {
+    writeMeta('r6', { status: 'running', pid: deadPid(), created_at: new Date().toISOString() });
+    const r = run(['r6', '--poll-ms', '20', '--grace-ms', '100']);
+    expect(r.out).toBe('WINGMAN_RUN r6 failed_no_report\n');
+    const meta = JSON.parse(readFileSync(join(home, 'runs', 'r6', 'meta.json'), 'utf8'));
+    expect(meta.status).toBe('failed_no_report');
+    expect(meta.exit_code).toBeNull();
+    expect(typeof meta.finished_at).toBe('string');
+  });
+
+  it('treats a live pid with another start time as a reused pid', () => {
+    writeMeta('r7', { status: 'running', pid: process.pid, pid_start_time: '1' });
+    const r = run(['r7', '--poll-ms', '20', '--grace-ms', '100']);
+    expect(r.out).toBe('WINGMAN_RUN r7 failed_no_report\n');
+  });
+
+  it('ends a run with no pid recorded after the no-pid grace, not before', () => {
+    const old = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+    writeMeta('r8', { status: 'running', created_at: old });
+    const r = run(['r8', '--poll-ms', '20', '--grace-ms', '100']);
+    expect(r.out).toBe('WINGMAN_RUN r8 failed_no_report\n');
+    writeMeta('r9', { status: 'running', created_at: new Date().toISOString() });
+    const young = run(['r9', '--poll-ms', '20', '--grace-ms', '100', '--timeout-ms', '400']);
+    expect(young.code).toBe(3);
   });
 });
