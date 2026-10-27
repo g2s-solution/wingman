@@ -188,6 +188,16 @@ describe('guard', () => {
     expect(text).toMatch(/WINGMAN_STATUS: done/);
   });
 
+  it('prompt rule 4 forbids delegating further and offers the blocked exit', () => {
+    const rule = guardPrompt()
+      .split('\n')
+      .find((l) => l.startsWith('4. '));
+    expect(rule).toMatch(/Never delegate further/);
+    expect(rule).toMatch(/wingman tools or the new-agent skill/);
+    expect(rule).toMatch(/do not manage plugins/);
+    expect(rule).toMatch(/WINGMAN_STATUS: blocked/);
+  });
+
   it('presets resolve as specified and the base deny list holds', () => {
     expect(PRESETS.readonly.allowed).toEqual([
       'Read',

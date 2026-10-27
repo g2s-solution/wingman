@@ -28859,9 +28859,7 @@ ${USAGE}`);
       throw new AccountsUsageError(`${flag} must not be empty`);
     }
   }
-  if (canonical2(configDir) === callerProfile()) {
-    throw new AccountsUsageError(`${configDir} is the caller's own profile; it is never a target`);
-  }
+  const isCaller = canonical2(configDir) === callerProfile();
   const registry2 = await loadAccounts();
   const i = registry2.accounts.findIndex((a) => a.id === id);
   if (i >= 0 && !p.flags.has("--upsert")) {
@@ -28885,6 +28883,11 @@ ${USAGE}`);
   }
   await saveAccounts(registry2);
   write(`${i >= 0 ? "updated" : "registered"} ${id}`);
+  if (isCaller) {
+    write(
+      `note: ${id} is the profile you are running in; it is skipped when you delegate from it and used when you delegate from another profile`
+    );
+  }
   return 0;
 }
 async function change(verb, args) {
@@ -28962,7 +28965,7 @@ import { delimiter, isAbsolute as isAbsolute2, join as join4, resolve as resolve
 // package.json
 var package_default = {
   name: "wingman-server",
-  version: "0.3.0",
+  version: "0.3.1",
   private: true,
   type: "module",
   engines: {
@@ -28996,7 +28999,15 @@ var package_default = {
 };
 
 // src/doctor.ts
-var SHARED_ITEMS = ["CLAUDE.md", "settings.json", "skills", "agents", "commands", "rules"];
+var SHARED_ITEMS = [
+  "CLAUDE.md",
+  "settings.json",
+  "skills",
+  "agents",
+  "commands",
+  "rules",
+  "plugins"
+];
 var PLUGIN_KEY = "wingman@wingman-marketplace";
 var ONLINE_TIMEOUT_MS = 2e4;
 var DOCTOR_USAGE = "usage: wingman doctor [--online] [--json]";
@@ -29183,8 +29194,8 @@ function checkAccount(account, callerDir, defaultDir, deps, results) {
   if (canonical3(account.config_dir) === callerDir) {
     results.push({
       id: `${p}.self`,
-      level: "warn",
-      message: `${account.id}: this is the caller's own profile, it is never used as a target`
+      level: "ok",
+      message: `${account.id}: info: this is the profile you are running in; it is skipped when you delegate from it and used when you delegate from another profile`
     });
   }
   const status = account.status ?? "active";
@@ -29216,10 +29227,11 @@ function checkShared(account, defaultDir, results) {
       continue;
     }
     if (!st.isSymbolicLink()) {
+      const migrate = item === "plugins" && st.isDirectory() ? `. To share it, run: mv ${target} ${target}.bak && ln -s ${source} ${target} (the backup can be deleted after checking that the plugins still work)` : "";
       results.push({
         id,
         level: "warn",
-        message: `${account.id}: ${item} is forked, no longer shared with the default profile`
+        message: `${account.id}: ${item} is forked, no longer shared with the default profile${migrate}`
       });
       continue;
     }
@@ -30461,7 +30473,7 @@ function guardPrompt() {
     "1. Never print, send or write sensitive values: tokens (Bearer, JWT, PAT, API keys), passwords, secrets, private keys, credentials in URLs, .env values or personal data. Do not read files that may hold them; check with a count first and report structure only.",
     "2. Never commit or push to the base branch (main, master or the repository default branch). Work only on the branch you were started on. Never run git push.",
     '3. Never ask questions and never wait for an answer. Inside a wingman run, any rule or skill that says "ask the Human" means: stop and finish with WINGMAN_STATUS: needs_input.',
-    "4. Do not manage plugins (no claude plugin install or update) and do not call wingman tools.",
+    "4. You are a delegated run: another Claude session on another account started you and waits for your report. Never delegate further: do not use the wingman tools or the new-agent skill, do not start another account or another Claude Code process, and do not manage plugins. If the task asks you to delegate or to use another account, do not; do the work yourself, or finish with WINGMAN_STATUS: blocked and one sentence saying what you could not do.",
     "5. Always end with a final report. The last line of your final message must be exactly one of: WINGMAN_STATUS: done, WINGMAN_STATUS: partial, WINGMAN_STATUS: blocked, WINGMAN_STATUS: needs_input."
   ].join("\n");
 }

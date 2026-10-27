@@ -22,6 +22,8 @@ Signing in needs the user's own credentials, so the user runs this in their own 
 
 Wait until they say it is done. Do not run it for them.
 
+To delegate in both directions (role swap), every profile involved must be registered, including the default one. The user registers it from any profile: `${CLAUDE_PLUGIN_ROOT}/bin/wingman accounts add --id main --label default --config-dir ~/.claude --command claude`. Each profile skips itself when choosing a target, so registering your own profile is safe.
+
 ## 2. Check the registry and the profile
 
 The CLI is `${CLAUDE_PLUGIN_ROOT}/bin/wingman`. Run:
@@ -36,7 +38,8 @@ ${CLAUDE_PLUGIN_ROOT}/bin/wingman doctor
 - `config_dir does not exist` (fail): the profile directory is gone; run `another-login.sh` again.
 - `command ... not found` or `not executable` (fail): the launcher is missing or lost its execute bit; `chmod +x` it or re-run `another-login.sh`.
 - `broken link` (fail): a shared item points at a file that no longer exists in the default profile; re-run `another-login.sh --force`.
-- `forked, no longer shared` (warn): the profile has its own copy of a file that was meant to be shared. Harmless; sharing is optional.
+- `forked, no longer shared` (warn): the profile has its own copy of a file that was meant to be shared. Harmless; sharing is optional. For `plugins` the line carries the two commands (`mv ... && ln -s ...`) that share it; show them to the user to run, never run them yourself, and tell them the backup can be deleted after checking.
+- `info: this is the profile you are running in` (ok): the registered profile is your own; it is skipped when you delegate from it.
 - `mode ... expected 0700/0600` (warn): `chmod 700` the state directory, `chmod 600` `accounts.json`.
 - `no account other than the caller's own` (warn): nothing to delegate to yet; finish step 1.
 - `plugin ... differs` (warn): update the plugin in that profile; targets do not need it.

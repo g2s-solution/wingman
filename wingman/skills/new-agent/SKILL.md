@@ -24,6 +24,7 @@ Never start both for the same task unless the user asks.
 - Never print, send or write sensitive values: tokens (Bearer, JWT, PAT, API keys), passwords, secrets, private keys, credentials in URLs, `.env` values, PII. Do not cat/Read files that may hold them.
 - Never read `events.jsonl`, run logs or account credential files. Use only `wingman_result`, `wingman_status`, `wingman_list` and `git`.
 - Never push, and never commit to the base branch. Merging and pushing stay with the caller.
+- The prompt for a run must not ask it to delegate or use wingman: the run cannot and will not delegate further.
 
 ## Steps
 

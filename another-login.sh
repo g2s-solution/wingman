@@ -8,9 +8,9 @@ usage() {
 }
 
 SRC_RAW="${CLAUDE_DEFAULT_DIR:-$HOME/.claude}"
-# plugins are not shared by default (plugin state is tied to each account).
-# To share them, add "plugins" back to the array below.
-SHARED=(CLAUDE.md settings.json skills agents commands rules)
+# plugins are shared on purpose so that every profile has the same plugins, skills and settings.
+# Keep in step with SHARED_ITEMS in wingman/server/src/doctor.ts.
+SHARED=(CLAUDE.md settings.json skills agents commands rules plugins)
 KEY_FILE=api-key.env
 
 # realpath -m is missing on macOS/BSD, so fall back to python3
@@ -128,6 +128,10 @@ for f in "${SHARED[@]}"; do
   [ -e "$SRC/$f" ] || continue
   if [ -e "$dir/$f" ] && [ ! -L "$dir/$f" ]; then
     echo "skip $f: a real file or dir already exists in $dir"
+    if [ "$f" = plugins ]; then
+      echo "  to share plugins with the default profile, run: mv \"$dir/plugins\" \"$dir/plugins.bak\" && ln -s \"$SRC/plugins\" \"$dir/plugins\""
+      echo "  (the backup can be deleted after checking that the plugins still work)"
+    fi
     continue
   fi
   ln -sfn "$SRC/$f" "$dir/$f"

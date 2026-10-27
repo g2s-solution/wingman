@@ -2,6 +2,12 @@
 
 Versions are the plugin version in `wingman/.claude-plugin/plugin.json`. Claude Code only updates an installed plugin when this number changes.
 
+## 0.3.1
+
+- Role swap: `wingman accounts add` may register your own profile (a note is printed); every profile skips itself when choosing a target, so a registry listing all profiles lets each one delegate to the others. README has a new section "Delegate in both directions".
+- `another-login.sh` now also links `plugins` from the default profile, so all profiles share plugins, skills and settings. For an existing profile with a real `plugins/` directory the script and `wingman doctor` print the two commands that migrate it; nothing is moved automatically.
+- No delegation loops: a delegated run is told it must never delegate further (new rule 4 of the appended prompt) and the `SessionStart` hook no longer injects the "prefer new-agent" instruction inside a run. The hard guards are unchanged (depth, no wingman tools in a run).
+
 ## 0.3.0
 
 - Manage accounts without editing JSON: `wingman accounts list|add|disable|enable|remove` (run as `node <plugin dir>/wingman/bin/wingman accounts ...`). `another-login.sh` now registers the profile through it. `remove` needs `--yes` and never touches the profile directory or credentials.

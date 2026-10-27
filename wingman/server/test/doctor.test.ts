@@ -151,7 +151,10 @@ describe('doctor state and registry', () => {
     const { code, results } = await doctor();
     expect(code).toBe(0);
     expect(find(results, 'registry.accounts')?.level).toBe('warn');
-    expect(find(results, 'account.me.self')?.level).toBe('warn');
+    expect(find(results, 'account.me.self')).toMatchObject({
+      level: 'ok',
+      message: expect.stringContaining('info:'),
+    });
   });
 
   it('defaults the home to ~/.wingman and the default profile to ~/.claude', async () => {
@@ -237,6 +240,63 @@ describe('doctor shared items', () => {
     expect(find(results, 'account.b.shared.skills')?.level).toBe('warn');
     expect(find(results, 'account.b.shared.agents')?.message).toContain('somewhere other');
     expect(find(results, 'account.b.shared.commands')).toBeUndefined();
+  });
+
+  describe('plugins', () => {
+    const shared = (results: CheckResult[], id: string): CheckResult | undefined =>
+      find(results, `account.${id}.shared.plugins`);
+
+    it('is ok when linked to the default profile', async () => {
+      mkdirSync(join(defaultDir, 'plugins'));
+      const a = acct('b');
+      symlinkSync(join(defaultDir, 'plugins'), join(a.config_dir as string, 'plugins'));
+      writeRegistry([a]);
+      const { code, results } = await doctor();
+      expect(code).toBe(0);
+      expect(shared(results, 'b')?.level).toBe('ok');
+    });
+
+    it('warns with the exact migration commands when it is a real directory', async () => {
+      mkdirSync(join(defaultDir, 'plugins'));
+      const a = acct('b');
+      const target = join(a.config_dir as string, 'plugins');
+      mkdirSync(target);
+      writeRegistry([a]);
+      const { code, results } = await doctor();
+      expect(code).toBe(0);
+      const r = shared(results, 'b');
+      expect(r?.level).toBe('warn');
+      expect(r?.message).toContain(
+        `mv ${target} ${target}.bak && ln -s ${join(defaultDir, 'plugins')} ${target}`,
+      );
+      expect(r?.message).toContain('backup can be deleted');
+    });
+
+    it('fails on a broken link', async () => {
+      mkdirSync(join(defaultDir, 'plugins'));
+      const a = acct('b');
+      symlinkSync(join(root, 'missing-target'), join(a.config_dir as string, 'plugins'));
+      writeRegistry([a]);
+      const { code, results } = await doctor();
+      expect(code).toBe(1);
+      expect(shared(results, 'b')?.message).toContain('broken link');
+    });
+
+    it('is ok when absent in the profile', async () => {
+      mkdirSync(join(defaultDir, 'plugins'));
+      writeRegistry([acct('b')]);
+      const { results } = await doctor();
+      expect(shared(results, 'b')).toMatchObject({
+        level: 'ok',
+        message: expect.stringContaining('absent'),
+      });
+    });
+
+    it('is not checked when the default profile has no plugins', async () => {
+      writeRegistry([acct('b')]);
+      const { results } = await doctor();
+      expect(shared(results, 'b')).toBeUndefined();
+    });
   });
 
   it('an absent item is ok and info only', async () => {
