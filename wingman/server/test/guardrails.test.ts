@@ -178,6 +178,18 @@ describe('run branch rules', () => {
     expect((await settle(ro.id)).status).toBe('done');
   });
 
+  it('an edit-files run gets a run branch, and branch:false is refused for it', async () => {
+    const { repo } = featureRepo();
+    const started = await startRun(opts('ok', { cwd: repo, worktree: true, preset: 'edit-files' }));
+    expect(started.run_branch).toBe(`feat/g-wm-${started.id}`);
+    await expect(
+      startRun(
+        opts('ok', { cwd: repo, worktree: true, preset: 'edit-files', create_branch: false }),
+      ),
+    ).rejects.toThrow(/cannot commit/);
+    await settle(started.id);
+  });
+
   it('create_branch:true gives a readonly run a branch, and explicit allowed_tools imply one', async () => {
     const { repo } = featureRepo();
     const forced = await startRun(

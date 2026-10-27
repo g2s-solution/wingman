@@ -16,6 +16,7 @@ const account: Account = {
   provider: 'claude',
   command: '/bin/launcher',
 };
+const NOT_IN_EDIT_FILES = ['Agent', 'Skill', 'Bash(node:*)', 'Bash(npm:*)'];
 const spec: StartSpec = {
   prompt: 'do it',
   cwd: '/x',
@@ -54,18 +55,15 @@ describe('claude adapter command', () => {
       'Bash(git:*)',
       '--model',
       'opus',
-      '--',
-      'do it',
     ]);
   });
 
-  it('puts the prompt after a `--` terminator so a dash-leading prompt is not a flag', () => {
-    const prompt = '--dangerously-skip-permissions';
+  it('keeps the prompt out of the command line', () => {
+    const prompt = '--dangerously-skip-permissions MARKER-7f3a';
     const { args } = claudeAdapter.buildCommand(account, { ...spec, prompt });
-    expect(args.at(-1)).toBe(prompt);
-    expect(args.at(-2)).toBe('--');
-    expect(args.indexOf(prompt)).toBe(args.lastIndexOf('--') + 1);
-    expect(args.slice(0, -2)).not.toContain(prompt);
+    expect(args.join('\n')).not.toContain('MARKER-7f3a');
+    expect(args).not.toContain('--');
+    expect(args).not.toContain('--dangerously-skip-permissions');
   });
 
   it('omits optional flags', () => {
@@ -228,6 +226,18 @@ describe('guard', () => {
       'Bash(npm:*)',
       'Bash(date:*)',
     ]);
+    const files = PRESETS['edit-files'].allowed;
+    expect([...files].sort()).toEqual(
+      PRESETS.edit.allowed.filter((t) => !NOT_IN_EDIT_FILES.includes(t)).sort(),
+    );
+    for (const tool of ['Agent', 'Skill', 'Bash(node:*)', 'Bash(npm:*)', 'Bash(git:*)']) {
+      expect(files).not.toContain(tool);
+    }
+    expect(files.some((t) => /^Bash\((node|npm)/.test(t))).toBe(false);
+    const filesResolved = resolveTools({ preset: 'edit-files' });
+    expect(filesResolved.allowed).toEqual([...files]);
+    expect(filesResolved.disallowed).toContain('Bash(git push:*)');
+    expect(filesResolved.disallowed).toContain('AskUserQuestion');
     const deny = baseDisallowed();
     for (const name of [
       'AskUserQuestion',
