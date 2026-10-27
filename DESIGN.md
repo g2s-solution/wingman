@@ -15,7 +15,7 @@ Swapping roles needs no feature: start `claude` under another profile and that p
 
 ## Account registry
 
-`~/.wingman/accounts.json`. It never holds credentials; login stays in each profile's own config dir. In v0.1 it lists the profiles; the caller names one by `id` or omits it and the server picks one at random among eligible targets (see Account selection). Selection policy, tags and scope arrive in v0.2.
+`~/.wingman/accounts.json`. It never holds credentials; login stays in each profile's own config dir. In v0.1 it lists the profiles; the caller names one by `id` or omits it and the server picks one at random among eligible targets (see Account selection). Selection policy, tags and scope arrive in v0.5, and a registry CLI in v0.3 (see ROADMAP).
 
 | field | meaning |
 |---|---|
@@ -23,18 +23,18 @@ Swapping roles needs no feature: start `claude` under another profile and that p
 | `config_dir` | profile directory |
 | `provider` | agent backend, default `claude` |
 | `command` | executable that starts the agent for this profile, default `claude`; for a profile made by `another-login.sh` it is the launcher (for example `~/.local/bin/claude-second`), which sets `CLAUDE_CONFIG_DIR` and loads that profile's credential |
-| `scope` | data boundary (for example `company`); a run only goes to an account whose scope matches the work (v0.2) |
-| `tags`, `priority` | selection hints (v0.2) |
-| `status` | `active`, `disabled`, `rate_limited` (v0.3) |
-| `limited_until` | when `rate_limited` ends; expired values count as `active` (v0.3) |
+| `scope` | data boundary (for example `company`); a run only goes to an account whose scope matches the work (v0.5) |
+| `tags`, `priority` | selection hints (v0.5) |
+| `status` | `active`, `disabled`, `rate_limited` (written back automatically in v0.4) |
+| `limited_until` | when `rate_limited` ends; expired values count as `active` (v0.4) |
 
-Quota: every run records the `rate_limit_event` data the CLI emits (`status`, `resetsAt`, `rateLimitType`, `utilization`). That is per-run feedback, not a reliable pre-run gauge. The account `status` state machine built on it is v0.3.
+Quota: every run records the `rate_limit_event` data the CLI emits (`status`, `resetsAt`, `rateLimitType`, `utilization`). That is per-run feedback, not a reliable pre-run gauge. The account `status` state machine built on it is v0.4.
 
 ## Account selection
 
 v0.1: `account` is optional in `wingman_start`. When omitted, the server picks one at random among the registry targets that are not the caller's profile and not `disabled`. When given, it is used as is.
 
-v0.2 (skill `pick-account`) replaces the random pick with a smarter one:
+v0.5 (skill `pick-account`) replaces the random pick with a smarter one:
 
 1. Hard filter: `status = active` and matching `scope`.
 2. Match `tags` to the task (heavy implementation, cheap lookup).
@@ -83,7 +83,7 @@ A Claude Code plugin named `wingman`: MCP server declared in the plugin's `.mcp.
 
 ## Backends
 
-v0.1 supports Claude Code only, but the runner is written against a small adapter interface: build the command, set the account selector env, inject the guardrail prompt, parse events into a common shape (`started`, `message`, `tool`, `rate_limited`, `finished`), and report the session id. Registry entries have a `provider` field (default `claude`). Other providers (OpenAI Codex, OpenCode, and similar CLIs) are added as further adapters in v0.6; the guardrails and the capped-report rule stay in the server so they apply to every provider.
+v0.1 supports Claude Code only, but the runner is written against a small adapter interface: build the command, set the account selector env, inject the guardrail prompt, parse events into a common shape (`started`, `message`, `tool`, `rate_limited`, `finished`), and report the session id. Registry entries have a `provider` field (default `claude`). Other providers (OpenAI Codex, OpenCode, and similar CLIs) are added as further adapters in v0.7; the guardrails and the capped-report rule stay in the server so they apply to every provider.
 
 ## Engine
 
