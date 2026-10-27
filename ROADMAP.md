@@ -8,12 +8,13 @@ The order follows dependencies: first make the public project healthy, safe and 
 
 **v0.1** (released as 0.1.x): MCP server `wingman` with `wingman_start`, `wingman_status`, `wingman_result` (paged), `wingman_cancel`, `wingman_list`, `wingman_cleanup`; detached one-shot runs with state on disk; environment allowlist; a worktree per run cut from the caller's HEAD, with lock and cleanup; `readonly` and `edit` presets; guardrails (prompt, `WINGMAN_STATUS`, no push, no plugin management, no recursion, ref, config and hooks snapshot); masked output; `rate_limit_event` recorded per run; `wingman-wait`; skill `new-agent`; `another-login.sh` (login, launcher, registry entry); CI and a quality gate.
 
+**v0.2** (0.2.0): the prompt goes to the agent over stdin (not visible in `ps`); preset `edit-files` (no `node`, `npm`, `Agent`, `Skill`); `proc.ts` platform layer (`/proc` on Linux, `ps` on macOS) with a macOS CI job; `wingman wait` and `wingman gc` in the bundle (old run directories, stale locks, orphan worktrees). The macOS path has had little real-world use.
+
 ## Planned
 
 | Phase | Goal | Scope | Done when | Depends on |
 |---|---|---|---|---|
 | **v0.1.x** (patch releases) | Keep the public repository healthy. | Pin CI actions by SHA and add Dependabot; code of conduct, issue and PR templates, release checklist; remove timing-dependent tests (poll for conditions, never fixed sleeps); document retention of `~/.wingman` | CI actions pinned; the test suite passes three CI runs in a row without retries; templates exist | v0.1 |
-| **v0.2 Safe and portable** | Remove the known safety and platform gaps. | Pass the prompt on stdin or a file instead of argv; `proc.ts` platform layer (Linux `/proc`, macOS `ps`) shared by the server and `wingman-wait`; macOS CI job; `wingman gc` (old runs, `events.jsonl`, stale locks); a preset or option that drops `node` and `npm` from `edit` | `ps` shows no prompt text during a run; the test suite is green on Linux and macOS; README Limits no longer lists "Linux only" or "prompt in argv" | v0.1.x |
 | **v0.3 Manage accounts** | Manage the registry without editing JSON. | `wingman` CLI: `list`, `add`, `disable`, `enable`, `remove`, reusing the registration logic of `another-login.sh`; tool `wingman_accounts`; `doctor` (profile symlinks, plugin version in each profile, whether `CLAUDE_CONFIG_DIR` still takes effect); skill `add-account` | Add, disable and list work from the CLI alone; `doctor` flags a broken symlink in a test fixture | v0.2 |
 | **v0.4 Account status** | Make limits visible and self-healing. | Write `rate_limited` and `limited_until` back to the registry from the run's `rate_limit` data (the run already ends as `rate_limited` and records it); expiry on read; `mark-limited --until`; a hint to the caller naming other active accounts; per-account run and outcome summary | A run that hits a limit marks its account, the account is skipped until it expires, and the caller sees alternatives | v0.3 |
 | **v0.5 Selection policy** | Pick targets by policy instead of at random. | `tags`, `priority`, `scope`, filters; least-recently-used default; skill `pick-account`; failover stays the caller's decision | With three accounts, selection honors tags and priority and skips limited ones, in tests | v0.4 |
@@ -22,7 +23,7 @@ The order follows dependencies: first make the public project healthy, safe and 
 
 ## Verification debt
 
-Not verified yet, each owned by the phase that depends on it: spawning from a real interactive Claude Code session (v0.1.x), whether `--bg` background sessions work under a custom `CLAUDE_CONFIG_DIR` (v0.6), `acceptEdits` versus `auto` permission mode for `edit` (v0.2), whether the settings symlink survives a Claude Code rewrite (v0.3 `doctor`), and a Claude Code version compatibility matrix with a canary CI job (v0.2).
+Not verified yet, each owned by the phase that depends on it: spawning from a real interactive Claude Code session (v0.1.x), whether `--bg` background sessions work under a custom `CLAUDE_CONFIG_DIR` (v0.6), `acceptEdits` versus `auto` permission mode for `edit` (v0.3), whether the settings symlink survives a Claude Code rewrite (v0.3 `doctor`), and a Claude Code version compatibility matrix with a canary CI job (v0.3).
 
 ## Out of scope for now
 
