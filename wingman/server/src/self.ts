@@ -2,7 +2,7 @@ import { realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 
-function canonical(dir: string): string {
+export function canonical(dir: string): string {
   try {
     return realpathSync(dir);
   } catch {

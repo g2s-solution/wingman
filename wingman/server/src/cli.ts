@@ -1,5 +1,6 @@
 import { chmodSync, existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { accountsCommand } from './accounts.js';
 import { DEFAULT_OLDER_THAN_DAYS, runGc } from './gc.js';
 import { runDir } from './paths.js';
 import { groupMembers } from './proc.js';
@@ -8,7 +9,7 @@ import { writeResult } from './runs.js';
 import { TERMINAL_STATUSES, type RunMeta } from './types.js';
 
 const RUN_ID = /^[A-Za-z0-9_-]{1,64}$/;
-const COMMANDS = ['wait', 'gc'];
+const COMMANDS = ['wait', 'gc', 'accounts'];
 const NO_RESULT_TEXT = '[wingman] the run ended without a result message (supervisor gone)';
 const ORPHAN_DRAIN_MS = 3500;
 
@@ -24,6 +25,7 @@ export async function maybeRunCli(argv: string[]): Promise<number | undefined> {
   const [command, ...args] = argv.slice(2);
   if (command === undefined || !COMMANDS.includes(command)) return undefined;
   try {
+    if (command === 'accounts') return await accountsCommand(args);
     return command === 'wait' ? await waitCommand(args) : await gcCommand(args);
   } catch (err) {
     if (err instanceof UsageError) {
