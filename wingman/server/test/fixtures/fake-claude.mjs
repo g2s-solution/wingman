@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { appendFileSync } from 'node:fs';
+import { setInterval } from 'node:timers';
 
 const mode = process.env.FAKE_CLAUDE_MODE ?? 'ok';
 const log = process.env.FAKE_CLAUDE_LOG;

@@ -60,6 +60,7 @@ export function makeRepo(branch = 'main'): string {
   git('config', 'user.name', 'T');
   mkdirSync(join(dir, 'sub'));
   writeFileSync(join(dir, 'a.txt'), 'a');
+  writeFileSync(join(dir, 'sub', 'keep.txt'), 'k');
   git('add', '.');
   git('commit', '-q', '-m', 'init');
   return dir;
