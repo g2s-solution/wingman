@@ -426,6 +426,11 @@ export async function startRun(opts: StartRunOptions): Promise<RunMeta> {
   }
   const mayCommit =
     (opts.preset ?? DEFAULT_PRESET) !== 'readonly' || opts.allowed_tools !== undefined;
+  if (opts.create_branch === false && mayCommit && opts.worktree) {
+    throw new Error(
+      'branch:false is only for runs that cannot commit: commits in a detached worktree would be lost on cleanup',
+    );
+  }
   const repo = opts.worktree ? top : undefined;
   if (opts.lock_key !== undefined && !repo) {
     throw new Error('lock_key needs a worktree run inside a git repository');

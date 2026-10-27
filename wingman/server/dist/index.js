@@ -29880,6 +29880,11 @@ async function startRun(opts) {
     }
   }
   const mayCommit = (opts.preset ?? DEFAULT_PRESET) !== "readonly" || opts.allowed_tools !== void 0;
+  if (opts.create_branch === false && mayCommit && opts.worktree) {
+    throw new Error(
+      "branch:false is only for runs that cannot commit: commits in a detached worktree would be lost on cleanup"
+    );
+  }
   const repo = opts.worktree ? top : void 0;
   if (opts.lock_key !== void 0 && !repo) {
     throw new Error("lock_key needs a worktree run inside a git repository");
@@ -38262,7 +38267,7 @@ var startInput = {
     "Run in a fresh git worktree; default true in a repo, also when the caller is on the base branch."
   ),
   branch: external_exports.boolean().optional().describe(
-    "Create a run branch in the worktree. Default: yes for edit runs, no (detached worktree) for readonly runs."
+    "Create a run branch in the worktree. Default: yes for edit runs, no (detached worktree) for readonly runs. branch:false is refused for runs that may commit."
   ),
   lock_key: external_exports.string().min(1).max(200).optional().describe(
     "Stops two concurrent runs in the same repo with the same key. Needs a worktree run: refused with worktree:false or outside a git repo."
@@ -38412,7 +38417,7 @@ function buildServer(deps = {}) {
   server.registerTool(
     "wingman_cleanup",
     {
-      description: "Remove the worktree and lock of a finished run; the run branch is always kept. Refused while running.",
+      description: "Remove the worktree and lock of a finished run; the run branch, when the run has one, is kept. Refused while running.",
       inputSchema: { ...runIdInput, action: external_exports.enum(["accept", "discard"]) }
     },
     wrap(h.cleanup)

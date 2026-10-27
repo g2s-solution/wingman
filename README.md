@@ -51,7 +51,7 @@ In a session: `/new-agent <task>`. The skill chooses a preset, calls `wingman_st
 | `wingman_status`, `wingman_result` | state and the final report, masked and capped |
 | `wingman_cancel` | stop a run |
 | `wingman_list` | recent runs |
-| `wingman_cleanup` | remove a run's worktree (`accept` refuses uncommitted changes); the run branch is always kept |
+| `wingman_cleanup` | remove a run's worktree (`accept` refuses uncommitted changes); the run branch, when there is one, is kept |
 
 Run state lives in `~/.wingman/runs/<id>/`. Do not read `events.jsonl`: it holds raw tool output. Review an edit run with `git diff --stat <caller-branch>..<run-branch>`; merging and pushing stay with the caller.
 

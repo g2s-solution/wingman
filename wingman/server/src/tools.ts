@@ -120,7 +120,7 @@ const startInput = {
     .boolean()
     .optional()
     .describe(
-      'Create a run branch in the worktree. Default: yes for edit runs, no (detached worktree) for readonly runs.',
+      'Create a run branch in the worktree. Default: yes for edit runs, no (detached worktree) for readonly runs. branch:false is refused for runs that may commit.',
     ),
   lock_key: z
     .string()
@@ -300,7 +300,7 @@ export function buildServer(deps: ServerDeps = {}): McpServer {
     'wingman_cleanup',
     {
       description:
-        'Remove the worktree and lock of a finished run; the run branch is always kept. Refused while running.',
+        'Remove the worktree and lock of a finished run; the run branch, when the run has one, is kept. Refused while running.',
       inputSchema: { ...runIdInput, action: z.enum(['accept', 'discard']) },
     },
     wrap(h.cleanup),

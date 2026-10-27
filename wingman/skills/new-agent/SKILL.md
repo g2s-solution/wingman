@@ -25,7 +25,7 @@ Run a task on another Claude account through the wingman MCP server. The run is 
    - `git diff --stat <caller-branch>...<run-branch>`
    - `git diff <caller-branch>...<run-branch> | grep -c -iE 'bearer|token|secret|password|jwt|authorization|api[_-]?key'`
    - Read a hunk only when the count is 0 or the match is judged harmless by file and function name, never by printing the line.
-6. **Cleanup, case by case.** Propose it yourself: accept or discard the worktree, then `wingman_cleanup` (the run branch is kept). Ask the user only for destructive or ambiguous cases. Merging and pushing stay with the caller.
+6. **Cleanup, case by case.** Propose it yourself: accept or discard the worktree, then `wingman_cleanup` (the run branch, if there is one, is kept; readonly runs have none). Ask the user only for destructive or ambiguous cases. Merging and pushing stay with the caller.
 
 ## Statuses
 
