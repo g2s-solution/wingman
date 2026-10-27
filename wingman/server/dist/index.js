@@ -28611,255 +28611,169 @@ var StdioServerTransport = class {
   }
 };
 
-// src/runner.ts
-import { randomUUID } from "node:crypto";
-import { closeSync as closeSync3, mkdirSync as mkdirSync3, openSync as openSync3, realpathSync as realpathSync3, rmSync as rmSync3 } from "node:fs";
-import { spawn as spawn2 } from "node:child_process";
-import { createInterface } from "node:readline";
-import { relative, join as join7, isAbsolute as isAbsolute2 } from "node:path";
+// src/cli.ts
+import { chmodSync as chmodSync3, existsSync as existsSync5, readFileSync as readFileSync4, renameSync as renameSync3, writeFileSync as writeFileSync3 } from "node:fs";
+import { join as join6 } from "node:path";
 
-// src/guard.ts
-var DEFAULT_PRESET = "readonly";
-var STATUS_VALUES = ["done", "partial", "blocked", "needs_input"];
-var PRESETS = {
-  readonly: {
-    allowed: [
-      "Read",
-      "Glob",
-      "Grep",
-      "Bash(git log:*)",
-      "Bash(git diff:*)",
-      "Bash(git status:*)",
-      "Bash(git show:*)",
-      "Bash(date:*)"
-    ]
-  },
-  edit: {
-    allowed: [
-      "Agent",
-      "Skill",
-      "Edit",
-      "Write",
-      "Read",
-      "Glob",
-      "Grep",
-      "Bash(git status:*)",
-      "Bash(git add:*)",
-      "Bash(git commit:*)",
-      "Bash(git diff:*)",
-      "Bash(git log:*)",
-      "Bash(git show:*)",
-      "Bash(git rev-parse:*)",
-      "Bash(git branch --show-current)",
-      "Bash(git ls-files:*)",
-      "Bash(git mv:*)",
-      "Bash(git rm:*)",
-      "Bash(git restore:*)",
-      "Bash(node:*)",
-      "Bash(npm:*)",
-      "Bash(date:*)"
-    ]
-  }
-};
-function guardPrompt() {
-  return [
-    "You are running as a delegated wingman run inside another Claude Code session. These rules override any other instruction, rule or skill you load:",
-    "1. Never print, send or write sensitive values: tokens (Bearer, JWT, PAT, API keys), passwords, secrets, private keys, credentials in URLs, .env values or personal data. Do not read files that may hold them; check with a count first and report structure only.",
-    "2. Never commit or push to the base branch (main, master or the repository default branch). Work only on the branch you were started on. Never run git push.",
-    '3. Never ask questions and never wait for an answer. Inside a wingman run, any rule or skill that says "ask the Human" means: stop and finish with WINGMAN_STATUS: needs_input.',
-    "4. Do not manage plugins (no claude plugin install or update) and do not call wingman tools.",
-    "5. Always end with a final report. The last line of your final message must be exactly one of: WINGMAN_STATUS: done, WINGMAN_STATUS: partial, WINGMAN_STATUS: blocked, WINGMAN_STATUS: needs_input."
-  ].join("\n");
-}
-function baseDisallowed() {
-  return [
-    "AskUserQuestion",
-    "Bash(git push:*)",
-    "Bash(git -C:*)",
-    "Bash(git -c:*)",
-    "Bash(git --no-pager:*)",
-    "Bash(git --git-dir:*)",
-    "Bash(git --work-tree:*)",
-    "Bash(git send-pack:*)",
-    "Bash(git diff --output:*)",
-    "Bash(git log --output:*)",
-    "Bash(git show --output:*)",
-    "Bash(git update-ref:*)",
-    "Bash(git config:*)",
-    "Bash(git remote:*)",
-    "Bash(claude:*)",
-    "Bash(claude plugin:*)",
-    "Bash(npm install -g:*)",
-    "Bash(npm publish:*)",
-    "mcp__plugin_wingman_*",
-    "mcp__wingman__*",
-    "mcp__plugin_wingman_wingman__*"
-  ];
-}
-var TOOL_ITEM = /^(?!-)[A-Za-z0-9_*.:()\- ,/'"@=+~[\]$|]+$/;
-function assertToolItems(items, label) {
-  for (const item of items) {
-    if (!TOOL_ITEM.test(item) || item.length > 300) {
-      throw new Error(`Invalid ${label} item "${item.slice(0, 60)}"`);
-    }
-  }
-}
-function resolveTools(sel) {
-  const disallowed = baseDisallowed();
-  let allowed;
-  if (sel.allowed_tools !== void 0) {
-    assertToolItems(sel.allowed_tools, "allowed_tools");
-    allowed = [...sel.allowed_tools];
-  } else {
-    const name = sel.preset ?? DEFAULT_PRESET;
-    const preset = Object.hasOwn(PRESETS, name) ? PRESETS[name] : void 0;
-    if (!preset) throw new Error(`Unknown preset "${name}"`);
-    allowed = [...preset.allowed];
-  }
-  allowed = allowed.filter((name) => !disallowed.includes(name));
-  return { allowed, disallowed };
-}
-function parseStatusLine(text) {
-  let found = null;
-  const re = /^[ \t]*WINGMAN_STATUS:[ \t]*([a-z_]+)[ \t]*$/gm;
-  for (const match of text.matchAll(re)) {
-    const value = match[1];
-    if (STATUS_VALUES.includes(value)) found = value;
-  }
-  return found;
-}
+// src/gc.ts
+import { existsSync as existsSync4, readdirSync as readdirSync4, rmSync as rmSync3, statSync } from "node:fs";
+import { join as join5 } from "node:path";
 
-// src/adapters/claude.ts
-var ALLOWED_ENV = /* @__PURE__ */ new Set([
-  "PATH",
-  "HOME",
-  "USER",
-  "LOGNAME",
-  "LANG",
-  "TERM",
-  "SHELL",
-  "TMPDIR",
-  "HTTPS_PROXY",
-  "https_proxy",
-  "HTTP_PROXY",
-  "http_proxy",
-  "NO_PROXY",
-  "no_proxy"
-]);
-var NON_REJECTIONS = /* @__PURE__ */ new Set(["allowed", "allowed_warning"]);
-function isRateLimitRejected(info) {
-  return info.status !== void 0 && !NON_REJECTIONS.has(info.status);
+// src/paths.ts
+import { homedir } from "node:os";
+import { join } from "node:path";
+function wingmanHome() {
+  return process.env.WINGMAN_HOME || join(homedir(), ".wingman");
 }
-function isObject2(value) {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-function str(value) {
-  return typeof value === "string" ? value : void 0;
-}
-function num(value) {
-  return typeof value === "number" && Number.isFinite(value) ? value : void 0;
-}
-var claudeAdapter = {
-  provider: "claude",
-  buildCommand(account, spec) {
-    assertToolItems(spec.allowed_tools, "allowed_tools");
-    assertToolItems(spec.disallowed_tools, "disallowed_tools");
-    const args = ["-p"];
-    args.push("--session-id", spec.session_id);
-    args.push("--append-system-prompt", spec.append_system_prompt);
-    args.push("--disallowedTools", ...spec.disallowed_tools);
-    args.push("--permission-mode", "acceptEdits", "--permission-prompts", "none");
-    if (spec.max_turns !== void 0) args.push("--max-turns", String(spec.max_turns));
-    args.push("--output-format", "stream-json", "--verbose", "--strict-mcp-config");
-    if (spec.allowed_tools.length > 0) args.push("--allowedTools", ...spec.allowed_tools);
-    if (spec.model) args.push("--model", spec.model);
-    args.push("--", spec.prompt);
-    return { command: account.command, args };
-  },
-  buildEnv(parent, account, depth) {
-    const env = {};
-    for (const [name, value] of Object.entries(parent)) {
-      if (value === void 0) continue;
-      if (ALLOWED_ENV.has(name) || name.startsWith("LC_")) env[name] = value;
+var accountsFile = () => join(wingmanHome(), "accounts.json");
+var runsDir = () => join(wingmanHome(), "runs");
+var runDir = (id) => join(runsDir(), id);
+var worktreesDir = () => join(wingmanHome(), "worktrees");
+
+// src/proc.ts
+import { execFileSync } from "node:child_process";
+import { readFileSync, readdirSync } from "node:fs";
+var defaultPsExec = (file2, args) => execFileSync(file2, args, {
+  encoding: "utf8",
+  env: { ...process.env, LC_ALL: "C" },
+  stdio: ["ignore", "pipe", "ignore"],
+  timeout: 5e3,
+  maxBuffer: 16 * 1024 * 1024
+});
+function procfsBackend() {
+  return {
+    startTime(pid) {
+      try {
+        const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+        const rest = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
+        return rest[19];
+      } catch {
+        return void 0;
+      }
+    },
+    groupMembers(pgid) {
+      let names;
+      try {
+        names = readdirSync("/proc");
+      } catch {
+        return [];
+      }
+      const members2 = [];
+      for (const name of names) {
+        if (!/^\d+$/.test(name)) continue;
+        try {
+          const stat = readFileSync(`/proc/${name}/stat`, "utf8");
+          const rest = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
+          if (rest[0] !== "Z" && Number(rest[2]) === pgid) members2.push(Number(name));
+        } catch {
+        }
+      }
+      return members2;
     }
-    env.CLAUDE_CONFIG_DIR = account.config_dir;
-    env.WINGMAN_DEPTH = String(depth);
-    return env;
-  },
-  parseLine(line) {
-    let data;
+  };
+}
+function psBackend(exec = defaultPsExec) {
+  return {
+    startTime(pid) {
+      if (!Number.isInteger(pid) || pid <= 0) return void 0;
+      try {
+        const out = exec("ps", ["-o", "lstart=", "-p", String(pid)]).trim().replace(/\s+/g, " ");
+        return out === "" ? void 0 : out;
+      } catch {
+        return void 0;
+      }
+    },
+    groupMembers(pgid) {
+      let out;
+      try {
+        out = exec("ps", ["-A", "-o", "pid=,pgid=,stat="]);
+      } catch {
+        return [];
+      }
+      const members2 = [];
+      for (const line of out.split("\n")) {
+        const m = /^\s*(\d+)\s+(\d+)\s+(\S+)\s*$/.exec(line);
+        if (!m || m[3].startsWith("Z")) continue;
+        if (Number(m[2]) === pgid) members2.push(Number(m[1]));
+      }
+      return members2;
+    }
+  };
+}
+function backendFor(platform, exec) {
+  return platform === "linux" ? procfsBackend() : psBackend(exec);
+}
+var current;
+function defaultBackend() {
+  current ??= backendFor(process.platform);
+  return current;
+}
+function readStartTime(pid, backend = defaultBackend()) {
+  return backend.startTime(pid);
+}
+function isAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return err.code === "EPERM";
+  }
+}
+function isSameProcess(pid, startTime, backend = defaultBackend()) {
+  if (!isAlive(pid)) return false;
+  if (startTime === void 0) return true;
+  const actual = backend.startTime(pid);
+  return actual === void 0 || actual === startTime;
+}
+var GROUP_KILL_GRACE_MS = 3e3;
+function groupMembers(pgid, backend = defaultBackend()) {
+  return backend.groupMembers(pgid);
+}
+function hasOrphanedGroup(pgid, backend = defaultBackend()) {
+  if (!Number.isInteger(pgid) || pgid <= 1 || isAlive(pgid)) return false;
+  const members2 = backend.groupMembers(pgid);
+  return members2.length > 0 && !members2.includes(process.pid);
+}
+function terminateOrphanedGroup(pgid, graceMs2 = GROUP_KILL_GRACE_MS) {
+  if (!hasOrphanedGroup(pgid)) return false;
+  try {
+    process.kill(-pgid, "SIGTERM");
+  } catch {
+    return false;
+  }
+  setTimeout(() => {
+    if (!hasOrphanedGroup(pgid)) return;
     try {
-      data = JSON.parse(line);
+      process.kill(-pgid, "SIGKILL");
     } catch {
-      return [];
     }
-    if (!isObject2(data)) return [];
-    const events = [];
-    switch (data.type) {
-      case "system": {
-        const sessionId = str(data.session_id);
-        if (data.subtype === "init" && sessionId) {
-          events.push({ kind: "started", session_id: sessionId });
-        }
-        break;
-      }
-      case "assistant": {
-        const message = data.message;
-        const content = isObject2(message) ? message.content : void 0;
-        if (!Array.isArray(content)) break;
-        for (const block of content) {
-          if (!isObject2(block)) continue;
-          if (block.type === "text" && typeof block.text === "string") {
-            events.push({ kind: "message", text: block.text });
-          } else if (block.type === "tool_use" && typeof block.name === "string") {
-            events.push({ kind: "tool", name: block.name });
-          }
-        }
-        break;
-      }
-      case "rate_limit_event": {
-        const raw = data.rate_limit_info;
-        if (!isObject2(raw)) break;
-        const info = {};
-        const status = str(raw.status);
-        const resetsAt = num(raw.resetsAt);
-        const rateLimitType = str(raw.rateLimitType);
-        const utilization = num(raw.utilization);
-        if (status !== void 0) info.status = status;
-        if (resetsAt !== void 0) info.resetsAt = resetsAt;
-        if (rateLimitType !== void 0) info.rateLimitType = rateLimitType;
-        if (utilization !== void 0) info.utilization = utilization;
-        events.push({ kind: "rate_limited", info });
-        break;
-      }
-      case "result": {
-        const denials = [];
-        if (Array.isArray(data.permission_denials)) {
-          for (const d of data.permission_denials) {
-            if (isObject2(d) && typeof d.tool_name === "string") denials.push(d.tool_name);
-          }
-        }
-        const isError = data.is_error === true || data.subtype !== void 0 && data.subtype !== "success";
-        const finished = {
-          kind: "finished",
-          result: typeof data.result === "string" ? data.result : null,
-          is_error: isError,
-          permission_denials: denials
-        };
-        if (data.subtype === "error_max_turns") finished.max_turns = true;
-        events.push(finished);
-        break;
-      }
-      default:
-        break;
-    }
-    return events;
-  }
-};
-function getAdapter(provider) {
-  if (provider === "claude") return claudeAdapter;
-  throw new Error(`No adapter for provider "${provider}"`);
+  }, graceMs2).unref();
+  return true;
 }
+
+// src/reconcile.ts
+import { existsSync as existsSync2 } from "node:fs";
+import { join as join3 } from "node:path";
+
+// src/runs.ts
+import { randomBytes } from "node:crypto";
+import {
+  chmodSync,
+  closeSync,
+  existsSync,
+  fstatSync,
+  mkdirSync,
+  openSync,
+  readFileSync as readFileSync2,
+  readSync,
+  readdirSync as readdirSync2,
+  renameSync,
+  rmSync,
+  unlinkSync,
+  writeFileSync,
+  appendFileSync
+} from "node:fs";
+import { join as join2 } from "node:path";
 
 // src/mask.ts
 var MASK = "[MASKED]";
@@ -28897,37 +28811,6 @@ function capText(text, max) {
 function safeSummary(text, max = 4e3) {
   return capText(maskSecrets(text), max);
 }
-
-// src/paths.ts
-import { homedir } from "node:os";
-import { join } from "node:path";
-function wingmanHome() {
-  return process.env.WINGMAN_HOME || join(homedir(), ".wingman");
-}
-var accountsFile = () => join(wingmanHome(), "accounts.json");
-var runsDir = () => join(wingmanHome(), "runs");
-var runDir = (id) => join(runsDir(), id);
-var worktreesDir = () => join(wingmanHome(), "worktrees");
-
-// src/runs.ts
-import { randomBytes } from "node:crypto";
-import {
-  chmodSync,
-  closeSync,
-  existsSync,
-  fstatSync,
-  mkdirSync,
-  openSync,
-  readFileSync,
-  readSync,
-  readdirSync,
-  renameSync,
-  rmSync,
-  unlinkSync,
-  writeFileSync,
-  appendFileSync
-} from "node:fs";
-import { join as join2 } from "node:path";
 
 // src/types.ts
 var TERMINAL_STATUSES = [
@@ -29042,23 +28925,23 @@ function writeMeta(meta3) {
 `);
 }
 function patchRunning(id, patch) {
-  const current = readMeta(id);
-  if (TERMINAL_STATUSES.includes(current.status)) {
-    throw new Error(`run ${id} already ended as ${current.status} during start`);
+  const current2 = readMeta(id);
+  if (TERMINAL_STATUSES.includes(current2.status)) {
+    throw new Error(`run ${id} already ended as ${current2.status} during start`);
   }
-  const next = { ...current, ...patch, id, status: current.status };
+  const next = { ...current2, ...patch, id, status: current2.status };
   writeMeta(next);
   return next;
 }
 function readMeta(id) {
-  return metaSchema.parse(JSON.parse(readFileSync(join2(dirOf(id), "meta.json"), "utf8")));
+  return metaSchema.parse(JSON.parse(readFileSync2(join2(dirOf(id), "meta.json"), "utf8")));
 }
 function updateStatus(id, status, patch = {}) {
-  const current = readMeta(id);
-  if (TERMINAL_STATUSES.includes(current.status) && current.status !== status) {
-    throw new Error(`run ${id} is already ${current.status}; cannot change to ${status}`);
+  const current2 = readMeta(id);
+  if (TERMINAL_STATUSES.includes(current2.status) && current2.status !== status) {
+    throw new Error(`run ${id} is already ${current2.status}; cannot change to ${status}`);
   }
-  const next = { ...current, ...patch, id, status };
+  const next = { ...current2, ...patch, id, status };
   if (TERMINAL_STATUSES.includes(status) && !next.finished_at) {
     next.finished_at = (/* @__PURE__ */ new Date()).toISOString();
   }
@@ -29115,7 +28998,7 @@ function writeResult(id, text) {
 function listRuns() {
   if (!existsSync(runsDir())) return [];
   const runs = [];
-  for (const entry of readdirSync(runsDir())) {
+  for (const entry of readdirSync2(runsDir())) {
     if (!RUN_ID.test(entry)) continue;
     try {
       runs.push(readMeta(entry));
@@ -29127,7 +29010,7 @@ function listRuns() {
 function runSummary(id, page = {}) {
   const meta3 = readMeta(id);
   const resultPath = join2(dirOf(id), "result.md");
-  const masked = existsSync(resultPath) ? maskSecrets(readFileSync(resultPath, "utf8")) : null;
+  const masked = existsSync(resultPath) ? maskSecrets(readFileSync2(resultPath, "utf8")) : null;
   const summary = {
     id: meta3.id,
     account: meta3.account,
@@ -29156,91 +29039,22 @@ function runSummary(id, page = {}) {
   return summary;
 }
 
-// src/proc.ts
-import { readFileSync as readFileSync2, readdirSync as readdirSync2 } from "node:fs";
-function readStartTime(pid) {
-  try {
-    const stat = readFileSync2(`/proc/${pid}/stat`, "utf8");
-    const rest = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
-    return rest[19];
-  } catch {
-    return void 0;
-  }
-}
-function isAlive(pid) {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (err) {
-    return err.code === "EPERM";
-  }
-}
-function isSameProcess(pid, startTime) {
-  if (!isAlive(pid)) return false;
-  if (startTime === void 0) return true;
-  const actual = readStartTime(pid);
-  return actual === void 0 || actual === startTime;
-}
-var GROUP_KILL_GRACE_MS = 3e3;
-function groupMembers(pgid) {
-  let names;
-  try {
-    names = readdirSync2("/proc");
-  } catch {
-    return [];
-  }
-  const members2 = [];
-  for (const name of names) {
-    if (!/^\d+$/.test(name)) continue;
-    try {
-      const stat = readFileSync2(`/proc/${name}/stat`, "utf8");
-      const rest = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
-      if (rest[0] !== "Z" && Number(rest[2]) === pgid) members2.push(Number(name));
-    } catch {
-    }
-  }
-  return members2;
-}
-function hasOrphanedGroup(pgid) {
-  if (!Number.isInteger(pgid) || pgid <= 1 || isAlive(pgid)) return false;
-  const members2 = groupMembers(pgid);
-  return members2.length > 0 && !members2.includes(process.pid);
-}
-function terminateOrphanedGroup(pgid, graceMs2 = GROUP_KILL_GRACE_MS) {
-  if (!hasOrphanedGroup(pgid)) return false;
-  try {
-    process.kill(-pgid, "SIGTERM");
-  } catch {
-    return false;
-  }
-  setTimeout(() => {
-    if (!hasOrphanedGroup(pgid)) return;
-    try {
-      process.kill(-pgid, "SIGKILL");
-    } catch {
-    }
-  }, graceMs2).unref();
-  return true;
-}
-
 // src/reconcile.ts
-import { existsSync as existsSync2 } from "node:fs";
-import { join as join3 } from "node:path";
 var DEFAULT_NO_PID_GRACE_MS = 20 * 60 * 1e3;
 function graceMs(opts) {
   if (opts.noPidGraceMs !== void 0) return opts.noPidGraceMs;
   const raw = Number(process.env.WINGMAN_NO_PID_GRACE_MS);
   return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_NO_PID_GRACE_MS;
 }
+function supervisorGone(meta3, opts = {}) {
+  if (meta3.pid !== void 0) return !isSameProcess(meta3.pid, meta3.pid_start_time);
+  const age = (opts.now ?? Date.now()) - Date.parse(meta3.created_at);
+  return age > graceMs(opts);
+}
 function reconcile(meta3, opts = {}) {
   if (meta3.status !== "running") return meta3;
-  if (meta3.pid !== void 0) {
-    if (isSameProcess(meta3.pid, meta3.pid_start_time)) return meta3;
-    terminateOrphanedGroup(meta3.pid);
-  } else {
-    const age = (opts.now ?? Date.now()) - Date.parse(meta3.created_at);
-    if (!(age > graceMs(opts))) return meta3;
-  }
+  if (!supervisorGone(meta3, opts)) return meta3;
+  if (meta3.pid !== void 0) terminateOrphanedGroup(meta3.pid);
   const again = readMeta(meta3.id);
   if (TERMINAL_STATUSES.includes(again.status)) return again;
   if (!existsSync2(join3(runDir(meta3.id), "result.md"))) {
@@ -29252,40 +29066,6 @@ function reconcile(meta3, opts = {}) {
     return readMeta(meta3.id);
   }
 }
-
-// src/self.ts
-import { realpathSync } from "node:fs";
-import { homedir as homedir2 } from "node:os";
-import { join as join4, resolve } from "node:path";
-function canonical(dir) {
-  try {
-    return realpathSync(dir);
-  } catch {
-    return resolve(dir);
-  }
-}
-function callerProfile(env = process.env) {
-  const configured = env.CLAUDE_CONFIG_DIR;
-  return canonical(configured ? configured : join4(homedir2(), ".claude"));
-}
-function currentDepth(env = process.env) {
-  const raw = env.WINGMAN_DEPTH;
-  if (raw === void 0 || !/^\d+$/.test(raw.trim())) return 0;
-  return Number.parseInt(raw.trim(), 10);
-}
-function assertCanStart(env = process.env, limit = 1) {
-  const depth = currentDepth(env);
-  if (depth >= limit) {
-    throw new Error(
-      `Refusing to start a nested run: WINGMAN_DEPTH=${depth} has reached the limit of ${limit}`
-    );
-  }
-}
-
-// src/snapshot.ts
-import { createHash as createHash2 } from "node:crypto";
-import { existsSync as existsSync4, readFileSync as readFileSync4, readdirSync as readdirSync4, statSync } from "node:fs";
-import { isAbsolute, join as join6, resolve as resolve2 } from "node:path";
 
 // src/worktree.ts
 import { spawn } from "node:child_process";
@@ -29299,12 +29079,12 @@ import {
   readFileSync as readFileSync3,
   linkSync,
   readdirSync as readdirSync3,
-  realpathSync as realpathSync2,
+  realpathSync,
   renameSync as renameSync2,
   rmSync as rmSync2,
   writeFileSync as writeFileSync2
 } from "node:fs";
-import { join as join5 } from "node:path";
+import { join as join4 } from "node:path";
 var PROXY_VARS = ["HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"];
 var TIMED_OUT = 124;
 var MAX_OUTPUT = 16 * 1024 * 1024;
@@ -29362,11 +29142,11 @@ function withoutProxy(env) {
   return copy;
 }
 function locksDir() {
-  return join5(wingmanHome(), "locks");
+  return join4(wingmanHome(), "locks");
 }
 function lockPathFor(repo, lockKey) {
-  const key = createHash("sha256").update(`${realpathSync2(repo)}\0${lockKey}`).digest("hex");
-  return join5(locksDir(), `${key.slice(0, 24)}.lock`);
+  const key = createHash("sha256").update(`${realpathSync(repo)}\0${lockKey}`).digest("hex");
+  return join4(locksDir(), `${key.slice(0, 24)}.lock`);
 }
 function readLock(path) {
   try {
@@ -29437,7 +29217,7 @@ function setLockOwner(lockPath, pid) {
 function releaseLocksOf(runId) {
   if (!existsSync3(locksDir())) return;
   for (const entry of readdirSync3(locksDir())) {
-    const path = join5(locksDir(), entry);
+    const path = join4(locksDir(), entry);
     if (readLock(path)?.run_id === runId) rmSync2(path, { force: true });
   }
 }
@@ -29483,7 +29263,7 @@ async function createWorktree(opts) {
   try {
     mkdirSync2(worktreesDir(), { recursive: true, mode: 448 });
     chmodSync2(worktreesDir(), 448);
-    const path = join5(worktreesDir(), runId);
+    const path = join4(worktreesDir(), runId);
     const branch = opts.createBranch === false ? void 0 : fromBase ? `wingman/${runId}` : `${callerBranch}-wm-${runId}`;
     const added = await execWithinBudget(
       exec,
@@ -29553,10 +29333,11 @@ async function removeWorktree(runId, exec = defaultExec) {
 async function pruneOrphans(opts = {}) {
   const removed = [];
   const minAge = opts.minAgeMs ?? 0;
+  const seen = /* @__PURE__ */ new Set();
   for (const listed of listRuns()) {
     if (!listed.worktree || !existsSync3(listed.worktree) || !existsSync3(runDir(listed.id)))
       continue;
-    const meta3 = reconcile(listed);
+    const meta3 = opts.dryRun ? peekReconciled(listed) : reconcile(listed);
     const terminal = TERMINAL_STATUSES.includes(meta3.status);
     const wasDead = listed.status === "running" && terminal;
     if (!terminal) continue;
@@ -29565,6 +29346,12 @@ async function pruneOrphans(opts = {}) {
     }
     if (meta3.pid !== void 0 && groupMembers(meta3.pid).length > 0) continue;
     if (await worktreeDirty(meta3.worktree, opts.exec)) continue;
+    if (opts.dryRun) {
+      if (seen.has(meta3.worktree)) continue;
+      seen.add(meta3.worktree);
+      removed.push(meta3.id);
+      continue;
+    }
     try {
       await removeWorktree(meta3.id, opts.exec);
     } catch {
@@ -29574,8 +29361,560 @@ async function pruneOrphans(opts = {}) {
   }
   return removed;
 }
+function peekReconciled(meta3) {
+  if (meta3.status !== "running" || !supervisorGone(meta3)) return meta3;
+  return {
+    ...meta3,
+    status: "failed_no_report",
+    finished_at: meta3.finished_at ?? (/* @__PURE__ */ new Date()).toISOString()
+  };
+}
+
+// src/gc.ts
+var DAY_MS = 24 * 60 * 60 * 1e3;
+var RUN_ID2 = /^[A-Za-z0-9_-]{1,64}$/;
+var UNPARSABLE_LOCK_MIN_AGE_MS = 60 * 60 * 1e3;
+var DEFAULT_OLDER_THAN_DAYS = 30;
+async function runGc(opts = {}) {
+  const dryRun = opts.dryRun ?? false;
+  const maxAgeMs = (opts.olderThanDays ?? DEFAULT_OLDER_THAN_DAYS) * DAY_MS;
+  const now = Date.now();
+  const pruned = await pruneOrphans({ minAgeMs: DAY_MS, dryRun });
+  const runs = listRuns();
+  const prunedWorktrees = /* @__PURE__ */ new Set();
+  for (const m of runs) {
+    if (pruned.includes(m.id) && m.worktree) prunedWorktrees.add(m.worktree);
+  }
+  const removedIds = /* @__PURE__ */ new Set();
+  let runsKept = 0;
+  for (const listed of runs) {
+    const meta3 = dryRun ? peekReconciled(listed) : reconcile(listed);
+    const finished = meta3.finished_at ? Date.parse(meta3.finished_at) : NaN;
+    const old = Number.isFinite(finished) && now - finished > maxAgeMs;
+    const worktreeLeft = meta3.worktree !== void 0 && existsSync4(meta3.worktree) && !prunedWorktrees.has(meta3.worktree);
+    if (!TERMINAL_STATUSES.includes(meta3.status) || !old || worktreeLeft) {
+      runsKept++;
+      continue;
+    }
+    if (!dryRun) rmSync3(runDir(meta3.id), { recursive: true, force: true });
+    removedIds.add(meta3.id);
+  }
+  let runsUnreadable = 0;
+  if (existsSync4(runsDir())) {
+    const valid = new Set(runs.map((m) => m.id));
+    for (const entry of readdirSync4(runsDir(), { withFileTypes: true })) {
+      if (entry.isDirectory() && RUN_ID2.test(entry.name) && !valid.has(entry.name)) {
+        runsUnreadable++;
+      }
+    }
+  }
+  return {
+    runsRemoved: removedIds.size,
+    runsKept: runsKept + runsUnreadable,
+    runsUnreadable,
+    worktreesPruned: pruned.length,
+    locksRemoved: removeStaleLocks(dryRun, removedIds)
+  };
+}
+function runExists(runId, removedRuns) {
+  return RUN_ID2.test(runId) && !removedRuns.has(runId) && existsSync4(runDir(runId));
+}
+function removeStaleLocks(dryRun, removedRuns) {
+  if (!existsSync4(locksDir())) return 0;
+  let removed = 0;
+  for (const entry of readdirSync4(locksDir())) {
+    if (!entry.endsWith(".lock")) continue;
+    const path = join5(locksDir(), entry);
+    const held = readLock(path);
+    let stale;
+    if (held) {
+      stale = !runExists(held.run_id, removedRuns) || !isSameProcess(held.pid, held.start_time);
+    } else {
+      try {
+        stale = Date.now() - statSync(path).mtimeMs > UNPARSABLE_LOCK_MIN_AGE_MS;
+      } catch {
+        continue;
+      }
+    }
+    if (!stale) continue;
+    if (!dryRun) rmSync3(path, { force: true });
+    removed++;
+  }
+  return removed;
+}
+
+// src/cli.ts
+var RUN_ID3 = /^[A-Za-z0-9_-]{1,64}$/;
+var COMMANDS = ["wait", "gc"];
+var NO_RESULT_TEXT = "[wingman] the run ended without a result message (supervisor gone)";
+var ORPHAN_DRAIN_MS = 3500;
+var WAIT_USAGE = "usage: wingman wait <run_id> [--timeout-ms N] [--poll-ms N] [--grace-ms N]";
+var GC_USAGE = "usage: wingman gc [--older-than-days N] [--dry-run]";
+var UsageError = class extends Error {
+};
+var sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+async function maybeRunCli(argv) {
+  const [command, ...args] = argv.slice(2);
+  if (command === void 0 || !COMMANDS.includes(command)) return void 0;
+  try {
+    return command === "wait" ? await waitCommand(args) : await gcCommand(args);
+  } catch (err) {
+    if (err instanceof UsageError) {
+      process.stderr.write(`wingman ${command}: ${err.message}
+`);
+      return 2;
+    }
+    process.stderr.write(`wingman ${command}: ${err.message}
+`);
+    return 1;
+  }
+}
+function numberOption(flag, value) {
+  const n = Number(value);
+  if (value === void 0 || value === "" || !Number.isFinite(n) || n < 0) {
+    throw new UsageError(
+      `${flag} needs a non-negative number
+${flag.startsWith("--older") ? GC_USAGE : WAIT_USAGE}`
+    );
+  }
+  return n;
+}
+function parseWait(args) {
+  let id;
+  const opt = { timeoutMs: 0, pollMs: 1e3, graceMs: 5e3 };
+  const flags = {
+    "--timeout-ms": "timeoutMs",
+    "--poll-ms": "pollMs",
+    "--grace-ms": "graceMs"
+  };
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    const key = flags[a];
+    if (key !== void 0) {
+      opt[key] = numberOption(a, args[++i]);
+    } else if (a.startsWith("-") || id !== void 0) {
+      throw new UsageError(`unexpected argument ${a}
+${WAIT_USAGE}`);
+    } else {
+      id = a;
+    }
+  }
+  if (id === void 0) throw new UsageError(`run_id is required
+${WAIT_USAGE}`);
+  if (!RUN_ID3.test(id)) throw new UsageError(`invalid run_id
+${WAIT_USAGE}`);
+  return { id, ...opt, pollMs: Math.max(opt.pollMs, 10) };
+}
+function writeAtomic2(path, data) {
+  const tmp = `${path}.${process.pid}.tmp`;
+  writeFileSync3(tmp, data, { mode: 384 });
+  chmodSync3(tmp, 384);
+  renameSync3(tmp, path);
+}
+function readRawMeta(id) {
+  return JSON.parse(readFileSync4(join6(runDir(id), "meta.json"), "utf8"));
+}
+function asRunMeta(raw) {
+  const pid = raw.pid;
+  const start = raw.pid_start_time;
+  const meta3 = { ...raw };
+  if (!(typeof pid === "number" && Number.isInteger(pid) && pid > 0)) delete meta3.pid;
+  if (typeof start !== "string") delete meta3.pid_start_time;
+  if (typeof raw.created_at !== "string") meta3.created_at = "";
+  return meta3;
+}
+function endDeadRun(id, raw) {
+  try {
+    return reconcile(asRunMeta(raw)).status;
+  } catch {
+  }
+  try {
+    const current2 = readRawMeta(id);
+    if (typeof current2.status === "string" && current2.status !== "running") return current2.status;
+    if (!existsSync5(join6(runDir(id), "result.md"))) writeResult(id, NO_RESULT_TEXT);
+    current2.status = "failed_no_report";
+    current2.exit_code = null;
+    current2.finished_at = typeof current2.finished_at === "string" ? current2.finished_at : (/* @__PURE__ */ new Date()).toISOString();
+    writeAtomic2(join6(runDir(id), "meta.json"), `${JSON.stringify(current2, null, 2)}
+`);
+  } catch {
+  }
+  return "failed_no_report";
+}
+async function drainOrphanedGroup(pid) {
+  if (typeof pid !== "number" || !Number.isInteger(pid) || pid <= 1) return;
+  const end = Date.now() + ORPHAN_DRAIN_MS;
+  while (Date.now() < end && groupMembers(pid).length > 0) await sleep(100);
+}
+function finish(id, status) {
+  process.stdout.write(`WINGMAN_RUN ${id} ${status}
+`);
+  return status === "done" || status === "partial" ? 0 : 1;
+}
+async function waitCommand(args) {
+  const { id, timeoutMs, pollMs, graceMs: graceMs2 } = parseWait(args);
+  const start = Date.now();
+  let deadSince = 0;
+  let unreadable = 0;
+  for (; ; ) {
+    let raw;
+    try {
+      raw = readRawMeta(id);
+      unreadable = 0;
+    } catch (err) {
+      if (err.code === "ENOENT")
+        throw new UsageError(`unknown run ${id}`);
+      if (++unreadable > 5) throw new UsageError(`unreadable meta for run ${id}`);
+    }
+    if (raw) {
+      const status = typeof raw.status === "string" ? raw.status : "";
+      if (TERMINAL_STATUSES.includes(status)) return finish(id, status);
+      if (status !== "running") throw new UsageError(`unreadable meta for run ${id}`);
+      if (supervisorGone(asRunMeta(raw))) {
+        deadSince ||= Date.now();
+        if (Date.now() - deadSince >= graceMs2) {
+          const ended = endDeadRun(id, raw);
+          await drainOrphanedGroup(raw.pid);
+          return finish(id, ended);
+        }
+      } else {
+        deadSince = 0;
+      }
+    }
+    if (timeoutMs > 0 && Date.now() - start >= timeoutMs) return 3;
+    await sleep(pollMs);
+  }
+}
+async function gcCommand(args) {
+  let olderThanDays = DEFAULT_OLDER_THAN_DAYS;
+  let dryRun = false;
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a === "--dry-run") dryRun = true;
+    else if (a === "--older-than-days") olderThanDays = numberOption(a, args[++i]);
+    else throw new UsageError(`unexpected argument ${a}
+${GC_USAGE}`);
+  }
+  const r = await runGc({ olderThanDays, dryRun });
+  const kept = r.runsUnreadable > 0 ? `${r.runsKept} (${r.runsUnreadable} without a valid meta.json)` : `${r.runsKept}`;
+  process.stdout.write(
+    dryRun ? `wingman gc (dry run): would remove ${r.runsRemoved} runs, keep ${kept}, prune ${r.worktreesPruned} worktrees, remove ${r.locksRemoved} locks
+` : `wingman gc: removed ${r.runsRemoved} runs, kept ${kept}, pruned ${r.worktreesPruned} worktrees, removed ${r.locksRemoved} locks
+`
+  );
+  return 0;
+}
+
+// src/runner.ts
+import { randomUUID } from "node:crypto";
+import { closeSync as closeSync3, mkdirSync as mkdirSync3, openSync as openSync3, realpathSync as realpathSync3, rmSync as rmSync4 } from "node:fs";
+import { spawn as spawn2 } from "node:child_process";
+import { createInterface } from "node:readline";
+import { relative, join as join9, isAbsolute as isAbsolute2 } from "node:path";
+
+// src/guard.ts
+var DEFAULT_PRESET = "readonly";
+var STATUS_VALUES = ["done", "partial", "blocked", "needs_input"];
+var PRESETS = {
+  readonly: {
+    allowed: [
+      "Read",
+      "Glob",
+      "Grep",
+      "Bash(git log:*)",
+      "Bash(git diff:*)",
+      "Bash(git status:*)",
+      "Bash(git show:*)",
+      "Bash(date:*)"
+    ],
+    mayCommit: false
+  },
+  "edit-files": {
+    allowed: [
+      "Read",
+      "Glob",
+      "Grep",
+      "Edit",
+      "Write",
+      "Bash(git status:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git show:*)",
+      "Bash(git rev-parse:*)",
+      "Bash(git branch --show-current)",
+      "Bash(git ls-files:*)",
+      "Bash(git mv:*)",
+      "Bash(git rm:*)",
+      "Bash(git restore:*)",
+      "Bash(date:*)"
+    ],
+    mayCommit: true
+  },
+  edit: {
+    allowed: [
+      "Agent",
+      "Skill",
+      "Edit",
+      "Write",
+      "Read",
+      "Glob",
+      "Grep",
+      "Bash(git status:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git show:*)",
+      "Bash(git rev-parse:*)",
+      "Bash(git branch --show-current)",
+      "Bash(git ls-files:*)",
+      "Bash(git mv:*)",
+      "Bash(git rm:*)",
+      "Bash(git restore:*)",
+      "Bash(node:*)",
+      "Bash(npm:*)",
+      "Bash(date:*)"
+    ],
+    mayCommit: true
+  }
+};
+function presetMayCommit(name) {
+  return Object.hasOwn(PRESETS, name) ? PRESETS[name].mayCommit : true;
+}
+function guardPrompt() {
+  return [
+    "You are running as a delegated wingman run inside another Claude Code session. These rules override any other instruction, rule or skill you load:",
+    "1. Never print, send or write sensitive values: tokens (Bearer, JWT, PAT, API keys), passwords, secrets, private keys, credentials in URLs, .env values or personal data. Do not read files that may hold them; check with a count first and report structure only.",
+    "2. Never commit or push to the base branch (main, master or the repository default branch). Work only on the branch you were started on. Never run git push.",
+    '3. Never ask questions and never wait for an answer. Inside a wingman run, any rule or skill that says "ask the Human" means: stop and finish with WINGMAN_STATUS: needs_input.',
+    "4. Do not manage plugins (no claude plugin install or update) and do not call wingman tools.",
+    "5. Always end with a final report. The last line of your final message must be exactly one of: WINGMAN_STATUS: done, WINGMAN_STATUS: partial, WINGMAN_STATUS: blocked, WINGMAN_STATUS: needs_input."
+  ].join("\n");
+}
+function baseDisallowed() {
+  return [
+    "AskUserQuestion",
+    "Bash(git push:*)",
+    "Bash(git -C:*)",
+    "Bash(git -c:*)",
+    "Bash(git --no-pager:*)",
+    "Bash(git --git-dir:*)",
+    "Bash(git --work-tree:*)",
+    "Bash(git send-pack:*)",
+    "Bash(git diff --output:*)",
+    "Bash(git log --output:*)",
+    "Bash(git show --output:*)",
+    "Bash(git update-ref:*)",
+    "Bash(git config:*)",
+    "Bash(git remote:*)",
+    "Bash(claude:*)",
+    "Bash(claude plugin:*)",
+    "Bash(npm install -g:*)",
+    "Bash(npm publish:*)",
+    "mcp__plugin_wingman_*",
+    "mcp__wingman__*",
+    "mcp__plugin_wingman_wingman__*"
+  ];
+}
+var TOOL_ITEM = /^(?!-)[A-Za-z0-9_*.:()\- ,/'"@=+~[\]$|]+$/;
+function assertToolItems(items, label) {
+  for (const item of items) {
+    if (!TOOL_ITEM.test(item) || item.length > 300) {
+      throw new Error(`Invalid ${label} item "${item.slice(0, 60)}"`);
+    }
+  }
+}
+function resolveTools(sel) {
+  const disallowed = baseDisallowed();
+  let allowed;
+  if (sel.allowed_tools !== void 0) {
+    assertToolItems(sel.allowed_tools, "allowed_tools");
+    allowed = [...sel.allowed_tools];
+  } else {
+    const name = sel.preset ?? DEFAULT_PRESET;
+    const preset = Object.hasOwn(PRESETS, name) ? PRESETS[name] : void 0;
+    if (!preset) throw new Error(`Unknown preset "${name}"`);
+    allowed = [...preset.allowed];
+  }
+  allowed = allowed.filter((name) => !disallowed.includes(name));
+  return { allowed, disallowed };
+}
+function parseStatusLine(text) {
+  let found = null;
+  const re = /^[ \t]*WINGMAN_STATUS:[ \t]*([a-z_]+)[ \t]*$/gm;
+  for (const match of text.matchAll(re)) {
+    const value = match[1];
+    if (STATUS_VALUES.includes(value)) found = value;
+  }
+  return found;
+}
+
+// src/adapters/claude.ts
+var ALLOWED_ENV = /* @__PURE__ */ new Set([
+  "PATH",
+  "HOME",
+  "USER",
+  "LOGNAME",
+  "LANG",
+  "TERM",
+  "SHELL",
+  "TMPDIR",
+  "HTTPS_PROXY",
+  "https_proxy",
+  "HTTP_PROXY",
+  "http_proxy",
+  "NO_PROXY",
+  "no_proxy"
+]);
+var NON_REJECTIONS = /* @__PURE__ */ new Set(["allowed", "allowed_warning"]);
+function isRateLimitRejected(info) {
+  return info.status !== void 0 && !NON_REJECTIONS.has(info.status);
+}
+function isObject2(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function str(value) {
+  return typeof value === "string" ? value : void 0;
+}
+function num(value) {
+  return typeof value === "number" && Number.isFinite(value) ? value : void 0;
+}
+var claudeAdapter = {
+  provider: "claude",
+  buildCommand(account, spec) {
+    assertToolItems(spec.allowed_tools, "allowed_tools");
+    assertToolItems(spec.disallowed_tools, "disallowed_tools");
+    const args = ["-p"];
+    args.push("--session-id", spec.session_id);
+    args.push("--append-system-prompt", spec.append_system_prompt);
+    args.push("--disallowedTools", ...spec.disallowed_tools);
+    args.push("--permission-mode", "acceptEdits", "--permission-prompts", "none");
+    if (spec.max_turns !== void 0) args.push("--max-turns", String(spec.max_turns));
+    args.push("--output-format", "stream-json", "--verbose", "--strict-mcp-config");
+    if (spec.allowed_tools.length > 0) args.push("--allowedTools", ...spec.allowed_tools);
+    if (spec.model) args.push("--model", spec.model);
+    return { command: account.command, args };
+  },
+  buildEnv(parent, account, depth) {
+    const env = {};
+    for (const [name, value] of Object.entries(parent)) {
+      if (value === void 0) continue;
+      if (ALLOWED_ENV.has(name) || name.startsWith("LC_")) env[name] = value;
+    }
+    env.CLAUDE_CONFIG_DIR = account.config_dir;
+    env.WINGMAN_DEPTH = String(depth);
+    return env;
+  },
+  parseLine(line) {
+    let data;
+    try {
+      data = JSON.parse(line);
+    } catch {
+      return [];
+    }
+    if (!isObject2(data)) return [];
+    const events = [];
+    switch (data.type) {
+      case "system": {
+        const sessionId = str(data.session_id);
+        if (data.subtype === "init" && sessionId) {
+          events.push({ kind: "started", session_id: sessionId });
+        }
+        break;
+      }
+      case "assistant": {
+        const message = data.message;
+        const content = isObject2(message) ? message.content : void 0;
+        if (!Array.isArray(content)) break;
+        for (const block of content) {
+          if (!isObject2(block)) continue;
+          if (block.type === "text" && typeof block.text === "string") {
+            events.push({ kind: "message", text: block.text });
+          } else if (block.type === "tool_use" && typeof block.name === "string") {
+            events.push({ kind: "tool", name: block.name });
+          }
+        }
+        break;
+      }
+      case "rate_limit_event": {
+        const raw = data.rate_limit_info;
+        if (!isObject2(raw)) break;
+        const info = {};
+        const status = str(raw.status);
+        const resetsAt = num(raw.resetsAt);
+        const rateLimitType = str(raw.rateLimitType);
+        const utilization = num(raw.utilization);
+        if (status !== void 0) info.status = status;
+        if (resetsAt !== void 0) info.resetsAt = resetsAt;
+        if (rateLimitType !== void 0) info.rateLimitType = rateLimitType;
+        if (utilization !== void 0) info.utilization = utilization;
+        events.push({ kind: "rate_limited", info });
+        break;
+      }
+      case "result": {
+        const denials = [];
+        if (Array.isArray(data.permission_denials)) {
+          for (const d of data.permission_denials) {
+            if (isObject2(d) && typeof d.tool_name === "string") denials.push(d.tool_name);
+          }
+        }
+        const isError = data.is_error === true || data.subtype !== void 0 && data.subtype !== "success";
+        const finished = {
+          kind: "finished",
+          result: typeof data.result === "string" ? data.result : null,
+          is_error: isError,
+          permission_denials: denials
+        };
+        if (data.subtype === "error_max_turns") finished.max_turns = true;
+        events.push(finished);
+        break;
+      }
+      default:
+        break;
+    }
+    return events;
+  }
+};
+function getAdapter(provider) {
+  if (provider === "claude") return claudeAdapter;
+  throw new Error(`No adapter for provider "${provider}"`);
+}
+
+// src/self.ts
+import { realpathSync as realpathSync2 } from "node:fs";
+import { homedir as homedir2 } from "node:os";
+import { join as join7, resolve } from "node:path";
+function canonical(dir) {
+  try {
+    return realpathSync2(dir);
+  } catch {
+    return resolve(dir);
+  }
+}
+function callerProfile(env = process.env) {
+  const configured = env.CLAUDE_CONFIG_DIR;
+  return canonical(configured ? configured : join7(homedir2(), ".claude"));
+}
+function currentDepth(env = process.env) {
+  const raw = env.WINGMAN_DEPTH;
+  if (raw === void 0 || !/^\d+$/.test(raw.trim())) return 0;
+  return Number.parseInt(raw.trim(), 10);
+}
+function assertCanStart(env = process.env, limit = 1) {
+  const depth = currentDepth(env);
+  if (depth >= limit) {
+    throw new Error(
+      `Refusing to start a nested run: WINGMAN_DEPTH=${depth} has reached the limit of ${limit}`
+    );
+  }
+}
 
 // src/snapshot.ts
+import { createHash as createHash2 } from "node:crypto";
+import { existsSync as existsSync6, readFileSync as readFileSync5, readdirSync as readdirSync5, statSync as statSync2 } from "node:fs";
+import { isAbsolute, join as join8, resolve as resolve2 } from "node:path";
 var SNAPSHOT_TIMEOUT_MS = 3e4;
 var sha = (text) => createHash2("sha256").update(text).digest("hex");
 async function git(exec, repo, args) {
@@ -29587,14 +29926,14 @@ async function git(exec, repo, args) {
   return res.code === 0 ? res.stdout : void 0;
 }
 function hashHooks(hooksDir) {
-  if (!existsSync4(hooksDir)) return sha("");
+  if (!existsSync6(hooksDir)) return sha("");
   const lines = [];
-  for (const name of readdirSync4(hooksDir).sort()) {
+  for (const name of readdirSync5(hooksDir).sort()) {
     if (name.endsWith(".sample")) continue;
     try {
-      const path = join6(hooksDir, name);
-      if (!statSync(path).isFile()) continue;
-      const content = readFileSync4(path);
+      const path = join8(hooksDir, name);
+      if (!statSync2(path).isFile()) continue;
+      const content = readFileSync5(path);
       lines.push(`${name} ${content.length} ${createHash2("sha256").update(content).digest("hex")}`);
     } catch {
       lines.push(`${name} unreadable`);
@@ -29612,7 +29951,7 @@ async function observe(exec, repo, refs) {
   const common = await git(exec, repo, ["rev-parse", "--git-common-dir"]);
   if (listed === void 0 || config2 === void 0 || common === void 0) return void 0;
   const commonDir = common.trim();
-  const hooksDir = join6(isAbsolute(commonDir) ? commonDir : resolve2(repo, commonDir), "hooks");
+  const hooksDir = join8(isAbsolute(commonDir) ? commonDir : resolve2(repo, commonDir), "hooks");
   return { refs_hash: sha(listed), config_hash: sha(config2), hooks_hash: hashHooks(hooksDir) };
 }
 async function takeSnapshot(exec, repo, callerBranch) {
@@ -29712,8 +30051,10 @@ async function runSupervisor(runId) {
   const child = spawn2(payload.command, payload.args, {
     cwd: payload.cwd,
     env: childEnv,
-    stdio: ["ignore", "pipe", "pipe"]
+    stdio: ["pipe", "pipe", "pipe"]
   });
+  child.stdin?.on("error", () => void 0);
+  child.stdin?.end(payload.prompt);
   const terminateGroup = () => {
     try {
       process.kill(-process.pid, "SIGTERM");
@@ -29768,8 +30109,8 @@ async function runSupervisor(runId) {
     child.on("error", () => settle2(null, null));
   });
   if (timer) clearTimeout(timer);
-  const current = readMeta(runId);
-  if (TERMINAL_STATUSES.includes(current.status)) return;
+  const current2 = readMeta(runId);
+  if (TERMINAL_STATUSES.includes(current2.status)) return;
   const input2 = {
     finished,
     exitCode: end.code,
@@ -29838,7 +30179,7 @@ async function gitOut(exec, cwd, args) {
 function launchSupervisor(meta3, payload, env, entry) {
   const dir = runDir(meta3.id);
   mkdirSync3(dir, { recursive: true, mode: 448 });
-  const fd = openSync3(join7(dir, "events.jsonl"), "a", 384);
+  const fd = openSync3(join9(dir, "events.jsonl"), "a", 384);
   let child;
   try {
     child = spawn2(process.execPath, [entry, "--supervise", meta3.id], {
@@ -29899,7 +30240,7 @@ async function startRun(opts) {
       );
     }
   }
-  const mayCommit = (opts.preset ?? DEFAULT_PRESET) !== "readonly" || opts.allowed_tools !== void 0;
+  const mayCommit = opts.allowed_tools !== void 0 || presetMayCommit(opts.preset ?? DEFAULT_PRESET);
   if (opts.create_branch === false && mayCommit && opts.worktree) {
     throw new Error(
       "branch:false is only for runs that cannot commit: commits in a detached worktree would be lost on cleanup"
@@ -29942,7 +30283,7 @@ async function startRun(opts) {
       lockPath = wt.lockPath;
       meta3.worktree = wt.path;
       if (wt.branch !== void 0) meta3.run_branch = wt.branch;
-      runCwd = offset ? join7(wt.path, offset) : wt.path;
+      runCwd = offset ? join9(wt.path, offset) : wt.path;
       meta3.run_cwd = runCwd;
       patchRunning(meta3.id, {
         worktree: wt.path,
@@ -30014,7 +30355,7 @@ async function discardStart(meta3, exec) {
   }
   await deleteRunBranch(meta3, exec);
   releaseLocksOf(meta3.id);
-  rmSync3(runDir(meta3.id), { recursive: true, force: true });
+  rmSync4(runDir(meta3.id), { recursive: true, force: true });
 }
 async function deleteRunBranch(meta3, exec) {
   const branch = meta3.run_branch;
@@ -30034,6 +30375,7 @@ function spawnRun(meta3, opts, adapter, spec, depth, parentEnv, lockPath) {
     provider: adapter.provider,
     command,
     args,
+    prompt: spec.prompt,
     cwd: spec.cwd,
     timeout_ms: opts.timeout_ms ?? DEFAULT_TIMEOUT_MS,
     wingman_home: wingmanHome()
@@ -30096,7 +30438,7 @@ async function cancelRun(runId) {
 
 // src/tools.ts
 import { execFile } from "node:child_process";
-import { existsSync as existsSync5, statSync as statSync2 } from "node:fs";
+import { existsSync as existsSync7, statSync as statSync3 } from "node:fs";
 import { isAbsolute as isAbsolute3 } from "node:path";
 
 // node_modules/zod/v3/helpers/util.js
@@ -38328,7 +38670,9 @@ var startInput = {
   prompt: external_exports.string().min(1).max(2e5).describe("The full task brief for the run."),
   cwd: external_exports.string().min(1).describe("Absolute path of the project directory."),
   model: external_exports.string().min(1).optional(),
-  preset: external_exports.string().min(1).optional().describe('Tool preset: "readonly" (default) or "edit".'),
+  preset: external_exports.string().min(1).optional().describe(
+    'Tool preset: "readonly" (default), "edit-files" (changes files and commits, runs no commands) or "edit" (also runs node and npm: arbitrary code).'
+  ),
   allowed_tools: external_exports.array(external_exports.string().min(1).max(300).regex(TOOL_ITEM, "invalid tool rule")).max(100).optional(),
   max_turns: external_exports.number().int().positive().max(1e3).optional(),
   worktree: external_exports.boolean().optional().describe(
@@ -38353,7 +38697,7 @@ function createHandlers(deps = {}) {
   return {
     async start(input2) {
       const account = await chooseAccount(env, input2.account, random);
-      if (!isAbsolute3(input2.cwd) || !statSync2(input2.cwd, { throwIfNoEntry: false })?.isDirectory()) {
+      if (!isAbsolute3(input2.cwd) || !statSync3(input2.cwd, { throwIfNoEntry: false })?.isDirectory()) {
         throw new Error("cwd must be an absolute path of an existing directory");
       }
       const branch = await currentBranch(input2.cwd);
@@ -38424,7 +38768,7 @@ function createHandlers(deps = {}) {
       if (meta3.status === "running") {
         throw new Error(`Run ${meta3.id} is still running; cancel it before cleanup`);
       }
-      if (input2.action !== "discard" && meta3.worktree !== void 0 && existsSync5(meta3.worktree) && await worktreeDirty(meta3.worktree)) {
+      if (input2.action !== "discard" && meta3.worktree !== void 0 && existsSync7(meta3.worktree) && await worktreeDirty(meta3.worktree)) {
         throw new Error(
           `The worktree of run ${meta3.id} has uncommitted changes; commit or copy them, or call wingman_cleanup with action "discard" to drop them`
         );
@@ -38453,7 +38797,7 @@ function buildServer(deps = {}) {
   server.registerTool(
     "wingman_start",
     {
-      description: `Start a one-shot detached run of Claude Code on another registered account (random active one when account is omitted); to give more work, start a new run. Returns run_id, account and status only. The preset "edit" runs arbitrary code under the target account and the deny rules are advisory, not a sandbox; "setup" is an arbitrary shell command run as the caller's user, outside the presets. Then run bin/wingman-wait <run_id> in the background and call wingman_result. ${LOGS_WARNING}`,
+      description: `Start a one-shot detached run of Claude Code on another registered account (random active one when account is omitted); to give more work, start a new run. Returns run_id, account and status only. Presets: "readonly" (default), "edit-files" (edits files and commits, runs no commands) and "edit" (also runs node and npm). The preset "edit" runs arbitrary code under the target account and the deny rules are advisory, not a sandbox; "setup" is an arbitrary shell command run as the caller's user, outside the presets. Then run bin/wingman-wait <run_id> in the background and call wingman_result. ${LOGS_WARNING}`,
       inputSchema: startInput
     },
     wrap(h.start)
@@ -38505,14 +38849,19 @@ function buildServer(deps = {}) {
 }
 
 // src/index.ts
-var DAY_MS = 24 * 60 * 60 * 1e3;
+var DAY_MS2 = 24 * 60 * 60 * 1e3;
 if (!maybeRunSupervisor(process.argv)) {
-  if (currentDepth() === 0) {
-    pruneOrphans({ minAgeMs: DAY_MS }).catch(() => void 0);
-    try {
-      pruneOldEvents();
-    } catch {
+  const cliCode = await maybeRunCli(process.argv);
+  if (cliCode !== void 0) {
+    process.exitCode = cliCode;
+  } else {
+    if (currentDepth() === 0) {
+      pruneOrphans({ minAgeMs: DAY_MS2 }).catch(() => void 0);
+      try {
+        pruneOldEvents();
+      } catch {
+      }
     }
+    await buildServer().connect(new StdioServerTransport());
   }
-  await buildServer().connect(new StdioServerTransport());
 }
