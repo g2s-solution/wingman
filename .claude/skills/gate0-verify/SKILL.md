@@ -1,10 +1,10 @@
 ---
 name: gate0-verify
-description: Run the Gate 0 checks from PLAN.md step 0 against the second Claude profile and report pass/fail per check. Use when the user says "gate0", "verify the second profile" or after a plugin update.
+description: Run the Gate 0 checks from docs/history/PLAN.md step 0 against the second Claude profile and report pass/fail per check. Use when the user says "gate0", "verify the second profile" or after a plugin update.
 disable-model-invocation: true
 ---
 
-Run the checks of `PLAN.md` section "0. Gate 0" in order and report one line per check: `PASS`, `FAIL` or `SKIP` with a short reason. Read `PLAN.md` first; it is the source of truth.
+Run the checks of `docs/history/PLAN.md` section "0. Gate 0" in order and report one line per check: `PASS`, `FAIL` or `SKIP` with a short reason. Read `docs/history/PLAN.md` first; it is the source of truth.
 
 Rules:
 - Never read, cat or print credential files (`.credentials.json`, `remote-settings.json` contents). Use `ls -la` for existence and mode only.

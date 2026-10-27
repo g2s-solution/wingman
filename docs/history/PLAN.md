@@ -1,3 +1,5 @@
+> **Design history.** This is the original build plan for v0.1, kept for reference. It describes decisions as they were made and may be out of date; for the current behavior read `README.md` and `DESIGN.md`. "Gate 0" was the initial verification step; terms such as `os-apply` and agent assignments refer to the maintainers' own workflow.
+
 # wingman: implementation plan (Gate 0 to v0.1)
 
 Scope: everything needed to delegate a small task as a one-shot run to a second account from the caller session, packaged as an installable plugin. Later phases are in `ROADMAP.md`; decisions, guardrails and the run lifecycle are in `DESIGN.md`.

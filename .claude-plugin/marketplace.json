@@ -1,11 +1,13 @@
 {
   "name": "wingman-marketplace",
-  "owner": { "name": "khoinv" },
+  "owner": {
+    "name": "g2s-solution"
+  },
   "plugins": [
     {
       "name": "wingman",
       "source": "./wingman",
-      "description": "Delegate work to a Claude Code session running under a second account."
+      "description": "Delegate a task to a second Claude account as a one-shot agent, with its own git worktree."
     }
   ]
 }

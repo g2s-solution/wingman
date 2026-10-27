@@ -2,6 +2,8 @@
 
 Delegate work from one Claude Code session (the caller) to another Claude Code account (the target), so the caller can use the target like a subagent but on the target's own quota.
 
+Contents: [Concepts](#concepts) · [Account registry](#account-registry) · [Account selection](#account-selection) · [Child process environment](#child-process-environment) · [Run lifecycle](#run-lifecycle) · [Tools](#tools-mcp-server-wingman) · [Guardrails](#guardrails-in-the-server-not-left-to-each-brief) · [Packaging](#packaging) · [Backends](#backends) · [Engine](#engine) · [Decisions](#decisions) · [Known risks](#known-risks). For setup and usage start with the README; the original build plan is kept in `docs/history/PLAN.md`.
+
 ## Concepts
 
 - **Profile**: one Claude account, identified by its config dir (`CLAUDE_CONFIG_DIR`). There is no fixed "A" or "B".
@@ -20,7 +22,7 @@ Swapping roles needs no feature: start `claude` under another profile and that p
 | `id`, `label` | short name used by tools and skills |
 | `config_dir` | profile directory |
 | `provider` | agent backend, default `claude` |
-| `command` | executable that starts the agent for this profile, default `claude`; for a profile made by `another-login.sh` it is the launcher (for example `~/.local/bin/claude-thinh`), which sets `CLAUDE_CONFIG_DIR` and loads that profile's credential |
+| `command` | executable that starts the agent for this profile, default `claude`; for a profile made by `another-login.sh` it is the launcher (for example `~/.local/bin/claude-second`), which sets `CLAUDE_CONFIG_DIR` and loads that profile's credential |
 | `scope` | data boundary (for example `company`); a run only goes to an account whose scope matches the work (v0.2) |
 | `tags`, `priority` | selection hints (v0.2) |
 | `status` | `active`, `disabled`, `rate_limited` (v0.3) |
@@ -85,28 +87,28 @@ v0.1 supports Claude Code only, but the runner is written against a small adapte
 
 ## Engine
 
-Candidates, to be decided in Gate 0 by testing under a real second profile: the Agent SDK (`query()`; leave `settingSources` unset so user, project and local settings load; `env` replaces the whole environment; `systemPrompt` preset with `append`); `claude -p --output-format stream-json --verbose`; and Claude Code's built-in background sessions (`--bg`, `claude agents --json`, `claude logs`, `claude stop`), which could replace much of the detach, list and cancel code. `--max-turns` works but is hidden from `--help`. `--bare` is not usable (it never reads OAuth). Default if equal: `claude -p` stream-json.
+Candidates that were compared by testing under a real second profile (the initial verification, called Gate 0 in the history notes): the Agent SDK (`query()`; leave `settingSources` unset so user, project and local settings load; `env` replaces the whole environment; `systemPrompt` preset with `append`); `claude -p --output-format stream-json --verbose`; and Claude Code's built-in background sessions (`--bg`, `claude agents --json`, `claude logs`, `claude stop`), which could replace much of the detach, list and cancel code. `--max-turns` works but is hidden from `--help`. `--bare` is not usable (it never reads OAuth). Default if equal: `claude -p` stream-json.
 
-### Gate 0 outcome
+### Engine decision and verification
 
 - **Engine: `claude -p --output-format stream-json --verbose`** (default, nothing argued for another). Permission mode `acceptEdits`; the `auto` comparison is deferred.
 - Verified under the second profile through its launcher, started with `env -i PATH HOME`: `-p` runs, a harmless installed skill expands under `-p`, and this command line is accepted: `-p <prompt> --session-id <uuid> --append-system-prompt <text> --disallowedTools <names...> --permission-mode acceptEdits --permission-prompts none --max-turns <n> --output-format stream-json --verbose`. `--strict-mcp-config` and `--plugin-dir` exist; `--max-turns` is hidden from `--help` but works. The adapter later added `--strict-mcp-config` to the child argv (right after `--verbose`); this is **verified against the real CLI**: real runs on the second profile completed with it, and no MCP server loaded in the child.
 - Event contract (keys): `system/init`, `system/hook_started`, `system/hook_response`, `assistant` (`message`, `session_id`, `uuid`), `rate_limit_event` (`rate_limit_info`: `status`, `resetsAt`, `rateLimitType`, `isUsingOverage`, `overageStatus`, `unifiedWindows`; no `utilization` key seen on an idle account), `result/success` (`result`, `is_error`, `num_turns`, `permission_denials`, `stop_reason`, `session_id`, `duration_ms`). The final message is `result.result`.
-- **Open (not run in Gate 0)**: spawn from inside a real MCP server (covered by verification step 8.1), settings-symlink survival (the `installed_plugins.json` comparison only matters if `plugins/` is shared), `--bg`, detached survival after the desktop session ends, `Agent` allow under `-p`.
+- **Open (not verified)**: spawn from inside a real MCP server (covered by verification step 8.1), settings-symlink survival (the `installed_plugins.json` comparison only matters if `plugins/` is shared), `--bg`, detached survival after the desktop session ends, `Agent` allow under `-p`.
 
 ## Decisions
 
 - **`projects/` is not shared between profiles.** Each profile keeps its own session history. Benefit: no concurrent writes to the same session files and no mixing of transcripts.
 - Shared via symlink from the default profile by `another-login.sh`: `CLAUDE.md`, `settings.json`, `skills`, `agents`, `commands`, `rules` (only the ones that exist). Per profile, not shared: credentials, `.claude.json`, history, `projects/`, `plugins/` (each profile installs and caches its own plugins).
-- User-scope MCP servers (for example redmine, grafana) live in each profile's `.claude.json` and are not shared; add them to a target only if its runs need them.
+- User-scope MCP servers (for example an MCP server for an internal tool) live in each profile's `.claude.json` and are not shared; add them to a target only if its runs need them.
 - Profile identity is checked with `claude auth status --json` (compare account or organization fields and print only same or different), not with file mtimes: the default profile's credentials file changes on every token refresh.
 - `CLAUDE_CONFIG_DIR` is not in Anthropic's documented settings, so treat it as working but unsupported.
 - Interaction rules in the shared `CLAUDE.md` (ask the Human, open a new session) are redefined for wingman runs by the appended prompt (see Guardrails).
 
-## Risks and checks for Gate 0
+## Known risks
 
-- Symlinks can break after a Claude Code update recreates a directory, or if Claude Code rewrites `settings.json` by temp file and rename, which would replace the symlink with a real file and fork settings. Gate 0 changes a setting in the second profile and checks the symlink survives; ship a health check.
+- Symlinks can break after a Claude Code update recreates a directory, or if Claude Code rewrites `settings.json` by temp file and rename, which would replace the symlink with a real file and fork settings. A check that a setting changed in the second profile leaves the symlink intact has not been automated; a health check is planned (see ROADMAP).
 - `plugins/` is per profile, so the profiles do not write each other's plugin state. If someone symlinks `plugins/` to share it (the option noted in `another-login.sh`), both profiles write `installed_plugins.json`, `known_marketplaces.json`, `synced/` and `data/` on startup and plugin sync; compare `installed_plugins.json` before and after a second-profile start in that case.
 - Updating the plugin while a run is in flight can fail the run.
 - Hooks that hard-code `~/.claude` run in every profile; keep hooks path-agnostic.
-- Unverified at runtime until Gate 0: whether a plugin skill invoked by name expands under `-p`; whether `rate_limit_event` appears in stream-json; whether plugin stdio MCP servers receive `WINGMAN_DEPTH`; whether `--bg` works under a custom `CLAUDE_CONFIG_DIR`; whether detached children survive the desktop app ending a session; whether the `Agent` tool needs an explicit allow in `-p`; how a worktree path with no plugin install entry resolves project-scope plugins; whether the second profile receives its own `remote-settings.json` proxy (check presence with `ls` only).
+- Not verified at runtime: whether a plugin skill invoked by name expands under `-p`; whether `rate_limit_event` appears in stream-json; whether plugin stdio MCP servers receive `WINGMAN_DEPTH`; whether `--bg` works under a custom `CLAUDE_CONFIG_DIR`; whether detached children survive the desktop app ending a session; whether the `Agent` tool needs an explicit allow in `-p`; how a worktree path with no plugin install entry resolves project-scope plugins; whether the second profile receives its own `remote-settings.json` proxy (check presence with `ls` only).

@@ -38146,7 +38146,7 @@ var EMPTY_COMPLETION_RESULT = {
 // package.json
 var package_default = {
   name: "wingman-server",
-  version: "0.1.2",
+  version: "0.1.3",
   private: true,
   type: "module",
   engines: {
@@ -38175,7 +38175,8 @@ var package_default = {
     typescript: "6.0.3",
     "typescript-eslint": "8.72.1",
     vitest: "5.0.5"
-  }
+  },
+  license: "MIT"
 };
 
 // src/registry.ts
@@ -38452,7 +38453,7 @@ function buildServer(deps = {}) {
   server.registerTool(
     "wingman_start",
     {
-      description: `Start a one-shot detached run of Claude Code on another registered account (random active one when account is omitted); to give more work, start a new run. Returns run_id, account and status only. The preset "edit" runs arbitrary code under the target account and the deny rules are advisory, not a sandbox; "setup" is an arbitrary shell command run as the caller's user, outside the presets. ${LOGS_WARNING}`,
+      description: `Start a one-shot detached run of Claude Code on another registered account (random active one when account is omitted); to give more work, start a new run. Returns run_id, account and status only. The preset "edit" runs arbitrary code under the target account and the deny rules are advisory, not a sandbox; "setup" is an arbitrary shell command run as the caller's user, outside the presets. Then run bin/wingman-wait <run_id> in the background and call wingman_result. ${LOGS_WARNING}`,
       inputSchema: startInput
     },
     wrap(h.start)
