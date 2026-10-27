@@ -18,7 +18,7 @@ Delegate `/ailab-agent:os-apply <change>` to another account and review the resu
 
 1. **Version gate.** Run `check-version-plugin.mjs --gate` (from the ailab-agent plugin) before delegating. A run must never self-update plugins, so a failed gate is fixed here, by the caller, before step 4.
 2. **Commit the change artifacts** (proposal, specs, design, tasks) on a feature branch, never the base branch (`git rev-parse --abbrev-ref HEAD`). The run worktree is cut from the caller's HEAD, so uncommitted artifacts would be missing.
-3. **Pick the account by id.** Ask the Human, or use the only registered target. Use `wingman_list` or the registry file name only; never read credentials.
+3. **Pick the account by id.** Ask the Human. If the id is unknown, call `wingman_start` with a placeholder id once: its error message (`Unknown account ... Registered accounts: ...`) lists the registered ids. `wingman_list` lists runs, not accounts. Do not open `~/.wingman/accounts.json` (read ids only through that error message) and never read credentials.
 4. **Start the run:** `wingman_start` with prompt `/ailab-agent:os-apply <change-name>`, preset `os-apply`, `change` set to the change name, worktree on, `cwd` the repo root. Keep the returned `run_id` and run branch.
 5. **Wait without polling.** Start `${CLAUDE_PLUGIN_ROOT}/bin/wingman-wait <run_id>` with Bash `run_in_background`. It prints one line, `WINGMAN_RUN <id> <status>`, and wakes the caller on exit (exit 0 for done/partial, 1 for other terminal statuses, 2 for an unknown run, 3 for a timeout).
 6. **On wake, read `wingman_result`** (masked and capped). Then review the run branch from the main checkout:

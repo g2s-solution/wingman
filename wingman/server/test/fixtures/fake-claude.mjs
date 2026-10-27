@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { execFileSync } from 'node:child_process';
 import { appendFileSync } from 'node:fs';
 import { setInterval } from 'node:timers';
 
@@ -83,6 +84,37 @@ switch (mode) {
   case 'plugin_update':
     assistant();
     result('I ran claude plugin update ailab-agent to continue.\nWINGMAN_STATUS: done');
+    break;
+  case 'max_turns':
+    assistant();
+    emit({ type: 'result', subtype: 'error_max_turns', is_error: true, session_id: sid });
+    process.exit(1);
+    break;
+  case 'move_ref': {
+    // moves FAKE_REF_NAME (a branch) to FAKE_REF_TARGET inside FAKE_REF_REPO, as a misbehaving run would
+    const repo = process.env.FAKE_REF_REPO;
+    execFileSync('git', [
+      '-C',
+      repo,
+      'update-ref',
+      `refs/heads/${process.env.FAKE_REF_NAME}`,
+      process.env.FAKE_REF_TARGET,
+    ]);
+    assistant();
+    result('Implemented the change.\nWINGMAN_STATUS: done');
+    break;
+  }
+  case 'edit_config':
+    execFileSync('git', [
+      '-C',
+      process.env.FAKE_REF_REPO,
+      'config',
+      '--local',
+      'wingman.test',
+      '1',
+    ]);
+    assistant();
+    result('Implemented the change.\nWINGMAN_STATUS: done');
     break;
   case 'permission_denial':
     assistant();

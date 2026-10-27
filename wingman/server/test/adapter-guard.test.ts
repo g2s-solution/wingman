@@ -49,6 +49,7 @@ describe('claude adapter command', () => {
       '--output-format',
       'stream-json',
       '--verbose',
+      '--strict-mcp-config',
       '--allowedTools',
       'Read',
       'Bash(git:*)',
@@ -147,6 +148,9 @@ describe('claude adapter parseLine', () => {
       }),
     ).toEqual([{ kind: 'finished', result: 'ok', is_error: false, permission_denials: ['Bash'] }]);
     expect(p({ type: 'result', subtype: 'error_max_turns' })).toEqual([
+      { kind: 'finished', result: null, is_error: true, permission_denials: [], max_turns: true },
+    ]);
+    expect(p({ type: 'result', subtype: 'error_during_execution' })).toEqual([
       { kind: 'finished', result: null, is_error: true, permission_denials: [] },
     ]);
   });
@@ -179,21 +183,24 @@ describe('guard', () => {
   });
 
   it('os-apply preset and base deny list', () => {
-    expect(PRESETS['os-apply'].allowed).toEqual([
-      'Agent',
-      'Skill',
-      'Edit',
-      'Write',
-      'Read',
-      'Bash(git:*)',
-      'Bash(node:*)',
-      'Bash(openspec:*)',
-      'Bash(date:*)',
-    ]);
+    const allowed = PRESETS['os-apply'].allowed;
+    expect(allowed).not.toContain('Bash(git:*)');
+    for (const sub of ['status', 'add', 'commit', 'diff', 'log', 'show', 'ls-files', 'restore']) {
+      expect(allowed).toContain(`Bash(git ${sub}:*)`);
+    }
+    for (const rule of allowed) {
+      expect(rule).not.toMatch(/git (checkout|stash|push|config|remote|update-ref|branch:)/);
+    }
     const deny = baseDisallowed();
     for (const name of [
       'AskUserQuestion',
       'Bash(git push:*)',
+      'Bash(git -C:*)',
+      'Bash(git -c:*)',
+      'Bash(git --no-pager:*)',
+      'Bash(git update-ref:*)',
+      'Bash(git config:*)',
+      'Bash(git remote:*)',
       'Bash(claude:*)',
       'Bash(claude plugin:*)',
       'Bash(npm install -g:*)',
@@ -211,6 +218,21 @@ describe('guard', () => {
     expect(resolveTools({ preset: 'os-apply' }).allowed).toContain('Skill');
     expect(resolveTools({}).allowed).toEqual([]);
     expect(() => resolveTools({ preset: 'nope' })).toThrow(/Unknown preset/);
+  });
+
+  it('rejects tool items that start with a dash or carry odd characters', () => {
+    for (const bad of ['--dangerously-skip-permissions', '-p', 'Read;rm', 'a\nb', '']) {
+      expect(() => resolveTools({ allowed_tools: [bad] })).toThrow(/Invalid allowed_tools/);
+      expect(() => claudeAdapter.buildCommand(account, { ...spec, allowed_tools: [bad] })).toThrow(
+        /Invalid allowed_tools/,
+      );
+    }
+    expect(() =>
+      claudeAdapter.buildCommand(account, { ...spec, disallowed_tools: ['--model'] }),
+    ).toThrow(/Invalid disallowed_tools/);
+    for (const good of ['Read', 'Bash(git status:*)', 'mcp__srv__tool', 'Edit(src/**)']) {
+      expect(resolveTools({ allowed_tools: [good] }).allowed).toEqual([good]);
+    }
   });
 
   it('parses the last valid status line', () => {

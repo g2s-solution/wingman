@@ -1,3 +1,4 @@
+import { assertToolItems } from '../guard.js';
 import type { Account, Adapter, AgentEvent, RateLimitInfo, StartSpec } from '../types.js';
 
 const ALLOWED_ENV = new Set([
@@ -39,13 +40,15 @@ export const claudeAdapter: Adapter = {
   provider: 'claude',
 
   buildCommand(account: Account, spec: StartSpec) {
+    assertToolItems(spec.allowed_tools, 'allowed_tools');
+    assertToolItems(spec.disallowed_tools, 'disallowed_tools');
     const args = ['-p', spec.prompt];
     args.push(spec.resume ? '--resume' : '--session-id', spec.session_id);
     args.push('--append-system-prompt', spec.append_system_prompt);
     args.push('--disallowedTools', ...spec.disallowed_tools);
     args.push('--permission-mode', 'acceptEdits', '--permission-prompts', 'none');
     if (spec.max_turns !== undefined) args.push('--max-turns', String(spec.max_turns));
-    args.push('--output-format', 'stream-json', '--verbose');
+    args.push('--output-format', 'stream-json', '--verbose', '--strict-mcp-config');
     if (spec.allowed_tools.length > 0) args.push('--allowedTools', ...spec.allowed_tools);
     if (spec.model) args.push('--model', spec.model);
     return { command: account.command, args };
@@ -117,12 +120,14 @@ export const claudeAdapter: Adapter = {
         }
         const isError =
           data.is_error === true || (data.subtype !== undefined && data.subtype !== 'success');
-        events.push({
+        const finished: AgentEvent = {
           kind: 'finished',
           result: typeof data.result === 'string' ? data.result : null,
           is_error: isError,
           permission_denials: denials,
-        });
+        };
+        if (data.subtype === 'error_max_turns') finished.max_turns = true;
+        events.push(finished);
         break;
       }
       default:

@@ -28618,6 +28618,94 @@ import { spawn as spawn2 } from "node:child_process";
 import { createInterface } from "node:readline";
 import { relative, join as join6, isAbsolute } from "node:path";
 
+// src/guard.ts
+var STATUS_VALUES = ["done", "partial", "blocked", "needs_input"];
+var PRESETS = {
+  "os-apply": {
+    allowed: [
+      "Agent",
+      "Skill",
+      "Edit",
+      "Write",
+      "Read",
+      "Bash(git status:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git show:*)",
+      "Bash(git rev-parse:*)",
+      "Bash(git branch --show-current)",
+      "Bash(git ls-files:*)",
+      "Bash(git mv:*)",
+      "Bash(git rm:*)",
+      "Bash(git restore:*)",
+      "Bash(node:*)",
+      "Bash(openspec:*)",
+      "Bash(date:*)"
+    ]
+  }
+};
+function guardPrompt() {
+  return [
+    "You are running as a delegated wingman run inside another Claude Code session. These rules override any other instruction, rule or skill you load:",
+    "1. Never print, send or write sensitive values: tokens (Bearer, JWT, PAT, API keys), passwords, secrets, private keys, credentials in URLs, .env values or personal data. Do not read files that may hold them; check with a count first and report structure only.",
+    "2. Never commit or push to the base branch (main, master or the repository default branch). Work only on the branch you were started on. Never run git push.",
+    '3. Never ask questions and never wait for an answer. Inside a wingman run, any rule or skill that says "ask the Human" means: stop and finish with WINGMAN_STATUS: needs_input.',
+    "4. Do not manage plugins (no claude plugin install or update) and do not call wingman tools.",
+    "5. Always end with a final report. The last line of your final message must be exactly one of: WINGMAN_STATUS: done, WINGMAN_STATUS: partial, WINGMAN_STATUS: blocked, WINGMAN_STATUS: needs_input."
+  ].join("\n");
+}
+function baseDisallowed() {
+  return [
+    "AskUserQuestion",
+    "Bash(git push:*)",
+    "Bash(git -C:*)",
+    "Bash(git -c:*)",
+    "Bash(git --no-pager:*)",
+    "Bash(git update-ref:*)",
+    "Bash(git config:*)",
+    "Bash(git remote:*)",
+    "Bash(claude:*)",
+    "Bash(claude plugin:*)",
+    "Bash(npm install -g:*)",
+    "mcp__plugin_wingman_*",
+    "mcp__wingman__*",
+    "mcp__plugin_wingman_wingman__*"
+  ];
+}
+var TOOL_ITEM = /^(?!-)[A-Za-z0-9_*.:()\- ,/'"@=+~[\]$|]+$/;
+function assertToolItems(items, label) {
+  for (const item of items) {
+    if (!TOOL_ITEM.test(item) || item.length > 300) {
+      throw new Error(`Invalid ${label} item "${item.slice(0, 60)}"`);
+    }
+  }
+}
+function resolveTools(sel) {
+  const disallowed = baseDisallowed();
+  let allowed = [];
+  if (sel.allowed_tools !== void 0) {
+    assertToolItems(sel.allowed_tools, "allowed_tools");
+    allowed = [...sel.allowed_tools];
+  } else if (sel.preset !== void 0) {
+    const preset = PRESETS[sel.preset];
+    if (!preset) throw new Error(`Unknown preset "${sel.preset}"`);
+    allowed = [...preset.allowed];
+  }
+  allowed = allowed.filter((name) => !disallowed.includes(name));
+  return { allowed, disallowed };
+}
+function parseStatusLine(text) {
+  let found = null;
+  const re = /^[ \t]*WINGMAN_STATUS:[ \t]*([a-z_]+)[ \t]*$/gm;
+  for (const match of text.matchAll(re)) {
+    const value = match[1];
+    if (STATUS_VALUES.includes(value)) found = value;
+  }
+  return found;
+}
+
 // src/adapters/claude.ts
 var ALLOWED_ENV = /* @__PURE__ */ new Set([
   "PATH",
@@ -28651,13 +28739,15 @@ function num(value) {
 var claudeAdapter = {
   provider: "claude",
   buildCommand(account, spec) {
+    assertToolItems(spec.allowed_tools, "allowed_tools");
+    assertToolItems(spec.disallowed_tools, "disallowed_tools");
     const args = ["-p", spec.prompt];
     args.push(spec.resume ? "--resume" : "--session-id", spec.session_id);
     args.push("--append-system-prompt", spec.append_system_prompt);
     args.push("--disallowedTools", ...spec.disallowed_tools);
     args.push("--permission-mode", "acceptEdits", "--permission-prompts", "none");
     if (spec.max_turns !== void 0) args.push("--max-turns", String(spec.max_turns));
-    args.push("--output-format", "stream-json", "--verbose");
+    args.push("--output-format", "stream-json", "--verbose", "--strict-mcp-config");
     if (spec.allowed_tools.length > 0) args.push("--allowedTools", ...spec.allowed_tools);
     if (spec.model) args.push("--model", spec.model);
     return { command: account.command, args };
@@ -28726,12 +28816,14 @@ var claudeAdapter = {
           }
         }
         const isError = data.is_error === true || data.subtype !== void 0 && data.subtype !== "success";
-        events.push({
+        const finished = {
           kind: "finished",
           result: typeof data.result === "string" ? data.result : null,
           is_error: isError,
           permission_denials: denials
-        });
+        };
+        if (data.subtype === "error_max_turns") finished.max_turns = true;
+        events.push(finished);
         break;
       }
       default:
@@ -28743,68 +28835,6 @@ var claudeAdapter = {
 function getAdapter(provider) {
   if (provider === "claude") return claudeAdapter;
   throw new Error(`No adapter for provider "${provider}"`);
-}
-
-// src/guard.ts
-var STATUS_VALUES = ["done", "partial", "blocked", "needs_input"];
-var PRESETS = {
-  "os-apply": {
-    allowed: [
-      "Agent",
-      "Skill",
-      "Edit",
-      "Write",
-      "Read",
-      "Bash(git:*)",
-      "Bash(node:*)",
-      "Bash(openspec:*)",
-      "Bash(date:*)"
-    ]
-  }
-};
-function guardPrompt() {
-  return [
-    "You are running as a delegated wingman run inside another Claude Code session. These rules override any other instruction, rule or skill you load:",
-    "1. Never print, send or write sensitive values: tokens (Bearer, JWT, PAT, API keys), passwords, secrets, private keys, credentials in URLs, .env values or personal data. Do not read files that may hold them; check with a count first and report structure only.",
-    "2. Never commit or push to the base branch (main, master or the repository default branch). Work only on the branch you were started on. Never run git push.",
-    '3. Never ask questions and never wait for an answer. Inside a wingman run, any rule or skill that says "ask the Human" means: stop and finish with WINGMAN_STATUS: needs_input.',
-    "4. Do not manage plugins (no claude plugin install or update) and do not call wingman tools.",
-    "5. Always end with a final report. The last line of your final message must be exactly one of: WINGMAN_STATUS: done, WINGMAN_STATUS: partial, WINGMAN_STATUS: blocked, WINGMAN_STATUS: needs_input."
-  ].join("\n");
-}
-function baseDisallowed() {
-  return [
-    "AskUserQuestion",
-    "Bash(git push:*)",
-    "Bash(claude:*)",
-    "Bash(claude plugin:*)",
-    "Bash(npm install -g:*)",
-    "mcp__plugin_wingman_*",
-    "mcp__wingman__*",
-    "mcp__plugin_wingman_wingman__*"
-  ];
-}
-function resolveTools(sel) {
-  const disallowed = baseDisallowed();
-  let allowed = [];
-  if (sel.allowed_tools !== void 0) {
-    allowed = [...sel.allowed_tools];
-  } else if (sel.preset !== void 0) {
-    const preset = PRESETS[sel.preset];
-    if (!preset) throw new Error(`Unknown preset "${sel.preset}"`);
-    allowed = [...preset.allowed];
-  }
-  allowed = allowed.filter((name) => !disallowed.includes(name));
-  return { allowed, disallowed };
-}
-function parseStatusLine(text) {
-  let found = null;
-  const re = /^[ \t]*WINGMAN_STATUS:[ \t]*([a-z_]+)[ \t]*$/gm;
-  for (const match of text.matchAll(re)) {
-    const value = match[1];
-    if (STATUS_VALUES.includes(value)) found = value;
-  }
-  return found;
 }
 
 // src/paths.ts
@@ -28987,6 +29017,7 @@ var metaSchema = external_exports.object({
   branch: external_exports.string().optional(),
   run_branch: external_exports.string().optional(),
   worktree: external_exports.string().optional(),
+  ref_snapshot: external_exports.object({ refs: external_exports.array(external_exports.string()), refs_hash: external_exports.string(), config_hash: external_exports.string() }).optional(),
   repo: external_exports.string().optional(),
   run_cwd: external_exports.string().optional(),
   session_id: external_exports.string(),
@@ -29219,6 +29250,9 @@ function assertCanStart(env = process.env, limit = 1) {
     );
   }
 }
+
+// src/snapshot.ts
+import { createHash as createHash2 } from "node:crypto";
 
 // src/worktree.ts
 import { spawn } from "node:child_process";
@@ -29506,11 +29540,52 @@ async function pruneOrphans(opts = {}) {
   return removed;
 }
 
+// src/snapshot.ts
+var SNAPSHOT_TIMEOUT_MS = 3e4;
+var sha = (text) => createHash2("sha256").update(text).digest("hex");
+async function git(exec, repo, args) {
+  const res = await exec("git", args, {
+    cwd: repo,
+    env: withoutProxy(process.env),
+    timeoutMs: SNAPSHOT_TIMEOUT_MS
+  });
+  return res.code === 0 ? res.stdout : void 0;
+}
+async function observe(exec, repo, refs) {
+  const listed = await git(exec, repo, [
+    "for-each-ref",
+    "--format=%(refname) %(objectname)",
+    ...refs
+  ]);
+  const config2 = await git(exec, repo, ["config", "--local", "--list"]);
+  if (listed === void 0 || config2 === void 0) return void 0;
+  return { refs_hash: sha(listed), config_hash: sha(config2) };
+}
+async function takeSnapshot(exec, repo, callerBranch) {
+  const names = /* @__PURE__ */ new Set([...await baseBranches(exec, repo, process.env), callerBranch]);
+  const refs = [...names].map((name) => `refs/heads/${name}`).sort();
+  const seen = await observe(exec, repo, refs);
+  return seen ? { refs, ...seen } : void 0;
+}
+async function changedSince(exec, repo, snapshot) {
+  const seen = await observe(exec, repo, snapshot.refs);
+  if (!seen) return [];
+  const changed = [];
+  if (seen.refs_hash !== snapshot.refs_hash) changed.push("refs");
+  if (seen.config_hash !== snapshot.config_hash) changed.push("config");
+  return changed;
+}
+
 // src/runner.ts
 var DEFAULT_TIMEOUT_MS = 4 * 60 * 60 * 1e3;
 var KILL_GRACE_MS = 3e3;
 var MAX_EVENTS_BYTES = 20 * 1024 * 1024;
-var PLUGIN_CHANGE = /\bclaude\s+plugins?\s+(?:update|install)\b|\bplugins?\s+(?:was\s+|were\s+|has\s+been\s+|have\s+been\s+)?(?:updated|installed)\b/i;
+var PLUGIN_COMMAND = /\bclaude\s+plugins?\s+(?:install|update|uninstall)\b/i;
+var PLUGIN_UPDATED = /\bplugins?\s+(?:was\s+|were\s+|has\s+been\s+|have\s+been\s+)?updated\b/i;
+function reportsPluginChange(text) {
+  if (PLUGIN_COMMAND.test(text)) return true;
+  return text.split(/[.!?\n]+/).some((sentence) => /\bclaude\b/i.test(sentence) && PLUGIN_UPDATED.test(sentence));
+}
 function mapOutcome(input2) {
   const { finished, exitCode, timedOut, rateRejected } = input2;
   const exit = `exit code ${exitCode ?? "none"}${input2.signal ? `, signal ${input2.signal}` : ""}`;
@@ -29530,13 +29605,30 @@ function mapOutcome(input2) {
       text: `[wingman] agent ended without a result message (${detail})`
     };
   }
+  if (finished.max_turns) {
+    return {
+      status: "partial",
+      text: finished.result ?? "[wingman] the agent stopped at its turn limit (max_turns) before finishing"
+    };
+  }
   const text = finished.result ?? "";
   if (finished.is_error || exitCode !== null && exitCode !== 0) {
     if (rateRejected) return { status: "rate_limited", text };
     return { status: "failed", text };
   }
-  if (PLUGIN_CHANGE.test(text)) return { status: "needs_caller", text };
+  if (reportsPluginChange(text)) return { status: "needs_caller", text };
   return { status: parseStatusLine(text) ?? "needs_input", text };
+}
+var CLEAN_STATUSES = ["done", "partial", "blocked", "needs_input"];
+function flagGuardrail(outcome, changed) {
+  const what = changed.map((c) => c === "refs" ? "the base branch or caller branch ref" : "the local git config").join(" and ");
+  const note = `[wingman] guardrail: ${what} changed while this run was active (the run, or you, moved it). Review with git before trusting this result.`;
+  return {
+    status: CLEAN_STATUSES.includes(outcome.status) ? "needs_caller" : outcome.status,
+    text: `${outcome.text}
+
+${note}`
+  };
 }
 async function readStdin() {
   const chunks = [];
@@ -29613,7 +29705,11 @@ async function runSupervisor(runId) {
     rateRejected
   };
   if (spawnError !== void 0) input2.spawnError = spawnError;
-  const outcome = mapOutcome(input2);
+  let outcome = mapOutcome(input2);
+  if (payload.repo && payload.ref_snapshot) {
+    const changed = await changedSince(defaultExec, payload.repo, payload.ref_snapshot);
+    if (changed.length > 0) outcome = flagGuardrail(outcome, changed);
+  }
   writeResult(runId, outcome.text);
   const patch = {
     exit_code: end.code,
@@ -29692,8 +29788,17 @@ async function startRun(opts) {
     ...opts.preset !== void 0 ? { preset: opts.preset } : {},
     ...opts.allowed_tools !== void 0 ? { allowed_tools: opts.allowed_tools } : {}
   });
-  const repo = opts.worktree ? await gitOut(exec, opts.cwd, ["rev-parse", "--show-toplevel"]) : void 0;
-  const callerBranch = repo ? await gitOut(exec, repo, ["rev-parse", "--abbrev-ref", "HEAD"]) : void 0;
+  const top = await gitOut(exec, opts.cwd, ["rev-parse", "--show-toplevel"]);
+  const callerBranch = top ? await gitOut(exec, top, ["rev-parse", "--abbrev-ref", "HEAD"]) : void 0;
+  if (top && callerBranch !== void 0) {
+    if (callerBranch === "HEAD") throw new Error("Refusing to start a run on a detached HEAD");
+    if ((await baseBranches(exec, top, parentEnv)).includes(callerBranch)) {
+      throw new Error(
+        `Refusing to start a run on the base branch "${callerBranch}"; switch to a feature branch first`
+      );
+    }
+  }
+  const repo = opts.worktree ? top : void 0;
   const offset = repo ? offsetInRepo(repo, opts.cwd) : "";
   const sessionId = randomUUID();
   const meta3 = createRun({
@@ -29703,7 +29808,7 @@ async function startRun(opts) {
     session_id: sessionId,
     depth,
     prompt_chars: opts.prompt.length,
-    ...repo !== void 0 ? { repo } : {},
+    ...top !== void 0 ? { repo: top } : {},
     ...callerBranch !== void 0 ? { branch: callerBranch } : {},
     ...opts.change !== void 0 ? { change: opts.change } : {},
     ...opts.preset !== void 0 ? { preset: opts.preset } : {}
@@ -29744,6 +29849,13 @@ async function startRun(opts) {
     await discardStart(meta3, exec);
     throw err;
   }
+  if (top && callerBranch !== void 0) {
+    const snapshot = await takeSnapshot(exec, top, callerBranch).catch(() => void 0);
+    if (snapshot) {
+      meta3.ref_snapshot = snapshot;
+      writeMeta(meta3);
+    }
+  }
   const spec = {
     prompt: opts.prompt,
     cwd: runCwd,
@@ -29780,6 +29892,8 @@ async function discardStart(meta3, exec) {
 function spawnRun(meta3, opts, adapter, spec, depth, parentEnv, lockPath) {
   const { command, args } = adapter.buildCommand(opts.account, spec);
   const payload = {
+    ...meta3.repo !== void 0 ? { repo: meta3.repo } : {},
+    ...meta3.ref_snapshot !== void 0 ? { ref_snapshot: meta3.ref_snapshot } : {},
     provider: adapter.provider,
     command,
     args,
@@ -29850,6 +29964,17 @@ async function sendToRun(runId, prompt, opts = {}) {
     ...previous.change !== void 0 ? { change: previous.change } : {},
     ...preset !== void 0 ? { preset } : {}
   });
+  if (previous.repo !== void 0 && previous.branch !== void 0) {
+    const snapshot = await takeSnapshot(
+      opts.exec ?? defaultExec,
+      previous.repo,
+      previous.branch
+    ).catch(() => void 0);
+    if (snapshot) {
+      meta3.ref_snapshot = snapshot;
+      writeMeta(meta3);
+    }
+  }
   let lockPath;
   if (previous.change !== void 0 && previous.repo !== void 0 && previous.worktree) {
     try {
@@ -38022,7 +38147,7 @@ var startInput = {
   cwd: external_exports.string().min(1).describe("Absolute path of the project directory."),
   model: external_exports.string().min(1).optional(),
   preset: external_exports.string().min(1).optional().describe('Tool preset, for example "os-apply".'),
-  allowed_tools: external_exports.array(external_exports.string().min(1)).max(100).optional(),
+  allowed_tools: external_exports.array(external_exports.string().min(1).max(300).regex(TOOL_ITEM, "invalid tool rule")).max(100).optional(),
   max_turns: external_exports.number().int().positive().max(1e3).optional(),
   worktree: external_exports.boolean().optional().describe("Run in a fresh git worktree; default true in a repo."),
   change: external_exports.string().min(1).max(200).optional().describe("OpenSpec change name, locks it."),

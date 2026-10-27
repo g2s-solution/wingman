@@ -43,6 +43,9 @@ const metaSchema = z.object({
   branch: z.string().optional(),
   run_branch: z.string().optional(),
   worktree: z.string().optional(),
+  ref_snapshot: z
+    .object({ refs: z.array(z.string()), refs_hash: z.string(), config_hash: z.string() })
+    .optional(),
   repo: z.string().optional(),
   run_cwd: z.string().optional(),
   session_id: z.string(),

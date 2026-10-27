@@ -228,7 +228,11 @@ async function withRetry(
   return result;
 }
 
-async function baseBranches(exec: ExecFn, cwd: string, env: NodeJS.ProcessEnv): Promise<string[]> {
+export async function baseBranches(
+  exec: ExecFn,
+  cwd: string,
+  env: NodeJS.ProcessEnv,
+): Promise<string[]> {
   const names = ['main', 'master'];
   const head = await exec('git', ['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'], {
     cwd,

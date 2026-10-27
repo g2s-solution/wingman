@@ -39,6 +39,13 @@ export interface RateLimitInfo {
   utilization?: number;
 }
 
+export interface RefSnapshot {
+  /** `refs/heads/<name>` of the base branches and the caller branch. */
+  refs: string[];
+  refs_hash: string;
+  config_hash: string;
+}
+
 export interface RunMeta {
   id: string;
   account: string;
@@ -46,6 +53,8 @@ export interface RunMeta {
   branch?: string;
   run_branch?: string;
   worktree?: string;
+  /** Refs and local config as they were when the run started. */
+  ref_snapshot?: RefSnapshot;
   /** Toplevel of the caller's repository; keys the change lock. */
   repo?: string;
   /** Directory the agent runs in: the worktree plus the caller's offset inside the repo. */
@@ -71,7 +80,14 @@ export type AgentEvent =
   | { kind: 'message'; text: string }
   | { kind: 'tool'; name: string }
   | { kind: 'rate_limited'; info: RateLimitInfo }
-  | { kind: 'finished'; result: string | null; is_error: boolean; permission_denials: string[] };
+  | {
+      kind: 'finished';
+      result: string | null;
+      is_error: boolean;
+      permission_denials: string[];
+      /** The agent stopped at its turn limit. */
+      max_turns?: boolean;
+    };
 
 export interface StartSpec {
   prompt: string;

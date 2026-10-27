@@ -3,6 +3,7 @@ import { existsSync, statSync } from 'node:fs';
 import { isAbsolute } from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
+import { TOOL_ITEM } from './guard.js';
 import { maskSecrets, safeSummary } from './mask.js';
 import { getAccount, targetsFor } from './registry.js';
 import { reconcile } from './reconcile.js';
@@ -78,7 +79,10 @@ const startInput = {
   cwd: z.string().min(1).describe('Absolute path of the project directory.'),
   model: z.string().min(1).optional(),
   preset: z.string().min(1).optional().describe('Tool preset, for example "os-apply".'),
-  allowed_tools: z.array(z.string().min(1)).max(100).optional(),
+  allowed_tools: z
+    .array(z.string().min(1).max(300).regex(TOOL_ITEM, 'invalid tool rule'))
+    .max(100)
+    .optional(),
   max_turns: z.number().int().positive().max(1000).optional(),
   worktree: z.boolean().optional().describe('Run in a fresh git worktree; default true in a repo.'),
   change: z.string().min(1).max(200).optional().describe('OpenSpec change name, locks it.'),

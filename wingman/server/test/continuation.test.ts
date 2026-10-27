@@ -168,6 +168,7 @@ describe('run_cwd and send (M3)', () => {
     const repo = makeRepo('main');
     git(repo, 'switch', '-q', '-c', 'feat/o');
     const other = makeRepo('main');
+    git(other, 'switch', '-q', '-c', 'feat/x');
     const exec: ExecFn = async (file, args, opts) => {
       if (args[0] === 'rev-parse' && args[1] === '--show-toplevel') {
         return { code: 0, stdout: `${other}\n`, stderr: '' };

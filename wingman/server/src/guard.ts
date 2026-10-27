@@ -11,7 +11,18 @@ export const PRESETS: Record<Preset, { allowed: readonly string[] }> = {
       'Edit',
       'Write',
       'Read',
-      'Bash(git:*)',
+      'Bash(git status:*)',
+      'Bash(git add:*)',
+      'Bash(git commit:*)',
+      'Bash(git diff:*)',
+      'Bash(git log:*)',
+      'Bash(git show:*)',
+      'Bash(git rev-parse:*)',
+      'Bash(git branch --show-current)',
+      'Bash(git ls-files:*)',
+      'Bash(git mv:*)',
+      'Bash(git rm:*)',
+      'Bash(git restore:*)',
       'Bash(node:*)',
       'Bash(openspec:*)',
       'Bash(date:*)',
@@ -34,6 +45,12 @@ export function baseDisallowed(): string[] {
   return [
     'AskUserQuestion',
     'Bash(git push:*)',
+    'Bash(git -C:*)',
+    'Bash(git -c:*)',
+    'Bash(git --no-pager:*)',
+    'Bash(git update-ref:*)',
+    'Bash(git config:*)',
+    'Bash(git remote:*)',
     'Bash(claude:*)',
     'Bash(claude plugin:*)',
     'Bash(npm install -g:*)',
@@ -41,6 +58,17 @@ export function baseDisallowed(): string[] {
     'mcp__wingman__*',
     'mcp__plugin_wingman_wingman__*',
   ];
+}
+
+/** A tool rule is passed as a bare argv word after a variadic flag: it must never read as a flag. */
+export const TOOL_ITEM = /^(?!-)[A-Za-z0-9_*.:()\- ,/'"@=+~[\]$|]+$/;
+
+export function assertToolItems(items: readonly string[], label: string): void {
+  for (const item of items) {
+    if (!TOOL_ITEM.test(item) || item.length > 300) {
+      throw new Error(`Invalid ${label} item "${item.slice(0, 60)}"`);
+    }
+  }
 }
 
 export interface ToolSelection {
@@ -52,6 +80,7 @@ export function resolveTools(sel: ToolSelection): { allowed: string[]; disallowe
   const disallowed = baseDisallowed();
   let allowed: string[] = [];
   if (sel.allowed_tools !== undefined) {
+    assertToolItems(sel.allowed_tools, 'allowed_tools');
     allowed = [...sel.allowed_tools];
   } else if (sel.preset !== undefined) {
     const preset = PRESETS[sel.preset as Preset];

@@ -32,8 +32,10 @@ import {
 import { isAlive, isSameProcess, readStartTime } from './proc.js';
 import { reconcile } from './reconcile.js';
 import { assertCanStart, currentDepth } from './self.js';
+import { changedSince, takeSnapshot } from './snapshot.js';
 import {
   activeUsersOf,
+  baseBranches,
   createWorktree,
   defaultExec,
   releaseLocksOf,
@@ -48,6 +50,7 @@ import {
   type Account,
   type Adapter,
   type RateLimitInfo,
+  type RefSnapshot,
   type RunMeta,
   type RunStatus,
   type StartSpec,
@@ -57,8 +60,16 @@ const DEFAULT_TIMEOUT_MS = 4 * 60 * 60 * 1000;
 const KILL_GRACE_MS = 3000;
 const MAX_EVENTS_BYTES = 20 * 1024 * 1024;
 
-const PLUGIN_CHANGE =
-  /\bclaude\s+plugins?\s+(?:update|install)\b|\bplugins?\s+(?:was\s+|were\s+|has\s+been\s+|have\s+been\s+)?(?:updated|installed)\b/i;
+const PLUGIN_COMMAND = /\bclaude\s+plugins?\s+(?:install|update|uninstall)\b/i;
+const PLUGIN_UPDATED = /\bplugins?\s+(?:was\s+|were\s+|has\s+been\s+|have\s+been\s+)?updated\b/i;
+
+/** An explicit plugin command, or a sentence that names claude and says a plugin was updated. */
+export function reportsPluginChange(text: string): boolean {
+  if (PLUGIN_COMMAND.test(text)) return true;
+  return text
+    .split(/[.!?\n]+/)
+    .some((sentence) => /\bclaude\b/i.test(sentence) && PLUGIN_UPDATED.test(sentence));
+}
 
 export interface StartRunOptions {
   account: Account;
@@ -89,6 +100,8 @@ export interface StartRunOptions {
 }
 
 interface SupervisorPayload {
+  repo?: string;
+  ref_snapshot?: RefSnapshot;
   provider: string;
   command: string;
   args: string[];
@@ -103,7 +116,7 @@ export interface Outcome {
 }
 
 export function mapOutcome(input: {
-  finished: { result: string | null; is_error: boolean } | undefined;
+  finished: { result: string | null; is_error: boolean; max_turns?: boolean } | undefined;
   exitCode: number | null;
   signal: string | null;
   timedOut: boolean;
@@ -128,13 +141,35 @@ export function mapOutcome(input: {
       text: `[wingman] agent ended without a result message (${detail})`,
     };
   }
+  if (finished.max_turns) {
+    return {
+      status: 'partial',
+      text:
+        finished.result ??
+        '[wingman] the agent stopped at its turn limit (max_turns) before finishing',
+    };
+  }
   const text = finished.result ?? '';
   if (finished.is_error || (exitCode !== null && exitCode !== 0)) {
     if (rateRejected) return { status: 'rate_limited', text };
     return { status: 'failed', text };
   }
-  if (PLUGIN_CHANGE.test(text)) return { status: 'needs_caller', text };
+  if (reportsPluginChange(text)) return { status: 'needs_caller', text };
   return { status: parseStatusLine(text) ?? 'needs_input', text };
+}
+
+const CLEAN_STATUSES: readonly RunStatus[] = ['done', 'partial', 'blocked', 'needs_input'];
+
+/** A run that moved a ref or the local config it must not touch goes back to the caller. */
+export function flagGuardrail(outcome: Outcome, changed: ('refs' | 'config')[]): Outcome {
+  const what = changed
+    .map((c) => (c === 'refs' ? 'the base branch or caller branch ref' : 'the local git config'))
+    .join(' and ');
+  const note = `[wingman] guardrail: ${what} changed while this run was active (the run, or you, moved it). Review with git before trusting this result.`;
+  return {
+    status: CLEAN_STATUSES.includes(outcome.status) ? 'needs_caller' : outcome.status,
+    text: `${outcome.text}\n\n${note}`,
+  };
 }
 
 async function readStdin(): Promise<string> {
@@ -152,7 +187,13 @@ export async function runSupervisor(runId: string): Promise<void> {
   let sessionRateLimit: RateLimitInfo | undefined;
   let rateRejected = false;
   let finished:
-    { result: string | null; is_error: boolean; permission_denials: string[] } | undefined;
+    | {
+        result: string | null;
+        is_error: boolean;
+        permission_denials: string[];
+        max_turns?: boolean;
+      }
+    | undefined;
   let timedOut = false;
   let spawnError: string | undefined;
 
@@ -221,7 +262,11 @@ export async function runSupervisor(runId: string): Promise<void> {
     rateRejected,
   };
   if (spawnError !== undefined) input.spawnError = spawnError;
-  const outcome = mapOutcome(input);
+  let outcome = mapOutcome(input);
+  if (payload.repo && payload.ref_snapshot) {
+    const changed = await changedSince(defaultExec, payload.repo, payload.ref_snapshot);
+    if (changed.length > 0) outcome = flagGuardrail(outcome, changed);
+  }
   writeResult(runId, outcome.text);
   const patch: Partial<Omit<RunMeta, 'id' | 'status'>> = {
     exit_code: end.code,
@@ -313,12 +358,19 @@ export async function startRun(opts: StartRunOptions): Promise<RunMeta> {
     ...(opts.allowed_tools !== undefined ? { allowed_tools: opts.allowed_tools } : {}),
   });
 
-  const repo = opts.worktree
-    ? await gitOut(exec, opts.cwd, ['rev-parse', '--show-toplevel'])
+  const top = await gitOut(exec, opts.cwd, ['rev-parse', '--show-toplevel']);
+  const callerBranch = top
+    ? await gitOut(exec, top, ['rev-parse', '--abbrev-ref', 'HEAD'])
     : undefined;
-  const callerBranch = repo
-    ? await gitOut(exec, repo, ['rev-parse', '--abbrev-ref', 'HEAD'])
-    : undefined;
+  if (top && callerBranch !== undefined) {
+    if (callerBranch === 'HEAD') throw new Error('Refusing to start a run on a detached HEAD');
+    if ((await baseBranches(exec, top, parentEnv)).includes(callerBranch)) {
+      throw new Error(
+        `Refusing to start a run on the base branch "${callerBranch}"; switch to a feature branch first`,
+      );
+    }
+  }
+  const repo = opts.worktree ? top : undefined;
   const offset = repo ? offsetInRepo(repo, opts.cwd) : '';
 
   const sessionId = randomUUID();
@@ -329,7 +381,7 @@ export async function startRun(opts: StartRunOptions): Promise<RunMeta> {
     session_id: sessionId,
     depth,
     prompt_chars: opts.prompt.length,
-    ...(repo !== undefined ? { repo } : {}),
+    ...(top !== undefined ? { repo: top } : {}),
     ...(callerBranch !== undefined ? { branch: callerBranch } : {}),
     ...(opts.change !== undefined ? { change: opts.change } : {}),
     ...(opts.preset !== undefined ? { preset: opts.preset } : {}),
@@ -372,6 +424,14 @@ export async function startRun(opts: StartRunOptions): Promise<RunMeta> {
   } catch (err) {
     await discardStart(meta, exec);
     throw err;
+  }
+
+  if (top && callerBranch !== undefined) {
+    const snapshot = await takeSnapshot(exec, top, callerBranch).catch(() => undefined);
+    if (snapshot) {
+      meta.ref_snapshot = snapshot;
+      writeMeta(meta);
+    }
   }
 
   const spec: StartSpec = {
@@ -424,6 +484,8 @@ function spawnRun(
 ): RunMeta {
   const { command, args } = adapter.buildCommand(opts.account, spec);
   const payload: SupervisorPayload = {
+    ...(meta.repo !== undefined ? { repo: meta.repo } : {}),
+    ...(meta.ref_snapshot !== undefined ? { ref_snapshot: meta.ref_snapshot } : {}),
     provider: adapter.provider,
     command,
     args,
@@ -500,6 +562,17 @@ export async function sendToRun(
     ...(previous.change !== undefined ? { change: previous.change } : {}),
     ...(preset !== undefined ? { preset } : {}),
   });
+  if (previous.repo !== undefined && previous.branch !== undefined) {
+    const snapshot = await takeSnapshot(
+      opts.exec ?? defaultExec,
+      previous.repo,
+      previous.branch,
+    ).catch(() => undefined);
+    if (snapshot) {
+      meta.ref_snapshot = snapshot;
+      writeMeta(meta);
+    }
+  }
   let lockPath: string | undefined;
   if (previous.change !== undefined && previous.repo !== undefined && previous.worktree) {
     try {
