@@ -32,7 +32,7 @@ In the caller's Claude Code:
 /plugin install wingman@wingman-marketplace
 ```
 
-Restart the session. The plugin is only needed in the caller's profile; the target loads no MCP servers. To update later:
+Restart the session. The plugin is needed in each profile you delegate from (profiles that share `plugins` get it together); the target of a run loads no MCP servers. To update later:
 
 ```bash
 claude plugin marketplace update wingman-marketplace && claude plugin update wingman@wingman-marketplace
@@ -51,7 +51,7 @@ Clone this repository (the login script is not part of the plugin) and run:
 A bare name such as `claude-second` becomes `~/.claude-second`; a value containing `/` or `~` is used as given. What the script does:
 
 - Creates the profile directory (mode 0700) and signs in with `claude auth login`, or stores an API key or token in `<profile>/api-key.env` (mode 0600) for the `api_key` method.
-- **Links these items from your default profile into the new one** (only those that exist): `CLAUDE.md`, `settings.json`, `skills`, `agents`, `commands`, `rules`. So the target runs with your instructions, settings and hooks, and editing one of them from the target edits your default profile. To share less, edit the `SHARED=(...)` line at the top of the script before running it. Plugins, credentials, history and sessions are not shared.
+- **Links these items from your default profile into the new one** (only those that exist): `CLAUDE.md`, `settings.json`, `skills`, `agents`, `commands`, `rules`, `plugins`. So the target runs with your instructions, settings, hooks and plugins, and editing one of them from the target edits your default profile. To share less, edit the `SHARED=(...)` line at the top of the script before running it. Credentials, `.claude.json`, history and sessions are not shared. If the new profile already has a real `plugins` directory the script skips it and prints the two commands to migrate it (see [Delegate in both directions](#delegate-in-both-directions-role-swap)).
 - Writes a launcher (for example `~/.local/bin/claude-second`) that sets `CLAUDE_CONFIG_DIR` and loads the profile's key file, if any.
 - Registers the profile in `~/.wingman/accounts.json` (id = the name without a leading `claude-`, so `claude-second` becomes `second`).
 
@@ -73,7 +73,7 @@ The registry is a plain file (directory mode 0700, file mode 0600). `another-log
 }
 ```
 
-`command` defaults to `claude` (use that for a profile signed in with `claude auth login` only). The caller's own profile is never a target. `WINGMAN_HOME` moves the state directory (default `~/.wingman`).
+`command` defaults to `claude` (use that for a profile signed in with `claude auth login` only). The caller's own profile may be registered, but it is never chosen as a target from itself. `WINGMAN_HOME` moves the state directory (default `~/.wingman`).
 
 ### Manage accounts
 
@@ -87,9 +87,26 @@ wingman accounts enable ID                # back to active
 wingman accounts remove ID --yes          # registry entry only; the profile directory and credentials are not touched
 ```
 
-`add` needs an absolute `--config-dir` (a leading `~` is expanded), refuses a duplicate id unless `--upsert` (which keeps fields you set by hand, such as `status`), and refuses your own profile. `remove` without `--yes` only prints what it would do and exits 2. Exit codes: 0 ok, 2 usage or validation error, 1 unexpected error. The commands never read or write credentials.
+`add` needs an absolute `--config-dir` (a leading `~` is expanded), refuses a duplicate id unless `--upsert` (which keeps fields you set by hand, such as `status`). Registering your own profile is allowed and prints a note: it is skipped when you delegate from it and used when you delegate from another profile. `remove` without `--yes` only prints what it would do and exits 2. Exit codes: 0 ok, 2 usage or validation error, 1 unexpected error. The commands never read or write credentials.
 
 Claude can list the accounts through the read-only `wingman_accounts` tool, but no tool adds, changes or removes one: an entry's `command` is run by wingman, so only you, in a terminal, can change it.
+
+### Delegate in both directions (role swap)
+
+Two profiles, for example your default `~/.claude` and `~/.claude-second`, can each delegate to the other.
+
+1. Register every profile you want to delegate to or from. For the default profile, run this from any profile: `wingman accounts add --id main --label default --config-dir ~/.claude --command claude`. The registry is shared, and each profile skips itself when choosing a target, so from `second` only `main` is picked and from `main` only `second`.
+2. Install the wingman plugin in each profile that should delegate. With `plugins` linked (next point) one install covers all.
+3. `another-login.sh` links `plugins`, `skills`, `settings.json` and the rest from the default profile into the new one, so every profile has the same plugins, skills and settings. This means that installing or updating a plugin in one profile affects all of them, and a run in flight can fail if a plugin is updated meanwhile. `.claude.json`, credentials, history and sessions stay per profile.
+4. To migrate an existing second profile that has its own `plugins` directory, run (with your paths):
+
+   ```sh
+   mv ~/.claude-second/plugins ~/.claude-second/plugins.bak && ln -s ~/.claude/plugins ~/.claude-second/plugins
+   ```
+
+   `wingman doctor` prints these two commands with the real paths for each profile whose `plugins` is a real directory. Nothing moves automatically; delete the backup once the plugins work.
+
+A delegated run can never delegate further: see "No recursion" in `DESIGN.md`.
 
 ## 3. Your first run
 
@@ -115,9 +132,9 @@ node <plugin dir>/wingman/bin/wingman doctor --online   # also asks each profile
 node <plugin dir>/wingman/bin/wingman doctor --json     # machine-readable list of {id, level, message}
 ```
 
-It checks the state directory and `accounts.json` (modes 0700 and 0600, valid JSON, no duplicate ids), each account's `config_dir` and launcher, the shared items `another-login.sh` links from your default profile, and the installed wingman plugin version of each profile.
+It checks the state directory and `accounts.json` (modes 0700 and 0600, valid JSON, no duplicate ids), each account's `config_dir` and launcher, the shared items `another-login.sh` links from your default profile (including `plugins`), and the installed wingman plugin version of each profile.
 
-- `[ok]`: fine (some are informational, such as an unshared item or a target without the plugin).
+- `[ok]`: fine (some are informational, such as an unshared item, a target without the plugin, or an account that is the profile you are running in).
 - `[warn]`: works, but worth a look (loose modes, a forked shared item, a version mismatch, no second account yet).
 - `[fail]`: something is broken (missing `config_dir`, launcher not found or not executable, broken link, invalid registry). The exit code is 1 when there is a `fail`, 0 otherwise, 2 for bad arguments.
 
