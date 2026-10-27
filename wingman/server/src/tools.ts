@@ -8,7 +8,13 @@ import { TOOL_ITEM } from './guard.js';
 import { maskSecrets, safeSummary } from './mask.js';
 import { getAccount, isActive, targetsFor } from './registry.js';
 import { reconcile } from './reconcile.js';
-import { listRuns, readMeta, runSummary } from './runs.js';
+import {
+  listRuns,
+  readMeta,
+  runSummary,
+  RESULT_PAGE_CHARS,
+  RESULT_PAGE_MAX_CHARS,
+} from './runs.js';
 import { cancelRun, startRun, type StartRunOptions } from './runner.js';
 import { callerProfile } from './self.js';
 import { TERMINAL_STATUSES, type RunMeta } from './types.js';
@@ -184,12 +190,17 @@ export function createHandlers(deps: ServerDeps = {}) {
       return { ...summary, has_result: result !== null };
     },
 
-    result(input: { run_id: string }): Json {
+    result(input: { run_id: string; offset?: number; limit?: number }): Json {
       const meta = loadMeta(input.run_id);
       if (!TERMINAL_STATUSES.includes(meta.status)) {
         return { id: meta.id, status: meta.status, message: 'still running' };
       }
-      return { ...runSummary(input.run_id) };
+      return {
+        ...runSummary(input.run_id, {
+          ...(input.offset !== undefined ? { offset: input.offset } : {}),
+          ...(input.limit !== undefined ? { limit: input.limit } : {}),
+        }),
+      };
     },
 
     async cancel(input: { run_id: string }): Promise<Json> {
@@ -278,8 +289,25 @@ export function buildServer(deps: ServerDeps = {}): McpServer {
   server.registerTool(
     'wingman_result',
     {
-      description: `Masked, capped final report of a finished run, or "still running". ${LOGS_WARNING}`,
-      inputSchema: runIdInput,
+      description: `Masked final report of a finished run, or "still running". Long reports come in pages: when the answer has result_next_offset, call again with offset set to it until it is absent (result_total_chars is the full length). ${LOGS_WARNING}`,
+      inputSchema: {
+        ...runIdInput,
+        offset: z
+          .number()
+          .int()
+          .min(0)
+          .optional()
+          .describe('Start of the page, in characters; default 0.'),
+        limit: z
+          .number()
+          .int()
+          .min(1)
+          .max(RESULT_PAGE_MAX_CHARS)
+          .optional()
+          .describe(
+            `Page size in characters; default ${RESULT_PAGE_CHARS}, max ${RESULT_PAGE_MAX_CHARS}.`,
+          ),
+      },
     },
     wrap(h.result),
   );
