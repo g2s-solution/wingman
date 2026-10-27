@@ -319,11 +319,26 @@ describe('guards', () => {
 });
 
 describe('worktree runs', () => {
-  it('refuses a run on the base branch', async () => {
+  it('an edit run on the base branch gets a wingman/<id> branch and leaves main alone', async () => {
     const repo = makeRepo('main');
+    const mainHead = git(repo, 'rev-parse', 'main');
     const { opts } = ctx('ok', { cwd: repo, worktree: true });
-    await expect(startRun(opts)).rejects.toThrow(/base branch/);
-    expect(existsSync(worktreesDir()) ? readdirSync(worktreesDir()) : []).toEqual([]);
+    const started = await startRun(opts);
+    expect(started.run_branch).toBe(`wingman/${started.id}`);
+    expect((await finish(started)).status).toBe('done');
+    expect(git(repo, 'rev-parse', 'main')).toBe(mainHead);
+    expect(git(repo, 'rev-parse', '--abbrev-ref', 'HEAD')).toBe('main');
+  });
+
+  it('a readonly run gets a detached worktree and no run branch', async () => {
+    const repo = makeRepo('main');
+    const branches = git(repo, 'branch', '--format=%(refname:short)');
+    const { opts } = ctx('ok', { cwd: repo, worktree: true, preset: 'readonly' });
+    const started = await startRun(opts);
+    expect(started.worktree).toBeDefined();
+    expect(started.run_branch).toBeUndefined();
+    expect((await finish(started)).status).toBe('done');
+    expect(git(repo, 'branch', '--format=%(refname:short)')).toBe(branches);
   });
 
   it('runs inside a worktree cut from the caller HEAD and locks the change', async () => {

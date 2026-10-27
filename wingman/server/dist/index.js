@@ -29456,9 +29456,7 @@ async function createWorktree(opts) {
   if (!callerBranch || callerBranch === "HEAD") {
     throw new Error("Refusing to create a worktree from a detached HEAD");
   }
-  if ((await baseBranches(exec, repo, env)).includes(callerBranch)) {
-    throw new Error(`Refusing to create a worktree from the base branch "${callerBranch}"`);
-  }
+  const fromBase = (await baseBranches(exec, repo, env)).includes(callerBranch);
   let lockPath;
   if (opts.lock_key) {
     lockPath = lockPathFor(repo, opts.lock_key);
@@ -29492,19 +29490,20 @@ async function createWorktree(opts) {
     mkdirSync2(worktreesDir(), { recursive: true, mode: 448 });
     chmodSync2(worktreesDir(), 448);
     const path = join5(worktreesDir(), runId);
-    const branch = `${callerBranch}-wm-${runId}`;
+    const branch = opts.createBranch === false ? void 0 : fromBase ? `wingman/${runId}` : `${callerBranch}-wm-${runId}`;
     const added = await withRetry(
       exec,
       sleep,
       "git",
-      ["worktree", "add", "-b", branch, path, "HEAD"],
+      branch === void 0 ? ["worktree", "add", "--detach", path, "HEAD"] : ["worktree", "add", "-b", branch, path, "HEAD"],
       { cwd: repo, env, timeoutMs: opts.addTimeoutMs ?? DEFAULT_ADD_TIMEOUT_MS },
       opts.deadline
     );
     if (added.code !== 0) {
       throw new Error(`git worktree add failed: ${added.stderr.trim().slice(0, 500)}`);
     }
-    const info = { path, branch, warnings };
+    const info = { path, warnings };
+    if (branch !== void 0) info.branch = branch;
     if (lockPath) info.lockPath = lockPath;
     return info;
   } catch (err) {
@@ -29874,12 +29873,13 @@ async function startRun(opts) {
   const callerBranch = top ? await gitOut(exec, top, ["rev-parse", "--abbrev-ref", "HEAD"]) : void 0;
   if (top && callerBranch !== void 0) {
     if (callerBranch === "HEAD") throw new Error("Refusing to start a run on a detached HEAD");
-    if ((await baseBranches(exec, top, parentEnv)).includes(callerBranch)) {
+    if (!opts.worktree && (await baseBranches(exec, top, parentEnv)).includes(callerBranch)) {
       throw new Error(
-        `Refusing to start a run on the base branch "${callerBranch}"; switch to a feature branch first`
+        `Refusing to start a run on the base branch "${callerBranch}" without a worktree; use a worktree or switch to a feature branch`
       );
     }
   }
+  const mayCommit = (opts.preset ?? DEFAULT_PRESET) !== "readonly" || opts.allowed_tools !== void 0;
   const repo = opts.worktree ? top : void 0;
   if (opts.lock_key !== void 0 && !repo) {
     throw new Error("lock_key needs a worktree run inside a git repository");
@@ -29910,6 +29910,7 @@ async function startRun(opts) {
         env: parentEnv,
         exec,
         deadline,
+        createBranch: opts.create_branch ?? mayCommit,
         ...opts.lock_key !== void 0 ? { lock_key: opts.lock_key } : {},
         ...opts.sleep ? { sleep: opts.sleep } : {},
         ...opts.fetch_timeout_ms !== void 0 ? { fetchTimeoutMs: opts.fetch_timeout_ms } : {},
@@ -29917,12 +29918,12 @@ async function startRun(opts) {
       });
       lockPath = wt.lockPath;
       meta3.worktree = wt.path;
-      meta3.run_branch = wt.branch;
+      if (wt.branch !== void 0) meta3.run_branch = wt.branch;
       runCwd = offset ? join6(wt.path, offset) : wt.path;
       meta3.run_cwd = runCwd;
       patchRunning(meta3.id, {
         worktree: wt.path,
-        run_branch: wt.branch,
+        ...wt.branch !== void 0 ? { run_branch: wt.branch } : {},
         run_cwd: runCwd
       });
       if (opts.setup) {
@@ -38257,7 +38258,12 @@ var startInput = {
   preset: external_exports.string().min(1).optional().describe('Tool preset: "readonly" (default) or "edit".'),
   allowed_tools: external_exports.array(external_exports.string().min(1).max(300).regex(TOOL_ITEM, "invalid tool rule")).max(100).optional(),
   max_turns: external_exports.number().int().positive().max(1e3).optional(),
-  worktree: external_exports.boolean().optional().describe("Run in a fresh git worktree; default true in a repo."),
+  worktree: external_exports.boolean().optional().describe(
+    "Run in a fresh git worktree; default true in a repo, also when the caller is on the base branch."
+  ),
+  branch: external_exports.boolean().optional().describe(
+    "Create a run branch in the worktree. Default: yes for edit runs, no (detached worktree) for readonly runs."
+  ),
   lock_key: external_exports.string().min(1).max(200).optional().describe(
     "Stops two concurrent runs in the same repo with the same key. Needs a worktree run: refused with worktree:false or outside a git repo."
   ),
@@ -38288,6 +38294,7 @@ function createHandlers(deps = {}) {
         prompt: input2.prompt,
         cwd: input2.cwd,
         worktree,
+        ...input2.branch !== void 0 ? { create_branch: input2.branch } : {},
         ...input2.model !== void 0 ? { model: input2.model } : {},
         ...input2.preset !== void 0 ? { preset: input2.preset } : {},
         ...input2.allowed_tools !== void 0 ? { allowed_tools: input2.allowed_tools } : {},

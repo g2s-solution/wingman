@@ -17,7 +17,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { relative, join, isAbsolute } from 'node:path';
 import { claudeAdapter, getAdapter, isRateLimitRejected } from './adapters/claude.js';
-import { guardPrompt, parseStatusLine, resolveTools } from './guard.js';
+import { DEFAULT_PRESET, guardPrompt, parseStatusLine, resolveTools } from './guard.js';
 import { runDir, wingmanHome } from './paths.js';
 import {
   appendEvent,
@@ -81,6 +81,8 @@ export interface StartRunOptions {
   allowed_tools?: string[];
   max_turns?: number;
   worktree?: boolean;
+  /** Create a run branch in the worktree; default: only when the run may commit (not the readonly preset). */
+  create_branch?: boolean;
   lock_key?: string;
   parentEnv?: NodeJS.ProcessEnv;
   adapter?: Adapter;
@@ -416,12 +418,14 @@ export async function startRun(opts: StartRunOptions): Promise<RunMeta> {
     : undefined;
   if (top && callerBranch !== undefined) {
     if (callerBranch === 'HEAD') throw new Error('Refusing to start a run on a detached HEAD');
-    if ((await baseBranches(exec, top, parentEnv)).includes(callerBranch)) {
+    if (!opts.worktree && (await baseBranches(exec, top, parentEnv)).includes(callerBranch)) {
       throw new Error(
-        `Refusing to start a run on the base branch "${callerBranch}"; switch to a feature branch first`,
+        `Refusing to start a run on the base branch "${callerBranch}" without a worktree; use a worktree or switch to a feature branch`,
       );
     }
   }
+  const mayCommit =
+    (opts.preset ?? DEFAULT_PRESET) !== 'readonly' || opts.allowed_tools !== undefined;
   const repo = opts.worktree ? top : undefined;
   if (opts.lock_key !== undefined && !repo) {
     throw new Error('lock_key needs a worktree run inside a git repository');
@@ -454,6 +458,7 @@ export async function startRun(opts: StartRunOptions): Promise<RunMeta> {
         env: parentEnv,
         exec,
         deadline,
+        createBranch: opts.create_branch ?? mayCommit,
         ...(opts.lock_key !== undefined ? { lock_key: opts.lock_key } : {}),
         ...(opts.sleep ? { sleep: opts.sleep } : {}),
         ...(opts.fetch_timeout_ms !== undefined ? { fetchTimeoutMs: opts.fetch_timeout_ms } : {}),
@@ -463,12 +468,12 @@ export async function startRun(opts: StartRunOptions): Promise<RunMeta> {
       });
       lockPath = wt.lockPath;
       meta.worktree = wt.path;
-      meta.run_branch = wt.branch;
+      if (wt.branch !== undefined) meta.run_branch = wt.branch;
       runCwd = offset ? join(wt.path, offset) : wt.path;
       meta.run_cwd = runCwd;
       patchRunning(meta.id, {
         worktree: wt.path,
-        run_branch: wt.branch,
+        ...(wt.branch !== undefined ? { run_branch: wt.branch } : {}),
         run_cwd: runCwd,
       });
       if (opts.setup) {

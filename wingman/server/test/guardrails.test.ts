@@ -108,11 +108,16 @@ describe('ref snapshot', () => {
 });
 
 describe('start on a base branch or detached HEAD (M4)', () => {
-  it('refuses regardless of the worktree option', async () => {
+  it('refuses on the base branch only without a worktree', async () => {
     const repo = makeRepo('main');
-    for (const worktree of [true, false, undefined]) {
-      await expect(startRun(opts('ok', { cwd: repo, worktree }))).rejects.toThrow(/base branch/);
-    }
+    await expect(startRun(opts('ok', { cwd: repo, worktree: false }))).rejects.toThrow(
+      /base branch/,
+    );
+    await expect(startRun(opts('ok', { cwd: repo, worktree: undefined }))).rejects.toThrow(
+      /base branch/,
+    );
+    const onBase = await startRun(opts('ok', { cwd: repo, worktree: true }));
+    expect((await settle(onBase.id)).status).toBe('done');
     git(repo, 'checkout', '-q', '--detach');
     await expect(startRun(opts('ok', { cwd: repo, worktree: false }))).rejects.toThrow(/detached/);
     git(repo, 'switch', '-q', '-c', 'feat/ok');

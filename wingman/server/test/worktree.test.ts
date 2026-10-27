@@ -33,27 +33,45 @@ afterEach(() => {
 });
 
 describe('createWorktree', () => {
-  it('refuses the base branch and a detached HEAD', async () => {
+  it('refuses a detached HEAD', async () => {
     const repo = makeRepo('main');
-    await expect(createWorktree({ repo, callerBranch: 'main', runId: 'r1' })).rejects.toThrow(
-      /base branch/,
-    );
-    await expect(createWorktree({ repo, callerBranch: 'master', runId: 'r1' })).rejects.toThrow(
-      /base branch/,
-    );
     await expect(createWorktree({ repo, callerBranch: 'HEAD', runId: 'r1' })).rejects.toThrow(
       /detached/,
     );
     expect(existsSync(join(worktreesDir(), 'r1'))).toBe(false);
   });
 
-  it('refuses the origin/HEAD target even when it has another name', async () => {
+  it('from a base branch cuts a wingman/<id> branch and leaves the base branch alone', async () => {
+    const repo = makeRepo('main');
+    const head = git(repo, 'rev-parse', 'HEAD');
+    const wt = await createWorktree({ repo, callerBranch: 'main', runId: 'r1', sleep: noSleep });
+    expect(wt.branch).toBe('wingman/r1');
+    expect(git(wt.path, 'rev-parse', 'HEAD')).toBe(head);
+    expect(git(repo, 'rev-parse', 'main')).toBe(head);
+    expect(git(repo, 'rev-parse', '--abbrev-ref', 'HEAD')).toBe('main');
+  });
+
+  it('createBranch:false gives a detached worktree and no branch', async () => {
+    const repo = makeRepo('main');
+    const before = git(repo, 'branch', '--format=%(refname:short)');
+    const wt = await createWorktree({
+      repo,
+      callerBranch: 'main',
+      runId: 'r2',
+      createBranch: false,
+      sleep: noSleep,
+    });
+    expect(wt.branch).toBeUndefined();
+    expect(git(wt.path, 'rev-parse', '--abbrev-ref', 'HEAD')).toBe('HEAD');
+    expect(git(repo, 'branch', '--format=%(refname:short)')).toBe(before);
+  });
+
+  it('treats the origin/HEAD target as a base branch even when it has another name', async () => {
     const repo = makeRepo('trunk');
     git(repo, 'update-ref', 'refs/remotes/origin/trunk', 'HEAD');
     git(repo, 'symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/trunk');
-    await expect(createWorktree({ repo, callerBranch: 'trunk', runId: 'r1' })).rejects.toThrow(
-      /base branch/,
-    );
+    const wt = await createWorktree({ repo, callerBranch: 'trunk', runId: 'r1', sleep: noSleep });
+    expect(wt.branch).toBe('wingman/r1');
   });
 
   it('cuts the run branch from the caller HEAD under worktreesDir', async () => {
