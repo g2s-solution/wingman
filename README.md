@@ -17,7 +17,7 @@ you:    get the findings; nothing in your checkout changed
 ## Requirements
 
 - Claude Code with plugin support (tested with 2.1.311) on the machine of the session that delegates (the *caller*).
-- Node.js 22 or newer (runs the bundled MCP server), `git`, `bash`.
+- Node.js 22 or newer (runs the bundled MCP server; CI tests on 22 and 26), `git`, `bash`.
 - A second Claude login: a claude.ai plan, a Console account or an API key. It must be different from the account of your caller session.
 - Linux. On macOS the login script works (it falls back to `python3` where `realpath -m` is missing), but run supervision, the pid-reuse check and the orphan-process kill read `/proc` and are not available or tested there.
 
