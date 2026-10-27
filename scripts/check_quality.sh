@@ -23,12 +23,13 @@ step "server: typecheck, lint, format, build"
 step "server: tests with coverage (>= 80%), including the committed-bundle check"
 (cd "$server" && npm run coverage)
 
-if ! git -C "$root" diff --quiet -- wingman/server/dist; then
+if [ -n "$(git -C "$root" status --porcelain -- wingman/server/dist)" ]; then
   note_fail "wingman/server/dist/index.js differs from a fresh build; run npm run build and commit it"
 fi
 
 step "shell scripts"
-mapfile -t scripts < <(cd "$root" && git ls-files '*.sh')
+scripts=()
+while IFS= read -r f; do scripts+=("$f"); done < <(cd "$root" && git ls-files '*.sh')
 for f in "${scripts[@]}"; do bash -n "$root/$f" || note_fail "bash -n $f"; done
 if command -v shellcheck >/dev/null; then
   (cd "$root" && shellcheck "${scripts[@]}") || note_fail "shellcheck"
@@ -39,7 +40,8 @@ else
 fi
 
 step "JSON files"
-mapfile -t jsons < <(cd "$root" && git ls-files '*.json' ':!:**/package-lock.json')
+jsons=()
+while IFS= read -r f; do jsons+=("$f"); done < <(cd "$root" && git ls-files '*.json' ':!:**/package-lock.json')
 for f in "${jsons[@]}"; do jq -e . "$root/$f" >/dev/null || note_fail "invalid JSON: $f"; done
 
 step "plugin version"

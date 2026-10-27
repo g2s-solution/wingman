@@ -59,6 +59,9 @@ Run state lives in `~/.wingman/runs/<id>/`. Do not read `events.jsonl`: it holds
 ## Limits
 
 - The deny lists are advisory: the `edit` preset allows `node` and `npm`, which run arbitrary code. Use it only on repos you would let the target account change.
+- `setup` is an arbitrary shell command run as your user, outside the presets, and the `edit` preset runs arbitrary code under the target account: neither is sandboxed.
+- The prompt is passed to the agent as argv, so other local users of the machine can see it in the process list.
+- Linux only for the pid-reuse check and the orphan-group kill (`proc.ts` and `wingman-wait` read `/proc`).
 - A run cannot be resumed; start a new one.
 - A run that changes the base branch, the caller branch ref or the repo's local git config ends as `needs_caller`.
 - Rate limits are recorded per run; the caller decides whether to wait or start another run. There is no automatic failover.

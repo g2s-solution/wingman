@@ -4,10 +4,12 @@ const PEM =
   /-----BEGIN [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?-----[\s\S]*?(?:-----END [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?-----|$)/g;
 // Greedy up to the last "@" before a "/" so a password that itself contains "@" is covered, and a
 // token-only userinfo (https://<token>@host) is masked as well.
-const URL_CREDENTIALS = /\b([a-z][a-z0-9+.-]*:\/\/)[^\s/]+@/gi;
+const URL_CREDENTIALS = /\b([a-z][a-z0-9+.-]{0,39}:\/\/)[^\s/]+@/gi;
 const AUTH_SCHEME =
   /(\bAuthorization["']?\s*[:=]\s*["']?)(Basic|Digest|Negotiate|NTLM)\s+[^\s"',;]+/gi;
-const JWT = /\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*/g;
+// Starts only at the beginning of a base64url run (not at every "-" inside one), so a long run
+// without a dot is scanned once instead of once per "eyJ" in it.
+const JWT = /(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*/g;
 const BEARER = /\b(Bearer)\s+[A-Za-z0-9._~+/=-]+/gi;
 const KEY_SHAPES = [
   /\bsk-[A-Za-z0-9_-]{16,}/g,
@@ -17,9 +19,11 @@ const KEY_SHAPES = [
   /\bxox[baprs]-[A-Za-z0-9-]{10,}/g,
   /\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g,
 ];
-// "auth" only as a whole word, so "author" and "Authorization" (handled above) are left alone.
+// No key prefix in the pattern: it would be rescanned from every start of a long keyword-free run
+// (quadratic), and the text before the keyword is kept as is anyway. The tail is bounded for the same
+// reason. "auth" only as a whole word, so "author" and "Authorization" (handled above) are left alone.
 const ASSIGNMENT =
-  /([A-Za-z0-9_.-]*(?:password|passwd|secret|token|api[_-]?key|credentials?|private[_-]?key|(?<![A-Za-z])auth(?![A-Za-z]))[A-Za-z0-9_.-]*)(["']?\s*[:=]\s*)("[^"\n]*"|'[^'\n]*'|[^\s"',;&}]+)/gi;
+  /((?:password|passwd|secret|token|api[_-]?key|credentials?|private[_-]?key|(?<![A-Za-z])auth(?![A-Za-z]))[A-Za-z0-9_.-]{0,128})(["']?\s*[:=]\s*)("[^"\n]*"|'[^'\n]*'|[^\s"',;&}]+)/gi;
 
 export function maskSecrets(text: string): string {
   let out = text.replace(PEM, MASK);

@@ -45,7 +45,6 @@ function opts(mode: string, extra: Partial<StartRunOptions>, exports = ''): Star
     parentEnv: env(),
     supervisorEntry: entry,
     preset: 'edit',
-    sleep: () => Promise.resolve(),
     ...extra,
   };
 }
@@ -101,9 +100,22 @@ describe('ref snapshot', () => {
     expect(runSummary(meta.id).result).toMatch(/local git config/);
   });
 
+  it('adding a hook is flagged as a changed hooks directory', async () => {
+    const { repo } = featureRepo();
+    const exports = `export FAKE_REF_REPO=${repo}`;
+    const meta = await settle(
+      (await startRun(opts('edit_hook', { cwd: repo, worktree: true }, exports))).id,
+    );
+    expect(meta.status).toBe('needs_caller');
+    expect(runSummary(meta.id).result).toMatch(/guardrail: the git hooks directory changed/);
+  });
+
   it('flagGuardrail keeps failure statuses and appends the note', () => {
     expect(flagGuardrail({ status: 'failed', text: 'x' }, ['refs']).status).toBe('failed');
     expect(flagGuardrail({ status: 'partial', text: 'x' }, ['config']).status).toBe('needs_caller');
+    expect(flagGuardrail({ status: 'done', text: 'x' }, ['refs', 'hooks']).text).toMatch(
+      /base branch or caller branch ref and the git hooks directory/,
+    );
   });
 });
 

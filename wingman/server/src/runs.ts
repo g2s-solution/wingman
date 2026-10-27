@@ -45,7 +45,12 @@ const metaSchema = z.object({
   run_branch: z.string().optional(),
   worktree: z.string().optional(),
   ref_snapshot: z
-    .object({ refs: z.array(z.string()), refs_hash: z.string(), config_hash: z.string() })
+    .object({
+      refs: z.array(z.string()),
+      refs_hash: z.string(),
+      config_hash: z.string(),
+      hooks_hash: z.string().optional(),
+    })
     .optional(),
   repo: z.string().optional(),
   run_cwd: z.string().optional(),
@@ -275,7 +280,10 @@ export function runSummary(id: string, page: ResultPage = {}): RunSummary {
     const start = Math.min(Math.max(page.offset ?? 0, 0), masked.length);
     let end = Math.min(start + limit, masked.length);
     const last = masked.charCodeAt(end - 1);
-    if (end < masked.length && end > start && last >= 0xd800 && last <= 0xdbff) end -= 1;
+    if (end < masked.length && end > start && last >= 0xd800 && last <= 0xdbff) {
+      // keep a surrogate pair whole, but always advance: a page of one unit takes the whole pair
+      end = end - 1 > start ? end - 1 : end + 1;
+    }
     summary.result = masked.slice(start, end);
     summary.result_total_chars = masked.length;
     summary.result_offset = start;

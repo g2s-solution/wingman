@@ -126,3 +126,27 @@ describe('safeSummary', () => {
     expect(safeSummary('z'.repeat(5000)).length).toBeLessThan(4100);
   });
 });
+
+describe('maskSecrets performance (linear on hostile input)', () => {
+  const MB = 1024 * 1024;
+  const timed = (text: string): number => {
+    const t0 = performance.now();
+    maskSecrets(text);
+    return performance.now() - t0;
+  };
+
+  it.each([
+    ['alphanumeric blob', 'a1B2'.repeat(MB / 4)],
+    ['a= repeats', 'a='.repeat(MB / 2)],
+    ['keyword repeats', 'token'.repeat(MB / 5)],
+    ['dotted run (url scheme shape)', 'a.'.repeat(MB / 2)],
+    ['jwt-like header without a dot', 'eyJ-'.repeat(MB / 4)],
+  ])('masks a 1 MB %s in under 1 s', (_name, blob) => {
+    expect(timed(blob)).toBeLessThan(1000);
+  });
+
+  it('still masks a key with a prefix and a tail', () => {
+    expect(maskSecrets('my_db.password_old = hunter2x')).toBe('my_db.password_old = [MASKED]');
+    expect(maskSecrets('MYAPP_API_KEY_V2=abc')).toBe('MYAPP_API_KEY_V2=[MASKED]');
+  });
+});

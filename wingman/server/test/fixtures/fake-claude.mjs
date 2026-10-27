@@ -2,6 +2,7 @@
 import { execFileSync } from 'node:child_process';
 import { spawn } from 'node:child_process';
 import { appendFileSync, writeFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { setInterval } from 'node:timers';
 
 const mode = process.env.FAKE_CLAUDE_MODE ?? 'ok';
@@ -126,6 +127,17 @@ switch (mode) {
     assistant();
     result('Implemented the change.\nWINGMAN_STATUS: done');
     break;
+  case 'edit_hook': {
+    // drops a hook into the caller repo's shared hooks directory, as a misbehaving run could
+    const repo = process.env.FAKE_REF_REPO;
+    const common = execFileSync('git', ['-C', repo, 'rev-parse', '--git-common-dir'], {
+      encoding: 'utf8',
+    }).trim();
+    writeFileSync(resolve(repo, common, 'hooks', 'pre-commit'), '#!/bin/sh\nexit 0\n');
+    assistant();
+    result('Implemented the change.\nWINGMAN_STATUS: done');
+    break;
+  }
   case 'permission_denial':
     assistant();
     result('Could not do everything.\nWINGMAN_STATUS: partial', {

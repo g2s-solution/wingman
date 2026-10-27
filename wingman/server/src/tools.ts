@@ -3,6 +3,7 @@ import { existsSync, statSync } from 'node:fs';
 import { isAbsolute } from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
+import pkg from '../package.json' with { type: 'json' };
 import type { Account } from './types.js';
 import { TOOL_ITEM } from './guard.js';
 import { maskSecrets, safeSummary } from './mask.js';
@@ -257,7 +258,7 @@ export function createHandlers(deps: ServerDeps = {}) {
 const LOGS_WARNING = 'Never read run logs or events.jsonl; use only the output of these tools.';
 
 export function buildServer(deps: ServerDeps = {}): McpServer {
-  const server = new McpServer({ name: 'wingman', version: '0.1.0' });
+  const server = new McpServer({ name: 'wingman', version: pkg.version });
   const h = createHandlers(deps);
 
   const wrap =
@@ -273,7 +274,7 @@ export function buildServer(deps: ServerDeps = {}): McpServer {
   server.registerTool(
     'wingman_start',
     {
-      description: `Start a one-shot detached run of Claude Code on another registered account (random active one when account is omitted); to give more work, start a new run. Returns run_id, account and status only. ${LOGS_WARNING}`,
+      description: `Start a one-shot detached run of Claude Code on another registered account (random active one when account is omitted); to give more work, start a new run. Returns run_id, account and status only. The preset "edit" runs arbitrary code under the target account and the deny rules are advisory, not a sandbox; "setup" is an arbitrary shell command run as the caller's user, outside the presets. ${LOGS_WARNING}`,
       inputSchema: startInput,
     },
     wrap(h.start),

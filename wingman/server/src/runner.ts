@@ -17,6 +17,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { relative, join, isAbsolute } from 'node:path';
 import { claudeAdapter, getAdapter, isRateLimitRejected } from './adapters/claude.js';
+import { maskSecrets } from './mask.js';
 import { DEFAULT_PRESET, guardPrompt, parseStatusLine, resolveTools } from './guard.js';
 import { runDir, wingmanHome } from './paths.js';
 import {
@@ -32,10 +33,11 @@ import {
 import { isAlive, isSameProcess, readStartTime } from './proc.js';
 import { reconcile } from './reconcile.js';
 import { assertCanStart, currentDepth } from './self.js';
-import { changedSince, takeSnapshot } from './snapshot.js';
+import { changedSince, takeSnapshot, type GuardrailChange } from './snapshot.js';
 import {
   baseBranches,
   createWorktree,
+  DEFAULT_ADD_TIMEOUT_MS,
   DEFAULT_SETUP_TIMEOUT_MS,
   START_BUDGET_MS,
   defaultExec,
@@ -43,6 +45,7 @@ import {
   removeWorktree,
   runSetup,
   setLockOwner,
+  withoutProxy,
   type ExecFn,
 } from './worktree.js';
 import {
@@ -93,14 +96,11 @@ export interface StartRunOptions {
   /** Script the supervisor is started from; defaults to the running entry (`process.argv[1]`). */
   supervisorEntry?: string;
   exec?: ExecFn;
-  sleep?: (ms: number) => Promise<void>;
-  /** Per `git fetch` attempt; default 120s. */
-  fetch_timeout_ms?: number;
   /** `git worktree add`; default 60s. */
   worktree_timeout_ms?: number;
   /** The setup command; default 600s. */
   setup_timeout_ms?: number;
-  /** Total start phase (fetch, worktree add, setup); default 15 min, below reconcile's grace. */
+  /** Total start phase (worktree add, setup); default 15 min, below reconcile's grace. */
   start_budget_ms?: number;
 }
 
@@ -167,11 +167,15 @@ export function mapOutcome(input: {
 
 const CLEAN_STATUSES: readonly RunStatus[] = ['done', 'partial', 'blocked', 'needs_input'];
 
-/** A run that moved a ref or the local config it must not touch goes back to the caller. */
-export function flagGuardrail(outcome: Outcome, changed: ('refs' | 'config')[]): Outcome {
-  const what = changed
-    .map((c) => (c === 'refs' ? 'the base branch or caller branch ref' : 'the local git config'))
-    .join(' and ');
+const CHANGE_NOTES: Record<GuardrailChange, string> = {
+  refs: 'the base branch or caller branch ref',
+  config: 'the local git config',
+  hooks: 'the git hooks directory',
+};
+
+/** A run that moved a ref, or changed the local config or hooks it must not touch, goes back to the caller. */
+export function flagGuardrail(outcome: Outcome, changed: GuardrailChange[]): Outcome {
+  const what = changed.map((c) => CHANGE_NOTES[c]).join(' and ');
   const note = `[wingman] guardrail: ${what} changed while this run was active (the run, or you, moved it). Review with git before trusting this result.`;
   return {
     status: CLEAN_STATUSES.includes(outcome.status) ? 'needs_caller' : outcome.status,
@@ -465,8 +469,6 @@ export async function startRun(opts: StartRunOptions): Promise<RunMeta> {
         deadline,
         createBranch: opts.create_branch ?? mayCommit,
         ...(opts.lock_key !== undefined ? { lock_key: opts.lock_key } : {}),
-        ...(opts.sleep ? { sleep: opts.sleep } : {}),
-        ...(opts.fetch_timeout_ms !== undefined ? { fetchTimeoutMs: opts.fetch_timeout_ms } : {}),
         ...(opts.worktree_timeout_ms !== undefined
           ? { addTimeoutMs: opts.worktree_timeout_ms }
           : {}),
@@ -490,8 +492,11 @@ export async function startRun(opts: StartRunOptions): Promise<RunMeta> {
           adapter.buildEnv(parentEnv, opts.account, depth),
           Math.min(opts.setup_timeout_ms ?? DEFAULT_SETUP_TIMEOUT_MS, left),
         );
-        if (!setup.ok)
-          throw new Error(`Worktree setup command failed: ${setup.output.slice(-300)}`);
+        if (!setup.ok) {
+          throw new Error(
+            `Worktree setup command failed: ${maskSecrets(setup.output).slice(-300)}`,
+          );
+        }
       }
     }
   } catch (err) {
@@ -534,7 +539,7 @@ function offsetInRepo(repo: string, cwd: string): string {
   return rel;
 }
 
-/** Undoes a start that failed before the agent ran: worktree, lock and run directory. */
+/** Undoes a start that failed before the agent ran: worktree, run branch, lock and run directory. */
 async function discardStart(meta: RunMeta, exec: ExecFn): Promise<void> {
   try {
     updateStatus(meta.id, 'failed_no_report');
@@ -550,8 +555,21 @@ async function discardStart(meta: RunMeta, exec: ExecFn): Promise<void> {
     }
     await removeWorktree(meta.id, exec).catch(() => undefined);
   }
+  await deleteRunBranch(meta, exec);
   releaseLocksOf(meta.id);
   rmSync(runDir(meta.id), { recursive: true, force: true });
+}
+
+/** Deletes the run branch a failed start created; only a branch named for this run, never another. */
+async function deleteRunBranch(meta: RunMeta, exec: ExecFn): Promise<void> {
+  const branch = meta.run_branch;
+  if (!branch || !meta.repo) return;
+  if (branch !== `wingman/${meta.id}` && !branch.endsWith(`-wm-${meta.id}`)) return;
+  await exec('git', ['branch', '-D', branch], {
+    cwd: meta.repo,
+    env: withoutProxy(process.env),
+    timeoutMs: DEFAULT_ADD_TIMEOUT_MS,
+  }).catch(() => undefined);
 }
 
 function spawnRun(

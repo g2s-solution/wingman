@@ -1,5 +1,5 @@
 {
   "name": "wingman",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Delegate work to a Claude Code session running under a second account."
 }

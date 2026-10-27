@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import pkg from '../package.json' with { type: 'json' };
 import { saveAccounts } from '../src/registry.js';
 import { readMeta } from '../src/runs.js';
 import { buildServer, createHandlers } from '../src/tools.js';
@@ -133,6 +134,11 @@ describe('tools end to end', () => {
     await register(command);
     const client = await connect();
     expect((await client.listTools()).tools.map((t) => t.name).sort()).toEqual(TOOLS);
+    expect(client.getServerVersion()?.version).toBe(pkg.version);
+    const start = (await client.listTools()).tools.find((t) => t.name === 'wingman_start');
+    expect(start?.description).toMatch(/"edit" runs arbitrary code under the target account/);
+    expect(start?.description).toMatch(/deny rules are advisory/);
+    expect(start?.description).toMatch(/"setup" is an arbitrary shell command run as the caller/);
 
     const started = await call(client, 'wingman_start', {
       account: 'target',
