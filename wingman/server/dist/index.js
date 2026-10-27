@@ -411,11 +411,11 @@ var require_codegen = __commonJS({
         const rhs = this.rhs === void 0 ? "" : ` = ${this.rhs}`;
         return `${varKind} ${this.name}${rhs};` + _n;
       }
-      optimizeNames(names, constants) {
+      optimizeNames(names, constants2) {
         if (!names[this.name.str])
           return;
         if (this.rhs)
-          this.rhs = optimizeExpr(this.rhs, names, constants);
+          this.rhs = optimizeExpr(this.rhs, names, constants2);
         return this;
       }
       get names() {
@@ -432,10 +432,10 @@ var require_codegen = __commonJS({
       render({ _n }) {
         return `${this.lhs} = ${this.rhs};` + _n;
       }
-      optimizeNames(names, constants) {
+      optimizeNames(names, constants2) {
         if (this.lhs instanceof code_1.Name && !names[this.lhs.str] && !this.sideEffects)
           return;
-        this.rhs = optimizeExpr(this.rhs, names, constants);
+        this.rhs = optimizeExpr(this.rhs, names, constants2);
         return this;
       }
       get names() {
@@ -496,8 +496,8 @@ var require_codegen = __commonJS({
       optimizeNodes() {
         return `${this.code}` ? this : void 0;
       }
-      optimizeNames(names, constants) {
-        this.code = optimizeExpr(this.code, names, constants);
+      optimizeNames(names, constants2) {
+        this.code = optimizeExpr(this.code, names, constants2);
         return this;
       }
       get names() {
@@ -526,12 +526,12 @@ var require_codegen = __commonJS({
         }
         return nodes.length > 0 ? this : void 0;
       }
-      optimizeNames(names, constants) {
+      optimizeNames(names, constants2) {
         const { nodes } = this;
         let i = nodes.length;
         while (i--) {
           const n = nodes[i];
-          if (n.optimizeNames(names, constants))
+          if (n.optimizeNames(names, constants2))
             continue;
           subtractNames(names, n.names);
           nodes.splice(i, 1);
@@ -584,12 +584,12 @@ var require_codegen = __commonJS({
           return void 0;
         return this;
       }
-      optimizeNames(names, constants) {
+      optimizeNames(names, constants2) {
         var _a3;
-        this.else = (_a3 = this.else) === null || _a3 === void 0 ? void 0 : _a3.optimizeNames(names, constants);
-        if (!(super.optimizeNames(names, constants) || this.else))
+        this.else = (_a3 = this.else) === null || _a3 === void 0 ? void 0 : _a3.optimizeNames(names, constants2);
+        if (!(super.optimizeNames(names, constants2) || this.else))
           return;
-        this.condition = optimizeExpr(this.condition, names, constants);
+        this.condition = optimizeExpr(this.condition, names, constants2);
         return this;
       }
       get names() {
@@ -612,10 +612,10 @@ var require_codegen = __commonJS({
       render(opts) {
         return `for(${this.iteration})` + super.render(opts);
       }
-      optimizeNames(names, constants) {
-        if (!super.optimizeNames(names, constants))
+      optimizeNames(names, constants2) {
+        if (!super.optimizeNames(names, constants2))
           return;
-        this.iteration = optimizeExpr(this.iteration, names, constants);
+        this.iteration = optimizeExpr(this.iteration, names, constants2);
         return this;
       }
       get names() {
@@ -651,10 +651,10 @@ var require_codegen = __commonJS({
       render(opts) {
         return `for(${this.varKind} ${this.name} ${this.loop} ${this.iterable})` + super.render(opts);
       }
-      optimizeNames(names, constants) {
-        if (!super.optimizeNames(names, constants))
+      optimizeNames(names, constants2) {
+        if (!super.optimizeNames(names, constants2))
           return;
-        this.iterable = optimizeExpr(this.iterable, names, constants);
+        this.iterable = optimizeExpr(this.iterable, names, constants2);
         return this;
       }
       get names() {
@@ -696,11 +696,11 @@ var require_codegen = __commonJS({
         (_b = this.finally) === null || _b === void 0 ? void 0 : _b.optimizeNodes();
         return this;
       }
-      optimizeNames(names, constants) {
+      optimizeNames(names, constants2) {
         var _a3, _b;
-        super.optimizeNames(names, constants);
-        (_a3 = this.catch) === null || _a3 === void 0 ? void 0 : _a3.optimizeNames(names, constants);
-        (_b = this.finally) === null || _b === void 0 ? void 0 : _b.optimizeNames(names, constants);
+        super.optimizeNames(names, constants2);
+        (_a3 = this.catch) === null || _a3 === void 0 ? void 0 : _a3.optimizeNames(names, constants2);
+        (_b = this.finally) === null || _b === void 0 ? void 0 : _b.optimizeNames(names, constants2);
         return this;
       }
       get names() {
@@ -1001,7 +1001,7 @@ var require_codegen = __commonJS({
     function addExprNames(names, from) {
       return from instanceof code_1._CodeOrName ? addNames(names, from.names) : names;
     }
-    function optimizeExpr(expr, names, constants) {
+    function optimizeExpr(expr, names, constants2) {
       if (expr instanceof code_1.Name)
         return replaceName(expr);
       if (!canOptimize(expr))
@@ -1016,14 +1016,14 @@ var require_codegen = __commonJS({
         return items;
       }, []));
       function replaceName(n) {
-        const c = constants[n.str];
+        const c = constants2[n.str];
         if (c === void 0 || names[n.str] !== 1)
           return n;
         delete names[n.str];
         return c;
       }
       function canOptimize(e) {
-        return e instanceof code_1._Code && e._items.some((c) => c instanceof code_1.Name && names[c.str] === 1 && constants[c.str] !== void 0);
+        return e instanceof code_1._Code && e._items.some((c) => c instanceof code_1.Name && names[c.str] === 1 && constants2[c.str] !== void 0);
       }
     }
     function subtractNames(names, from) {
@@ -1208,11 +1208,11 @@ var require_util = __commonJS({
       return jsPropertySyntax ? (0, codegen_1.getProperty)(dataProp).toString() : "/" + escapeJsonPointer(dataProp);
     }
     exports.getErrorPath = getErrorPath;
-    function checkStrictMode(it, msg, mode = it.opts.strictSchema) {
-      if (!mode)
+    function checkStrictMode(it, msg, mode2 = it.opts.strictSchema) {
+      if (!mode2)
         return;
       msg = `strict mode: ${msg}`;
-      if (mode === true)
+      if (mode2 === true)
         throw new Error(msg);
       it.self.logger.warn(msg);
     }
@@ -2985,7 +2985,7 @@ var require_compile = __commonJS({
       const schOrFunc = root.refs[ref];
       if (schOrFunc)
         return schOrFunc;
-      let _sch = resolve4.call(this, root, ref);
+      let _sch = resolve6.call(this, root, ref);
       if (_sch === void 0) {
         const schema = (_a3 = root.localRefs) === null || _a3 === void 0 ? void 0 : _a3[ref];
         const { schemaId } = this.opts;
@@ -3012,7 +3012,7 @@ var require_compile = __commonJS({
     function sameSchemaEnv(s1, s2) {
       return s1.schema === s2.schema && s1.root === s2.root && s1.baseId === s2.baseId;
     }
-    function resolve4(root, ref) {
+    function resolve6(root, ref) {
       let sch;
       while (typeof (sch = this.refs[ref]) == "string")
         ref = sch;
@@ -3872,11 +3872,11 @@ var require_fast_uri = __commonJS({
         normalizeString(uri, options);
       } else if (typeof uri === "object") {
         uri = /** @type {T} */
-        parse3(serialize(uri, options), options);
+        parse4(serialize(uri, options), options);
       }
       return uri;
     }
-    function resolve4(baseURI, relativeURI, options) {
+    function resolve6(baseURI, relativeURI, options) {
       const schemelessOptions = options ? Object.assign({ scheme: "null" }, options) : { scheme: "null" };
       const {
         parsed: baseParsed,
@@ -3915,8 +3915,8 @@ var require_fast_uri = __commonJS({
     function resolveComponent(base, relative2, options, skipNormalization) {
       const target = {};
       if (!skipNormalization) {
-        base = parse3(serialize(base, options), options);
-        relative2 = parse3(serialize(relative2, options), options);
+        base = parse4(serialize(base, options), options);
+        relative2 = parse4(serialize(relative2, options), options);
       }
       options = options || {};
       if (!options.tolerant && relative2.scheme) {
@@ -4234,7 +4234,7 @@ var require_fast_uri = __commonJS({
       }
       return { parsed, malformedAuthorityOrPort, malformedPercentEncoding, malformedSchemeSpecific, malformedHost, malformedScheme };
     }
-    function parse3(uri, opts) {
+    function parse4(uri, opts) {
       return parseWithStatus(uri, opts).parsed;
     }
     function normalizeString(uri, opts) {
@@ -4267,11 +4267,11 @@ var require_fast_uri = __commonJS({
     var fastUri = {
       SCHEMES,
       normalize,
-      resolve: resolve4,
+      resolve: resolve6,
       resolveComponent,
       equal,
       serialize,
-      parse: parse3
+      parse: parse4
     };
     module.exports = fastUri;
     module.exports.default = fastUri;
@@ -7230,24 +7230,24 @@ var require_dist = __commonJS({
         return ajv;
       }
       const [formats, exportName] = opts.mode === "fast" ? [formats_1.fastFormats, fastName] : [formats_1.fullFormats, fullName];
-      const list = opts.formats || formats_1.formatNames;
-      addFormats(ajv, list, formats, exportName);
+      const list2 = opts.formats || formats_1.formatNames;
+      addFormats(ajv, list2, formats, exportName);
       if (opts.keywords)
         (0, limit_1.default)(ajv);
       return ajv;
     };
-    formatsPlugin.get = (name, mode = "full") => {
-      const formats = mode === "fast" ? formats_1.fastFormats : formats_1.fullFormats;
+    formatsPlugin.get = (name, mode2 = "full") => {
+      const formats = mode2 === "fast" ? formats_1.fastFormats : formats_1.fullFormats;
       const f = formats[name];
       if (!f)
         throw new Error(`Unknown format "${name}"`);
       return f;
     };
-    function addFormats(ajv, list, fs, exportName) {
+    function addFormats(ajv, list2, fs, exportName) {
       var _a3;
       var _b;
       (_a3 = (_b = ajv.opts.code).formats) !== null && _a3 !== void 0 ? _a3 : _b.formats = (0, codegen_1._)`require("ajv-formats/dist/formats").${exportName}`;
-      for (const f of list)
+      for (const f of list2)
         ajv.addFormat(f, fs[f]);
     }
     module.exports = exports = formatsPlugin;
@@ -8581,9 +8581,9 @@ var Class = class {
   constructor(..._args) {
   }
 };
-function members(proto, table) {
-  for (const key in table) {
-    const desc = Object.getOwnPropertyDescriptor(table, key);
+function members(proto, table2) {
+  for (const key in table2) {
+    const desc = Object.getOwnPropertyDescriptor(table2, key);
     if (desc.get)
       Object.defineProperty(proto, key, { ...desc, enumerable: false });
     else
@@ -8598,10 +8598,10 @@ function hide(inst, key, value) {
   return own(inst, key, value, false);
 }
 // @__NO_SIDE_EFFECTS__
-function derived(computes, table) {
+function derived(computes, table2) {
   for (const key in computes) {
     const compute = computes[key];
-    Object.defineProperty(table, key, {
+    Object.defineProperty(table2, key, {
       configurable: true,
       enumerable: true,
       get() {
@@ -8612,7 +8612,7 @@ function derived(computes, table) {
       }
     });
   }
-  return table;
+  return table2;
 }
 function defineBound(proto, key, fn) {
   Object.defineProperty(proto, key, {
@@ -9117,18 +9117,18 @@ var validateAsync = async (schema, value, _ctx) => {
   return result.issues.length === 0;
 };
 var _encode = (_Err) => {
-  const parse3 = _parse(_Err);
+  const parse4 = _parse(_Err);
   const fn = (schema, value, _ctx, _params) => {
     const ctx = _ctx ? { ..._ctx, direction: "backward" } : { direction: "backward" };
-    return parse3(schema, value, ctx, finalizeParams(fn, _params));
+    return parse4(schema, value, ctx, finalizeParams(fn, _params));
   };
   return fn;
 };
 var encode = /* @__PURE__ */ _encode($ZodRealError);
 var _decode = (_Err) => {
-  const parse3 = _parse(_Err);
+  const parse4 = _parse(_Err);
   const fn = (schema, value, _ctx, _params) => {
-    return parse3(schema, value, _ctx, finalizeParams(fn, _params));
+    return parse4(schema, value, _ctx, finalizeParams(fn, _params));
   };
   return fn;
 };
@@ -9269,8 +9269,8 @@ function emoji() {
 }
 var ipv4 = /^(?:(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])$/;
 var ipv6 = /^(([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:))$/;
-var mac = (delimiter) => {
-  const escapedDelim = escapeRegex(delimiter ?? ":");
+var mac = (delimiter2) => {
+  const escapedDelim = escapeRegex(delimiter2 ?? ":");
   return new RegExp(`^(?:[0-9A-F]{2}${escapedDelim}){5}[0-9A-F]{2}$|^(?:[0-9a-f]{2}${escapedDelim}){5}[0-9a-f]{2}$`);
 };
 var cidrv4 = /^((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\.){3}(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\/([0-9]|[1-2][0-9]|3[0-2])$/;
@@ -9885,7 +9885,7 @@ var $ZodType = /* @__PURE__ */ $constructor("$ZodType", (inst, def) => {
       inst._zod.run = inst._zod.parse;
     });
   } else {
-    const runChecks = (payload, checks2, ctx) => {
+    const runChecks2 = (payload, checks2, ctx) => {
       if (payload.memo)
         return payload;
       let isAborted2 = aborted(payload);
@@ -9936,7 +9936,7 @@ var $ZodType = /* @__PURE__ */ $constructor("$ZodType", (inst, def) => {
         canary.aborted = true;
         return canary;
       }
-      const checkResult = runChecks(payload, checks, ctx);
+      const checkResult = runChecks2(payload, checks, ctx);
       if (checkResult instanceof Promise) {
         if (ctx.async === false)
           throw new $ZodAsyncError();
@@ -9961,9 +9961,9 @@ var $ZodType = /* @__PURE__ */ $constructor("$ZodType", (inst, def) => {
       if (result instanceof Promise) {
         if (ctx.async === false)
           throw new $ZodAsyncError();
-        return result.then((result2) => runChecks(result2, checks, ctx));
+        return result.then((result2) => runChecks2(result2, checks, ctx));
       }
-      return runChecks(result, checks, ctx);
+      return runChecks2(result, checks, ctx);
     };
   }
 }, {
@@ -10623,7 +10623,7 @@ function capSize(inst, size) {
   if (!caps.length)
     return;
   const cap = Math.min(...caps.map((c) => c[0]));
-  const parse3 = inst._zod.parse;
+  const parse4 = inst._zod.parse;
   inst._zod.parse = (payload, ctx) => {
     const n = size(payload.value);
     if (n > cap && !ctx?.skipChecks && ctx?.direction !== "backward") {
@@ -10637,7 +10637,7 @@ function capSize(inst, size) {
         }
       }
     }
-    return parse3(payload, ctx);
+    return parse4(payload, ctx);
   };
 }
 var arraySize = (input2) => Array.isArray(input2) ? input2.length : -1;
@@ -12326,7 +12326,7 @@ var recursive = /* @__PURE__ */ new WeakMap();
 var NONE = 0;
 var ASSUMED = 1;
 var PROVEN = 2;
-function isRecursive(inst, stack, resolve4) {
+function isRecursive(inst, stack, resolve6) {
   const cached2 = recursive.get(inst);
   if (cached2 !== void 0)
     return cached2 ? PROVEN : NONE;
@@ -12336,7 +12336,7 @@ function isRecursive(inst, stack, resolve4) {
   let result = NONE;
   const check2 = (child) => {
     if (result !== PROVEN && child?._zod) {
-      const answer = isRecursive(child, stack, resolve4);
+      const answer = isRecursive(child, stack, resolve6);
       if (answer > result)
         result = answer;
     }
@@ -12347,7 +12347,7 @@ function isRecursive(inst, stack, resolve4) {
       const desc = Object.getOwnPropertyDescriptor(sh, key);
       if (spread && !desc.enumerable)
         continue;
-      const child = desc.get ? ASSUMED : desc.value?._zod ? isRecursive(desc.value, stack, resolve4) : NONE;
+      const child = desc.get ? ASSUMED : desc.value?._zod ? isRecursive(desc.value, stack, resolve6) : NONE;
       if (child > answer)
         answer = child;
     }
@@ -12411,7 +12411,7 @@ function isRecursive(inst, stack, resolve4) {
       break;
     // `$ZodLazy` caches its inner on the def, so a resolved edge is followed exactly
     case "lazy": {
-      const inner = def._cachedInner ?? (resolve4 ? inst._zod.innerType : void 0);
+      const inner = def._cachedInner ?? (resolve6 ? inst._zod.innerType : void 0);
       merge2(inner ? isRecursive(inner, stack, false) : ASSUMED);
       break;
     }
@@ -23464,8 +23464,8 @@ var contributors = {
 function aggregateChecks(schema) {
   const agg = {};
   const def = schema._zod.def;
-  const list = schema._zod.traits.has("$ZodCheck") ? [schema, ...def.checks ?? []] : def.checks ?? [];
-  for (const ch of list)
+  const list2 = schema._zod.traits.has("$ZodCheck") ? [schema, ...def.checks ?? []] : def.checks ?? [];
+  for (const ch of list2)
     contributors[ch._zod.def.check]?.(agg, ch._zod.def);
   const bag = schema._zod.bag;
   if (bag.minimum !== void 0)
@@ -28600,24 +28600,29 @@ var StdioServerTransport = class {
     this.onclose?.();
   }
   send(message) {
-    return new Promise((resolve4) => {
+    return new Promise((resolve6) => {
       const json2 = serializeMessage(message);
       if (this._stdout.write(json2)) {
-        resolve4();
+        resolve6();
       } else {
-        this._stdout.once("drain", resolve4);
+        this._stdout.once("drain", resolve6);
       }
     });
   }
 };
 
 // src/cli.ts
-import { chmodSync as chmodSync3, existsSync as existsSync5, readFileSync as readFileSync4, renameSync as renameSync3, writeFileSync as writeFileSync3 } from "node:fs";
-import { join as join6 } from "node:path";
+import { chmodSync as chmodSync3, existsSync as existsSync5, readFileSync as readFileSync5, renameSync as renameSync3, writeFileSync as writeFileSync3 } from "node:fs";
+import { join as join9 } from "node:path";
 
-// src/gc.ts
-import { existsSync as existsSync4, readdirSync as readdirSync4, rmSync as rmSync3, statSync } from "node:fs";
-import { join as join5 } from "node:path";
+// src/accounts.ts
+import { homedir as homedir3 } from "node:os";
+import { isAbsolute, join as join3, resolve as resolve3 } from "node:path";
+
+// src/registry.ts
+import { randomBytes } from "node:crypto";
+import { chmod, mkdir, realpath, rename, writeFile, readFile, unlink } from "node:fs/promises";
+import { dirname, resolve } from "node:path";
 
 // src/paths.ts
 import { homedir } from "node:os";
@@ -28630,9 +28635,774 @@ var runsDir = () => join(wingmanHome(), "runs");
 var runDir = (id) => join(runsDir(), id);
 var worktreesDir = () => join(wingmanHome(), "worktrees");
 
+// src/registry.ts
+var accountSchema = external_exports.object({
+  id: external_exports.string().min(1),
+  label: external_exports.string().min(1),
+  config_dir: external_exports.string().min(1),
+  provider: external_exports.string().min(1).default("claude"),
+  command: external_exports.string().min(1).default("claude"),
+  status: external_exports.string().min(1).optional()
+});
+var registrySchema = external_exports.object({ accounts: external_exports.array(accountSchema) });
+async function saveAccounts(registry2) {
+  const parsed = registrySchema.parse(registry2);
+  const ids = parsed.accounts.map((a) => a.id);
+  if (new Set(ids).size !== ids.length) throw new Error("accounts.json has duplicate account ids");
+  const file2 = accountsFile();
+  const dir = dirname(file2);
+  await mkdir(dir, { recursive: true, mode: 448 });
+  await chmod(dir, 448);
+  const tmp = `${file2}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`;
+  try {
+    await writeFile(tmp, `${JSON.stringify(parsed, null, 2)}
+`, { mode: 384 });
+    await chmod(tmp, 384);
+    await rename(tmp, file2);
+  } catch (err) {
+    await unlink(tmp).catch(() => void 0);
+    throw err;
+  }
+}
+async function loadAccounts() {
+  const file2 = accountsFile();
+  let raw;
+  try {
+    raw = await readFile(file2, "utf8");
+  } catch (err) {
+    if (err.code !== "ENOENT") throw err;
+    const empty = { accounts: [] };
+    await saveAccounts(empty);
+    return empty;
+  }
+  let json2;
+  try {
+    json2 = JSON.parse(raw);
+  } catch {
+    throw new Error(`accounts.json at ${file2} is not valid JSON`);
+  }
+  const result = registrySchema.safeParse(json2);
+  if (!result.success) {
+    throw new Error(`accounts.json at ${file2} is invalid: ${result.error.message}`);
+  }
+  return result.data;
+}
+async function getAccount(id) {
+  const { accounts } = await loadAccounts();
+  const found = accounts.find((a) => a.id === id);
+  if (!found) {
+    const known = accounts.map((a) => a.id).join(", ") || "none";
+    throw new Error(`Unknown account "${id}". Registered accounts: ${known}`);
+  }
+  return found;
+}
+async function canonical(dir) {
+  try {
+    return await realpath(dir);
+  } catch {
+    return resolve(dir);
+  }
+}
+async function targetsFor(callerProfileDir) {
+  const { accounts } = await loadAccounts();
+  const caller = await canonical(callerProfileDir);
+  const result = [];
+  for (const account of accounts) {
+    if (await canonical(account.config_dir) !== caller) result.push(account);
+  }
+  return result;
+}
+function isActive(account) {
+  return account.status === void 0 || account.status === "active";
+}
+
+// src/self.ts
+import { realpathSync } from "node:fs";
+import { homedir as homedir2 } from "node:os";
+import { join as join2, resolve as resolve2 } from "node:path";
+function canonical2(dir) {
+  try {
+    return realpathSync(dir);
+  } catch {
+    return resolve2(dir);
+  }
+}
+function callerProfile(env = process.env) {
+  const configured = env.CLAUDE_CONFIG_DIR;
+  return canonical2(configured ? configured : join2(homedir2(), ".claude"));
+}
+function currentDepth(env = process.env) {
+  const raw = env.WINGMAN_DEPTH;
+  if (raw === void 0 || !/^\d+$/.test(raw.trim())) return 0;
+  return Number.parseInt(raw.trim(), 10);
+}
+function assertCanStart(env = process.env, limit = 1) {
+  const depth = currentDepth(env);
+  if (depth >= limit) {
+    throw new Error(
+      `Refusing to start a nested run: WINGMAN_DEPTH=${depth} has reached the limit of ${limit}`
+    );
+  }
+}
+
+// src/accounts.ts
+var ID = /^[A-Za-z0-9_-]{1,64}$/;
+var USAGE = `usage: wingman accounts list [--json]
+       wingman accounts add --id ID --config-dir DIR [--label L] [--command CMD] [--provider P] [--upsert]
+       wingman accounts disable ID
+       wingman accounts enable ID
+       wingman accounts remove ID --yes`;
+var AccountsUsageError = class extends Error {
+};
+function accountRows(accounts, caller) {
+  return accounts.map((a) => ({
+    id: a.id,
+    label: a.label,
+    status: a.status ?? "active",
+    provider: a.provider,
+    config_dir: a.config_dir,
+    command: a.command,
+    is_caller: canonical2(a.config_dir) === caller
+  }));
+}
+function publicAccounts(accounts, caller) {
+  return accountRows(accounts, caller).map((r) => ({
+    id: r.id,
+    label: r.label,
+    status: r.status,
+    is_caller: r.is_caller,
+    provider: r.provider
+  }));
+}
+function normalizeConfigDir(raw) {
+  const expanded = raw === "~" || raw.startsWith("~/") ? join3(homedir3(), raw.slice(1)) : raw;
+  if (!isAbsolute(expanded)) {
+    throw new AccountsUsageError("--config-dir must be an absolute path (or start with ~/)");
+  }
+  return resolve3(expanded);
+}
+function parse3(args, valueFlags, boolFlags) {
+  const out = { positional: [], values: {}, flags: /* @__PURE__ */ new Set() };
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (valueFlags.includes(a)) {
+      const v = args[++i];
+      if (v === void 0) throw new AccountsUsageError(`${a} needs a value
+${USAGE}`);
+      out.values[a] = v;
+    } else if (boolFlags.includes(a)) {
+      out.flags.add(a);
+    } else if (a.startsWith("-")) {
+      throw new AccountsUsageError(`unexpected argument ${a}
+${USAGE}`);
+    } else {
+      out.positional.push(a);
+    }
+  }
+  return out;
+}
+function write(text) {
+  process.stdout.write(`${text}
+`);
+}
+function table(rows) {
+  const widths = rows[0].map((_, c) => Math.max(...rows.map((r) => r[c].length)));
+  return rows.map(
+    (r) => r.map((cell, c) => cell.padEnd(widths[c])).join("  ").trimEnd()
+  ).join("\n");
+}
+async function list(args) {
+  const p = parse3(args, [], ["--json"]);
+  if (p.positional.length > 0) throw new AccountsUsageError(`unexpected argument
+${USAGE}`);
+  const { accounts } = await loadAccounts();
+  const rows = accountRows(accounts, callerProfile());
+  if (p.flags.has("--json")) {
+    write(JSON.stringify(rows, null, 2));
+  } else if (rows.length === 0) {
+    write("no accounts registered");
+  } else {
+    write(
+      table([
+        ["ID", "LABEL", "STATUS", "CONFIG_DIR", "COMMAND", ""],
+        ...rows.map((r) => [
+          r.id,
+          r.label,
+          r.status,
+          r.config_dir,
+          r.command,
+          r.is_caller ? "this profile" : ""
+        ])
+      ])
+    );
+  }
+  return 0;
+}
+async function add(args) {
+  const p = parse3(
+    args,
+    ["--id", "--config-dir", "--label", "--command", "--provider"],
+    ["--upsert"]
+  );
+  if (p.positional.length > 0) throw new AccountsUsageError(`unexpected argument
+${USAGE}`);
+  const id = p.values["--id"];
+  const rawDir = p.values["--config-dir"];
+  if (id === void 0 || rawDir === void 0) {
+    throw new AccountsUsageError(`--id and --config-dir are required
+${USAGE}`);
+  }
+  if (!ID.test(id)) throw new AccountsUsageError("--id must match [A-Za-z0-9_-]{1,64}");
+  const configDir = normalizeConfigDir(rawDir);
+  for (const flag of ["--label", "--command", "--provider"]) {
+    if (p.values[flag] !== void 0 && p.values[flag].trim() === "") {
+      throw new AccountsUsageError(`${flag} must not be empty`);
+    }
+  }
+  if (canonical2(configDir) === callerProfile()) {
+    throw new AccountsUsageError(`${configDir} is the caller's own profile; it is never a target`);
+  }
+  const registry2 = await loadAccounts();
+  const i = registry2.accounts.findIndex((a) => a.id === id);
+  if (i >= 0 && !p.flags.has("--upsert")) {
+    throw new AccountsUsageError(`account "${id}" already exists; pass --upsert to update it`);
+  }
+  const given = { config_dir: configDir };
+  if (p.values["--label"] !== void 0) given.label = p.values["--label"];
+  if (p.values["--command"] !== void 0) given.command = p.values["--command"];
+  if (p.values["--provider"] !== void 0) given.provider = p.values["--provider"];
+  if (i >= 0) {
+    registry2.accounts[i] = { ...registry2.accounts[i], ...given };
+  } else {
+    registry2.accounts.push({
+      id,
+      label: id,
+      provider: "claude",
+      command: "claude",
+      ...given,
+      config_dir: configDir
+    });
+  }
+  await saveAccounts(registry2);
+  write(`${i >= 0 ? "updated" : "registered"} ${id}`);
+  return 0;
+}
+async function change(verb, args) {
+  const p = parse3(args, [], ["--yes"]);
+  const id = p.positional[0];
+  if (id === void 0 || p.positional.length > 1) {
+    throw new AccountsUsageError(`${verb} needs exactly one account id
+${USAGE}`);
+  }
+  if (verb !== "remove" && p.flags.has("--yes")) {
+    throw new AccountsUsageError(`unexpected argument --yes
+${USAGE}`);
+  }
+  const registry2 = await loadAccounts();
+  const i = registry2.accounts.findIndex((a) => a.id === id);
+  if (i < 0) {
+    const known = registry2.accounts.map((a) => a.id).join(", ") || "none";
+    throw new AccountsUsageError(`unknown account "${id}". Registered accounts: ${known}`);
+  }
+  if (verb === "remove") {
+    if (!p.flags.has("--yes")) {
+      write(
+        `would remove ${id} from the registry (the profile directory and its credentials stay untouched); pass --yes to do it`
+      );
+      return 2;
+    }
+    registry2.accounts.splice(i, 1);
+    await saveAccounts(registry2);
+    write(`removed ${id}`);
+    return 0;
+  }
+  if (verb === "disable") {
+    registry2.accounts[i] = { ...registry2.accounts[i], status: "disabled" };
+  } else {
+    const entry = { ...registry2.accounts[i] };
+    delete entry.status;
+    registry2.accounts[i] = entry;
+  }
+  await saveAccounts(registry2);
+  write(`${verb}d ${id}`);
+  return 0;
+}
+async function accountsCommand(args) {
+  const [sub, ...rest] = args;
+  try {
+    switch (sub) {
+      case "list":
+        return await list(rest);
+      case "add":
+        return await add(rest);
+      case "disable":
+      case "enable":
+      case "remove":
+        return await change(sub, rest);
+      default:
+        throw new AccountsUsageError(USAGE);
+    }
+  } catch (err) {
+    if (err instanceof AccountsUsageError) {
+      process.stderr.write(`wingman accounts: ${err.message}
+`);
+      return 2;
+    }
+    throw err;
+  }
+}
+
+// src/doctor.ts
+import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
+import { accessSync, constants, lstatSync, readFileSync, realpathSync as realpathSync2, statSync } from "node:fs";
+import { homedir as homedir4 } from "node:os";
+import { delimiter, isAbsolute as isAbsolute2, join as join4, resolve as resolve4 } from "node:path";
+
+// package.json
+var package_default = {
+  name: "wingman-server",
+  version: "0.2.0",
+  private: true,
+  type: "module",
+  engines: {
+    node: ">=22"
+  },
+  scripts: {
+    build: "node esbuild.config.mjs",
+    test: "vitest run",
+    coverage: "vitest run --coverage",
+    lint: "eslint .",
+    format: "prettier --check .",
+    typecheck: "tsc --noEmit",
+    check: "npm run typecheck && npm run lint && npm run format && npm run build && npm test"
+  },
+  dependencies: {
+    "@modelcontextprotocol/sdk": "1.32.2",
+    zod: "4.6.7"
+  },
+  devDependencies: {
+    "@eslint/js": "10.0.1",
+    "@types/node": "26.6.5",
+    "@vitest/coverage-v8": "5.0.5",
+    esbuild: "0.28.2",
+    eslint: "10.13.0",
+    prettier: "3.9.10",
+    typescript: "6.0.3",
+    "typescript-eslint": "8.72.1",
+    vitest: "5.0.5"
+  },
+  license: "MIT"
+};
+
+// src/doctor.ts
+var SHARED_ITEMS = ["CLAUDE.md", "settings.json", "skills", "agents", "commands", "rules"];
+var PLUGIN_KEY = "wingman@wingman-marketplace";
+var ONLINE_TIMEOUT_MS = 2e4;
+var DOCTOR_USAGE = "usage: wingman doctor [--online] [--json]";
+var AUTH_METHOD = /^[A-Za-z0-9_.-]{1,40}$/;
+var defaultExec = (file2, args, { env, timeoutMs }) => new Promise((res, rej) => {
+  execFile(
+    file2,
+    args,
+    { env, timeout: timeoutMs, maxBuffer: 1024 * 1024, encoding: "utf8" },
+    (err, stdout) => err ? rej(err) : res({ stdout })
+  );
+});
+function defaultDeps() {
+  return { env: process.env, homeDir: homedir4(), exec: defaultExec };
+}
+function canonical3(path) {
+  try {
+    return realpathSync2(path);
+  } catch {
+    return resolve4(path);
+  }
+}
+function isDir(path) {
+  try {
+    return statSync(path).isDirectory();
+  } catch {
+    return false;
+  }
+}
+function exists(path) {
+  try {
+    lstatSync(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+function mode(path) {
+  return statSync(path).mode & 511;
+}
+function octal(m) {
+  return m.toString(8).padStart(4, "0");
+}
+function readJson(path) {
+  return JSON.parse(readFileSync(path, "utf8"));
+}
+function checkState(stateDir, results) {
+  if (!isDir(stateDir)) {
+    results.push({
+      id: "state.dir",
+      level: "warn",
+      message: `state directory ${stateDir} does not exist yet (the server creates it on first start)`
+    });
+    return void 0;
+  }
+  const dirMode = mode(stateDir);
+  results.push(
+    (dirMode & 63) === 0 ? { id: "state.dir", level: "ok", message: `state directory ${stateDir} has mode 0700` } : {
+      id: "state.dir",
+      level: "warn",
+      message: `state directory ${stateDir} has mode ${octal(dirMode)}, expected 0700 (fix: chmod 700)`
+    }
+  );
+  const file2 = join4(stateDir, "accounts.json");
+  if (!exists(file2)) {
+    results.push({
+      id: "registry.file",
+      level: "warn",
+      message: "accounts.json does not exist yet (no account registered)"
+    });
+    return void 0;
+  }
+  const fileMode = mode(file2);
+  results.push(
+    (fileMode & 63) === 0 ? { id: "registry.mode", level: "ok", message: "accounts.json has mode 0600" } : {
+      id: "registry.mode",
+      level: "warn",
+      message: `accounts.json has mode ${octal(fileMode)}, expected 0600 (fix: chmod 600)`
+    }
+  );
+  let json2;
+  try {
+    json2 = readJson(file2);
+  } catch {
+    results.push({
+      id: "registry.parse",
+      level: "fail",
+      message: "accounts.json is not valid JSON"
+    });
+    return void 0;
+  }
+  const list2 = json2?.accounts;
+  if (!Array.isArray(list2)) {
+    results.push({
+      id: "registry.parse",
+      level: "fail",
+      message: 'accounts.json has no "accounts" array'
+    });
+    return void 0;
+  }
+  const accounts = [];
+  for (const item of list2) {
+    const a = item;
+    if (a === null || typeof a !== "object" || typeof a.id !== "string" || a.id === "" || typeof a.config_dir !== "string" || a.config_dir === "") {
+      results.push({
+        id: "registry.parse",
+        level: "fail",
+        message: "accounts.json has an entry without a valid id and config_dir"
+      });
+      return void 0;
+    }
+    accounts.push({
+      id: a.id,
+      config_dir: a.config_dir,
+      command: typeof a.command === "string" && a.command !== "" ? a.command : "claude",
+      ...typeof a.status === "string" && a.status !== "" ? { status: a.status } : {}
+    });
+  }
+  const ids = accounts.map((a) => a.id);
+  const dupes = [...new Set(ids.filter((id, i) => ids.indexOf(id) !== i))];
+  if (dupes.length > 0) {
+    results.push({
+      id: "registry.parse",
+      level: "fail",
+      message: `accounts.json has duplicate account ids: ${dupes.join(", ")}`
+    });
+    return accounts;
+  }
+  results.push({
+    id: "registry.parse",
+    level: "ok",
+    message: `accounts.json parses, ${accounts.length} account(s), no duplicate ids`
+  });
+  return accounts;
+}
+function resolveCommand(command, pathVar, cwd) {
+  const candidates = command.includes("/") ? [isAbsolute2(command) ? command : resolve4(cwd, command)] : pathVar.split(delimiter).filter((d) => d !== "").map((d) => join4(d, command));
+  for (const c of candidates) {
+    try {
+      if (statSync(c).isFile()) return c;
+    } catch {
+    }
+  }
+  return void 0;
+}
+function isExecutable(path) {
+  try {
+    accessSync(path, constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+function checkAccount(account, callerDir, defaultDir, deps, results) {
+  const p = `account.${account.id}`;
+  const dirOk = isDir(account.config_dir);
+  results.push(
+    dirOk ? { id: `${p}.config_dir`, level: "ok", message: `${account.id}: config_dir exists` } : {
+      id: `${p}.config_dir`,
+      level: "fail",
+      message: `${account.id}: config_dir ${account.config_dir} does not exist`
+    }
+  );
+  const found = resolveCommand(account.command, deps.env.PATH ?? "", process.cwd());
+  if (found === void 0) {
+    results.push({
+      id: `${p}.command`,
+      level: "fail",
+      message: `${account.id}: command "${account.command}" not found`
+    });
+  } else if (!isExecutable(found)) {
+    results.push({
+      id: `${p}.command`,
+      level: "fail",
+      message: `${account.id}: command ${found} is not executable (fix: chmod +x)`
+    });
+  } else {
+    results.push({
+      id: `${p}.command`,
+      level: "ok",
+      message: `${account.id}: command ${found} is executable`
+    });
+  }
+  if (canonical3(account.config_dir) === callerDir) {
+    results.push({
+      id: `${p}.self`,
+      level: "warn",
+      message: `${account.id}: this is the caller's own profile, it is never used as a target`
+    });
+  }
+  const status = account.status ?? "active";
+  results.push({
+    id: `${p}.status`,
+    level: "ok",
+    message: `${account.id}: status ${status}${status === "active" || status === "disabled" ? "" : " (unknown value, treated as disabled)"}`
+  });
+  if (dirOk && canonical3(account.config_dir) !== canonical3(defaultDir)) {
+    checkShared(account, defaultDir, results);
+  }
+  if (dirOk) checkPlugin(account, results);
+}
+function checkShared(account, defaultDir, results) {
+  for (const item of SHARED_ITEMS) {
+    const source = join4(defaultDir, item);
+    if (!exists(source)) continue;
+    const id = `account.${account.id}.shared.${item}`;
+    const target = join4(account.config_dir, item);
+    let st;
+    try {
+      st = lstatSync(target);
+    } catch {
+      results.push({
+        id,
+        level: "ok",
+        message: `${account.id}: ${item} absent (not shared, fine)`
+      });
+      continue;
+    }
+    if (!st.isSymbolicLink()) {
+      results.push({
+        id,
+        level: "warn",
+        message: `${account.id}: ${item} is forked, no longer shared with the default profile`
+      });
+      continue;
+    }
+    let real;
+    try {
+      real = realpathSync2(target);
+    } catch {
+      results.push({ id, level: "fail", message: `${account.id}: ${item} is a broken link` });
+      continue;
+    }
+    results.push(
+      real === canonical3(source) ? { id, level: "ok", message: `${account.id}: ${item} is linked to the default profile` } : {
+        id,
+        level: "warn",
+        message: `${account.id}: ${item} links somewhere other than the default profile`
+      }
+    );
+  }
+}
+function checkPlugin(account, results) {
+  const id = `account.${account.id}.plugin`;
+  const file2 = join4(account.config_dir, "plugins", "installed_plugins.json");
+  if (!exists(file2)) {
+    results.push({
+      id,
+      level: "ok",
+      message: `${account.id}: wingman plugin not installed (targets do not need it)`
+    });
+    return;
+  }
+  let version2;
+  try {
+    const entries = readJson(file2)?.plugins?.[PLUGIN_KEY];
+    if (Array.isArray(entries)) {
+      for (const e of entries) {
+        const v = e?.version;
+        if (typeof v === "string") {
+          version2 = v;
+          break;
+        }
+      }
+    }
+  } catch {
+    results.push({
+      id,
+      level: "warn",
+      message: `${account.id}: installed_plugins.json is not valid JSON`
+    });
+    return;
+  }
+  if (version2 === void 0) {
+    results.push({
+      id,
+      level: "ok",
+      message: `${account.id}: wingman plugin not installed (targets do not need it)`
+    });
+  } else if (version2 === package_default.version) {
+    results.push({
+      id,
+      level: "ok",
+      message: `${account.id}: wingman plugin ${version2} matches the running server`
+    });
+  } else {
+    results.push({
+      id,
+      level: "warn",
+      message: `${account.id}: wingman plugin ${version2} differs from the running server ${package_default.version} (run: claude plugin update)`
+    });
+  }
+}
+async function authStatus(command, deps) {
+  let stdout;
+  try {
+    ({ stdout } = await deps.exec(command, ["auth", "status", "--json"], {
+      env: deps.env,
+      timeoutMs: ONLINE_TIMEOUT_MS
+    }));
+  } catch (err) {
+    const e = err;
+    return {
+      error: e.killed === true ? "timed out after 20 s" : `exited with an error${typeof e.code === "number" ? ` (code ${e.code})` : ""}`
+    };
+  }
+  let json2;
+  try {
+    json2 = JSON.parse(stdout);
+  } catch {
+    return { error: "returned output that is not JSON" };
+  }
+  if (json2 === null || typeof json2 !== "object" || Array.isArray(json2)) {
+    return { error: "returned output that is not a JSON object" };
+  }
+  const o = json2;
+  const method = typeof o.authMethod === "string" && AUTH_METHOD.test(o.authMethod) ? o.authMethod : "unknown";
+  const identity = typeof o.email === "string" && typeof o.orgId === "string" ? createHash("sha256").update(`${o.email}\0${o.orgId}`).digest("hex") : void 0;
+  return { auth: { signedIn: o.loggedIn === true, method, identity } };
+}
+async function checkOnline(accounts, deps, results) {
+  const caller = await authStatus("claude", deps);
+  if ("error" in caller) {
+    results.push({
+      id: "online.caller",
+      level: "warn",
+      message: `caller: claude auth status ${caller.error}`
+    });
+  } else {
+    results.push({
+      id: "online.caller",
+      level: caller.auth.signedIn ? "ok" : "warn",
+      message: `caller: signed in ${caller.auth.signedIn ? "yes" : "no"}, authMethod ${caller.auth.method}`
+    });
+  }
+  const callerIdentity = "auth" in caller ? caller.auth.identity : void 0;
+  for (const account of accounts) {
+    const id = `online.${account.id}`;
+    const r = await authStatus(account.command, deps);
+    if ("error" in r) {
+      results.push({ id, level: "warn", message: `${account.id}: auth status ${r.error}` });
+      continue;
+    }
+    const { signedIn, method, identity } = r.auth;
+    const different = identity === void 0 || callerIdentity === void 0 ? "unknown" : identity !== callerIdentity ? "yes" : "no";
+    results.push({
+      id,
+      level: signedIn && different !== "no" ? "ok" : "warn",
+      message: `${account.id}: signed in ${signedIn ? "yes" : "no"}, authMethod ${method}, different account from the caller: ${different}${different === "no" ? " (CLAUDE_CONFIG_DIR of this profile may not take effect)" : ""}`
+    });
+  }
+}
+async function runChecks(online, deps) {
+  const results = [];
+  const stateDir = deps.env.WINGMAN_HOME || join4(deps.homeDir, ".wingman");
+  const defaultDir = deps.env.CLAUDE_DEFAULT_DIR || join4(deps.homeDir, ".claude");
+  const callerDir = canonical3(deps.env.CLAUDE_CONFIG_DIR || join4(deps.homeDir, ".claude"));
+  const accounts = checkState(stateDir, results) ?? [];
+  const others = accounts.filter((a) => canonical3(a.config_dir) !== callerDir);
+  if (others.length === 0) {
+    results.push({
+      id: "registry.accounts",
+      level: "warn",
+      message: "no account other than the caller's own is registered (run another-login.sh)"
+    });
+  }
+  for (const account of accounts) checkAccount(account, callerDir, defaultDir, deps, results);
+  if (online) await checkOnline(accounts, deps, results);
+  return results;
+}
+async function doctorCommand(args, deps) {
+  let online = false;
+  let json2 = false;
+  for (const a of args) {
+    if (a === "--online") online = true;
+    else if (a === "--json") json2 = true;
+    else {
+      process.stderr.write(`wingman doctor: unexpected argument ${a}
+${DOCTOR_USAGE}
+`);
+      return 2;
+    }
+  }
+  const results = await runChecks(online, deps);
+  const count = (l) => results.filter((r) => r.level === l).length;
+  if (json2) {
+    process.stdout.write(`${JSON.stringify(results, null, 2)}
+`);
+  } else {
+    for (const r of results) process.stdout.write(`[${r.level}] ${r.message}
+`);
+    process.stdout.write(
+      `wingman doctor: ${count("ok")} ok, ${count("warn")} warn, ${count("fail")} fail
+`
+    );
+  }
+  return count("fail") > 0 ? 1 : 0;
+}
+
+// src/gc.ts
+import { existsSync as existsSync4, readdirSync as readdirSync4, rmSync as rmSync3, statSync as statSync2 } from "node:fs";
+import { join as join8 } from "node:path";
+
 // src/proc.ts
 import { execFileSync } from "node:child_process";
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync as readFileSync2, readdirSync } from "node:fs";
 var defaultPsExec = (file2, args) => execFileSync(file2, args, {
   encoding: "utf8",
   env: { ...process.env, LC_ALL: "C" },
@@ -28644,7 +29414,7 @@ function procfsBackend() {
   return {
     startTime(pid) {
       try {
-        const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+        const stat = readFileSync2(`/proc/${pid}/stat`, "utf8");
         const rest = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
         return rest[19];
       } catch {
@@ -28662,7 +29432,7 @@ function procfsBackend() {
       for (const name of names) {
         if (!/^\d+$/.test(name)) continue;
         try {
-          const stat = readFileSync(`/proc/${name}/stat`, "utf8");
+          const stat = readFileSync2(`/proc/${name}/stat`, "utf8");
           const rest = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
           if (rest[0] !== "Z" && Number(rest[2]) === pgid) members2.push(Number(name));
         } catch {
@@ -28753,10 +29523,10 @@ function terminateOrphanedGroup(pgid, graceMs2 = GROUP_KILL_GRACE_MS) {
 
 // src/reconcile.ts
 import { existsSync as existsSync2 } from "node:fs";
-import { join as join3 } from "node:path";
+import { join as join6 } from "node:path";
 
 // src/runs.ts
-import { randomBytes } from "node:crypto";
+import { randomBytes as randomBytes2 } from "node:crypto";
 import {
   chmodSync,
   closeSync,
@@ -28764,7 +29534,7 @@ import {
   fstatSync,
   mkdirSync,
   openSync,
-  readFileSync as readFileSync2,
+  readFileSync as readFileSync3,
   readSync,
   readdirSync as readdirSync2,
   renameSync,
@@ -28773,7 +29543,7 @@ import {
   writeFileSync,
   appendFileSync
 } from "node:fs";
-import { join as join2 } from "node:path";
+import { join as join5 } from "node:path";
 
 // src/mask.ts
 var MASK = "[MASKED]";
@@ -28879,7 +29649,7 @@ var RESULT_PAGE_CHARS = 4e3;
 var RESULT_PAGE_MAX_CHARS = 8e3;
 var RUN_ID = /^[A-Za-z0-9_-]{1,64}$/;
 function newRunId() {
-  return randomBytes(6).toString("hex");
+  return randomBytes2(6).toString("hex");
 }
 function dirOf(id) {
   if (!RUN_ID.test(id)) throw new Error(`invalid run id: ${id}`);
@@ -28890,7 +29660,7 @@ function ensureDir(path) {
   chmodSync(path, DIR_MODE);
 }
 function writeAtomic(path, data) {
-  const tmp = `${path}.${randomBytes(4).toString("hex")}.tmp`;
+  const tmp = `${path}.${randomBytes2(4).toString("hex")}.tmp`;
   try {
     writeFileSync(tmp, data, { mode: FILE_MODE });
     chmodSync(tmp, FILE_MODE);
@@ -28921,7 +29691,7 @@ function writeMeta(meta3) {
   const parsed = metaSchema.parse(meta3);
   const dir = dirOf(parsed.id);
   ensureDir(dir);
-  writeAtomic(join2(dir, "meta.json"), `${JSON.stringify(parsed, null, 2)}
+  writeAtomic(join5(dir, "meta.json"), `${JSON.stringify(parsed, null, 2)}
 `);
 }
 function patchRunning(id, patch) {
@@ -28934,7 +29704,7 @@ function patchRunning(id, patch) {
   return next;
 }
 function readMeta(id) {
-  return metaSchema.parse(JSON.parse(readFileSync2(join2(dirOf(id), "meta.json"), "utf8")));
+  return metaSchema.parse(JSON.parse(readFileSync3(join5(dirOf(id), "meta.json"), "utf8")));
 }
 function updateStatus(id, status, patch = {}) {
   const current2 = readMeta(id);
@@ -28951,13 +29721,13 @@ function updateStatus(id, status, patch = {}) {
 function appendEvent(id, rawLine) {
   const dir = dirOf(id);
   ensureDir(dir);
-  const path = join2(dir, "events.jsonl");
+  const path = join5(dir, "events.jsonl");
   appendFileSync(path, rawLine.endsWith("\n") ? rawLine : `${rawLine}
 `, { mode: FILE_MODE });
   chmodSync(path, FILE_MODE);
 }
 function pruneEvents(id, maxBytes) {
-  const path = join2(dirOf(id), "events.jsonl");
+  const path = join5(dirOf(id), "events.jsonl");
   if (!existsSync(path)) return;
   const fd = openSync(path, "r");
   let tail;
@@ -28972,7 +29742,7 @@ function pruneEvents(id, maxBytes) {
   }
   const firstNewline = tail.indexOf(10);
   const kept = firstNewline === -1 ? Buffer.alloc(0) : tail.subarray(firstNewline + 1);
-  const tmp = `${path}.${randomBytes(4).toString("hex")}.tmp`;
+  const tmp = `${path}.${randomBytes2(4).toString("hex")}.tmp`;
   writeFileSync(tmp, kept, { mode: FILE_MODE });
   chmodSync(tmp, FILE_MODE);
   renameSync(tmp, path);
@@ -28983,7 +29753,7 @@ function pruneOldEvents(maxAgeMs = EVENTS_RETENTION_MS) {
   for (const meta3 of listRuns()) {
     if (!TERMINAL_STATUSES.includes(meta3.status) || !meta3.finished_at) continue;
     if (Date.now() - Date.parse(meta3.finished_at) < maxAgeMs) continue;
-    const path = join2(dirOf(meta3.id), "events.jsonl");
+    const path = join5(dirOf(meta3.id), "events.jsonl");
     if (!existsSync(path)) continue;
     rmSync(path, { force: true });
     pruned.push(meta3.id);
@@ -28993,7 +29763,7 @@ function pruneOldEvents(maxAgeMs = EVENTS_RETENTION_MS) {
 function writeResult(id, text) {
   const dir = dirOf(id);
   ensureDir(dir);
-  writeAtomic(join2(dir, "result.md"), text);
+  writeAtomic(join5(dir, "result.md"), text);
 }
 function listRuns() {
   if (!existsSync(runsDir())) return [];
@@ -29009,8 +29779,8 @@ function listRuns() {
 }
 function runSummary(id, page = {}) {
   const meta3 = readMeta(id);
-  const resultPath = join2(dirOf(id), "result.md");
-  const masked = existsSync(resultPath) ? maskSecrets(readFileSync2(resultPath, "utf8")) : null;
+  const resultPath = join5(dirOf(id), "result.md");
+  const masked = existsSync(resultPath) ? maskSecrets(readFileSync3(resultPath, "utf8")) : null;
   const summary = {
     id: meta3.id,
     account: meta3.account,
@@ -29057,7 +29827,7 @@ function reconcile(meta3, opts = {}) {
   if (meta3.pid !== void 0) terminateOrphanedGroup(meta3.pid);
   const again = readMeta(meta3.id);
   if (TERMINAL_STATUSES.includes(again.status)) return again;
-  if (!existsSync2(join3(runDir(meta3.id), "result.md"))) {
+  if (!existsSync2(join6(runDir(meta3.id), "result.md"))) {
     writeResult(meta3.id, "[wingman] the run ended without a result message (supervisor gone)");
   }
   try {
@@ -29069,26 +29839,26 @@ function reconcile(meta3, opts = {}) {
 
 // src/worktree.ts
 import { spawn } from "node:child_process";
-import { createHash, randomBytes as randomBytes2 } from "node:crypto";
+import { createHash as createHash2, randomBytes as randomBytes3 } from "node:crypto";
 import {
   chmodSync as chmodSync2,
   closeSync as closeSync2,
   existsSync as existsSync3,
   mkdirSync as mkdirSync2,
   openSync as openSync2,
-  readFileSync as readFileSync3,
+  readFileSync as readFileSync4,
   linkSync,
   readdirSync as readdirSync3,
-  realpathSync,
+  realpathSync as realpathSync3,
   renameSync as renameSync2,
   rmSync as rmSync2,
   writeFileSync as writeFileSync2
 } from "node:fs";
-import { join as join4 } from "node:path";
+import { join as join7 } from "node:path";
 var PROXY_VARS = ["HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"];
 var TIMED_OUT = 124;
 var MAX_OUTPUT = 16 * 1024 * 1024;
-var defaultExec = (file2, args, { cwd, env, timeoutMs }) => new Promise((resolve4) => {
+var defaultExec2 = (file2, args, { cwd, env, timeoutMs }) => new Promise((resolve6) => {
   let stdout = "";
   let stderr = "";
   let timedOut = false;
@@ -29108,7 +29878,7 @@ var defaultExec = (file2, args, { cwd, env, timeoutMs }) => new Promise((resolve
     if (hardStop) clearTimeout(hardStop);
     if (timedOut) stderr = `${stderr}
 timed out after ${timeoutMs}ms`.trim();
-    resolve4({ code: timedOut ? TIMED_OUT : code, stdout, stderr });
+    resolve6({ code: timedOut ? TIMED_OUT : code, stdout, stderr });
   };
   child.stdout?.on("data", (d) => {
     if (stdout.length < MAX_OUTPUT) stdout += d.toString("utf8");
@@ -29142,15 +29912,15 @@ function withoutProxy(env) {
   return copy;
 }
 function locksDir() {
-  return join4(wingmanHome(), "locks");
+  return join7(wingmanHome(), "locks");
 }
 function lockPathFor(repo, lockKey) {
-  const key = createHash("sha256").update(`${realpathSync(repo)}\0${lockKey}`).digest("hex");
-  return join4(locksDir(), `${key.slice(0, 24)}.lock`);
+  const key = createHash2("sha256").update(`${realpathSync3(repo)}\0${lockKey}`).digest("hex");
+  return join7(locksDir(), `${key.slice(0, 24)}.lock`);
 }
 function readLock(path) {
   try {
-    const parsed = JSON.parse(readFileSync3(path, "utf8"));
+    const parsed = JSON.parse(readFileSync4(path, "utf8"));
     return typeof parsed.pid === "number" ? parsed : void 0;
   } catch {
     return void 0;
@@ -29176,7 +29946,7 @@ function acquireLock(path, info) {
           { cause: err }
         );
       }
-      const aside = `${path}.stale-${randomBytes2(4).toString("hex")}`;
+      const aside = `${path}.stale-${randomBytes3(4).toString("hex")}`;
       try {
         renameSync2(path, aside);
       } catch {
@@ -29205,7 +29975,7 @@ function setLockOwner(lockPath, pid) {
   const startTime = readStartTime(pid);
   if (startTime !== void 0) next.start_time = startTime;
   else delete next.start_time;
-  const tmp = `${lockPath}.${randomBytes2(4).toString("hex")}.tmp`;
+  const tmp = `${lockPath}.${randomBytes3(4).toString("hex")}.tmp`;
   try {
     writeFileSync2(tmp, JSON.stringify(next), { mode: 384 });
     renameSync2(tmp, lockPath);
@@ -29217,7 +29987,7 @@ function setLockOwner(lockPath, pid) {
 function releaseLocksOf(runId) {
   if (!existsSync3(locksDir())) return;
   for (const entry of readdirSync3(locksDir())) {
-    const path = join4(locksDir(), entry);
+    const path = join7(locksDir(), entry);
     if (readLock(path)?.run_id === runId) rmSync2(path, { force: true });
   }
 }
@@ -29240,7 +30010,7 @@ async function baseBranches(exec, cwd, env) {
   return names;
 }
 async function createWorktree(opts) {
-  const exec = opts.exec ?? defaultExec;
+  const exec = opts.exec ?? defaultExec2;
   const env = withoutProxy(opts.env ?? process.env);
   const { repo, callerBranch, runId } = opts;
   if (!callerBranch || callerBranch === "HEAD") {
@@ -29263,7 +30033,7 @@ async function createWorktree(opts) {
   try {
     mkdirSync2(worktreesDir(), { recursive: true, mode: 448 });
     chmodSync2(worktreesDir(), 448);
-    const path = join4(worktreesDir(), runId);
+    const path = join7(worktreesDir(), runId);
     const branch = opts.createBranch === false ? void 0 : fromBase ? `wingman/${runId}` : `${callerBranch}-wm-${runId}`;
     const added = await execWithinBudget(
       exec,
@@ -29285,14 +30055,14 @@ async function createWorktree(opts) {
 }
 async function runSetup(worktree, command, env = process.env, timeoutMs = DEFAULT_SETUP_TIMEOUT_MS) {
   if (!command) return { ok: true, output: "" };
-  const result = await defaultExec("sh", ["-c", command], { cwd: worktree, env, timeoutMs });
+  const result = await defaultExec2("sh", ["-c", command], { cwd: worktree, env, timeoutMs });
   const output2 = maskSecrets(`${result.stdout}${result.stderr}`).slice(-2e3);
   return { ok: result.code === 0, output: output2 };
 }
 function activeUsersOf(worktree, exceptRunId) {
   return listRuns().filter((m) => m.id !== exceptRunId && m.worktree === worktree).map((m) => reconcile(m)).filter((m) => !TERMINAL_STATUSES.includes(m.status));
 }
-async function worktreeDirty(path, exec = defaultExec) {
+async function worktreeDirty(path, exec = defaultExec2) {
   const res = await exec("git", ["status", "--porcelain"], {
     cwd: path,
     env: withoutProxy(process.env),
@@ -29300,7 +30070,7 @@ async function worktreeDirty(path, exec = defaultExec) {
   });
   return res.code !== 0 || res.stdout.trim() !== "";
 }
-async function removeWorktree(runId, exec = defaultExec) {
+async function removeWorktree(runId, exec = defaultExec2) {
   const meta3 = readMeta(runId);
   const sharing = meta3.worktree ? listRuns().filter((m) => m.worktree === meta3.worktree) : [];
   if (meta3.worktree) {
@@ -29424,14 +30194,14 @@ function removeStaleLocks(dryRun, removedRuns) {
   let removed = 0;
   for (const entry of readdirSync4(locksDir())) {
     if (!entry.endsWith(".lock")) continue;
-    const path = join5(locksDir(), entry);
+    const path = join8(locksDir(), entry);
     const held = readLock(path);
     let stale;
     if (held) {
       stale = !runExists(held.run_id, removedRuns) || !isSameProcess(held.pid, held.start_time);
     } else {
       try {
-        stale = Date.now() - statSync(path).mtimeMs > UNPARSABLE_LOCK_MIN_AGE_MS;
+        stale = Date.now() - statSync2(path).mtimeMs > UNPARSABLE_LOCK_MIN_AGE_MS;
       } catch {
         continue;
       }
@@ -29445,7 +30215,7 @@ function removeStaleLocks(dryRun, removedRuns) {
 
 // src/cli.ts
 var RUN_ID3 = /^[A-Za-z0-9_-]{1,64}$/;
-var COMMANDS = ["wait", "gc"];
+var COMMANDS = ["wait", "gc", "accounts", "doctor"];
 var NO_RESULT_TEXT = "[wingman] the run ended without a result message (supervisor gone)";
 var ORPHAN_DRAIN_MS = 3500;
 var WAIT_USAGE = "usage: wingman wait <run_id> [--timeout-ms N] [--poll-ms N] [--grace-ms N]";
@@ -29453,10 +30223,12 @@ var GC_USAGE = "usage: wingman gc [--older-than-days N] [--dry-run]";
 var UsageError = class extends Error {
 };
 var sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-async function maybeRunCli(argv) {
+async function maybeRunCli(argv, doctorDeps = defaultDeps()) {
   const [command, ...args] = argv.slice(2);
   if (command === void 0 || !COMMANDS.includes(command)) return void 0;
   try {
+    if (command === "accounts") return await accountsCommand(args);
+    if (command === "doctor") return await doctorCommand(args, doctorDeps);
     return command === "wait" ? await waitCommand(args) : await gcCommand(args);
   } catch (err) {
     if (err instanceof UsageError) {
@@ -29512,7 +30284,7 @@ function writeAtomic2(path, data) {
   renameSync3(tmp, path);
 }
 function readRawMeta(id) {
-  return JSON.parse(readFileSync4(join6(runDir(id), "meta.json"), "utf8"));
+  return JSON.parse(readFileSync5(join9(runDir(id), "meta.json"), "utf8"));
 }
 function asRunMeta(raw) {
   const pid = raw.pid;
@@ -29531,11 +30303,11 @@ function endDeadRun(id, raw) {
   try {
     const current2 = readRawMeta(id);
     if (typeof current2.status === "string" && current2.status !== "running") return current2.status;
-    if (!existsSync5(join6(runDir(id), "result.md"))) writeResult(id, NO_RESULT_TEXT);
+    if (!existsSync5(join9(runDir(id), "result.md"))) writeResult(id, NO_RESULT_TEXT);
     current2.status = "failed_no_report";
     current2.exit_code = null;
     current2.finished_at = typeof current2.finished_at === "string" ? current2.finished_at : (/* @__PURE__ */ new Date()).toISOString();
-    writeAtomic2(join6(runDir(id), "meta.json"), `${JSON.stringify(current2, null, 2)}
+    writeAtomic2(join9(runDir(id), "meta.json"), `${JSON.stringify(current2, null, 2)}
 `);
   } catch {
   }
@@ -29607,10 +30379,10 @@ ${GC_USAGE}`);
 
 // src/runner.ts
 import { randomUUID } from "node:crypto";
-import { closeSync as closeSync3, mkdirSync as mkdirSync3, openSync as openSync3, realpathSync as realpathSync3, rmSync as rmSync4 } from "node:fs";
+import { closeSync as closeSync3, mkdirSync as mkdirSync3, openSync as openSync3, realpathSync as realpathSync4, rmSync as rmSync4 } from "node:fs";
 import { spawn as spawn2 } from "node:child_process";
 import { createInterface } from "node:readline";
-import { relative, join as join9, isAbsolute as isAbsolute2 } from "node:path";
+import { relative, join as join11, isAbsolute as isAbsolute4 } from "node:path";
 
 // src/guard.ts
 var DEFAULT_PRESET = "readonly";
@@ -29882,41 +30654,12 @@ function getAdapter(provider) {
   throw new Error(`No adapter for provider "${provider}"`);
 }
 
-// src/self.ts
-import { realpathSync as realpathSync2 } from "node:fs";
-import { homedir as homedir2 } from "node:os";
-import { join as join7, resolve } from "node:path";
-function canonical(dir) {
-  try {
-    return realpathSync2(dir);
-  } catch {
-    return resolve(dir);
-  }
-}
-function callerProfile(env = process.env) {
-  const configured = env.CLAUDE_CONFIG_DIR;
-  return canonical(configured ? configured : join7(homedir2(), ".claude"));
-}
-function currentDepth(env = process.env) {
-  const raw = env.WINGMAN_DEPTH;
-  if (raw === void 0 || !/^\d+$/.test(raw.trim())) return 0;
-  return Number.parseInt(raw.trim(), 10);
-}
-function assertCanStart(env = process.env, limit = 1) {
-  const depth = currentDepth(env);
-  if (depth >= limit) {
-    throw new Error(
-      `Refusing to start a nested run: WINGMAN_DEPTH=${depth} has reached the limit of ${limit}`
-    );
-  }
-}
-
 // src/snapshot.ts
-import { createHash as createHash2 } from "node:crypto";
-import { existsSync as existsSync6, readFileSync as readFileSync5, readdirSync as readdirSync5, statSync as statSync2 } from "node:fs";
-import { isAbsolute, join as join8, resolve as resolve2 } from "node:path";
+import { createHash as createHash3 } from "node:crypto";
+import { existsSync as existsSync6, readFileSync as readFileSync6, readdirSync as readdirSync5, statSync as statSync3 } from "node:fs";
+import { isAbsolute as isAbsolute3, join as join10, resolve as resolve5 } from "node:path";
 var SNAPSHOT_TIMEOUT_MS = 3e4;
-var sha = (text) => createHash2("sha256").update(text).digest("hex");
+var sha = (text) => createHash3("sha256").update(text).digest("hex");
 async function git(exec, repo, args) {
   const res = await exec("git", args, {
     cwd: repo,
@@ -29931,10 +30674,10 @@ function hashHooks(hooksDir) {
   for (const name of readdirSync5(hooksDir).sort()) {
     if (name.endsWith(".sample")) continue;
     try {
-      const path = join8(hooksDir, name);
-      if (!statSync2(path).isFile()) continue;
-      const content = readFileSync5(path);
-      lines.push(`${name} ${content.length} ${createHash2("sha256").update(content).digest("hex")}`);
+      const path = join10(hooksDir, name);
+      if (!statSync3(path).isFile()) continue;
+      const content = readFileSync6(path);
+      lines.push(`${name} ${content.length} ${createHash3("sha256").update(content).digest("hex")}`);
     } catch {
       lines.push(`${name} unreadable`);
     }
@@ -29951,7 +30694,7 @@ async function observe(exec, repo, refs) {
   const common = await git(exec, repo, ["rev-parse", "--git-common-dir"]);
   if (listed === void 0 || config2 === void 0 || common === void 0) return void 0;
   const commonDir = common.trim();
-  const hooksDir = join8(isAbsolute(commonDir) ? commonDir : resolve2(repo, commonDir), "hooks");
+  const hooksDir = join10(isAbsolute3(commonDir) ? commonDir : resolve5(repo, commonDir), "hooks");
   return { refs_hash: sha(listed), config_hash: sha(config2), hooks_hash: hashHooks(hooksDir) };
 }
 async function takeSnapshot(exec, repo, callerBranch) {
@@ -30095,12 +30838,12 @@ async function runSupervisor(runId) {
   child.on("error", (err) => {
     spawnError = err.message;
   });
-  const end = await new Promise((resolve4) => {
+  const end = await new Promise((resolve6) => {
     let settled = false;
     const settle2 = (code, signal) => {
       if (settled) return;
       settled = true;
-      resolve4({ code, signal });
+      resolve6({ code, signal });
     };
     child.on("close", (code, signal) => settle2(code, signal));
     child.on("exit", (code, signal) => {
@@ -30121,7 +30864,7 @@ async function runSupervisor(runId) {
   if (spawnError !== void 0) input2.spawnError = spawnError;
   let outcome = mapOutcome(input2);
   if (payload.repo && payload.ref_snapshot) {
-    const changed = await changedSince(defaultExec, payload.repo, payload.ref_snapshot);
+    const changed = await changedSince(defaultExec2, payload.repo, payload.ref_snapshot);
     if (changed.length > 0) outcome = flagGuardrail(outcome, changed);
   }
   writeResult(runId, outcome.text);
@@ -30179,7 +30922,7 @@ async function gitOut(exec, cwd, args) {
 function launchSupervisor(meta3, payload, env, entry) {
   const dir = runDir(meta3.id);
   mkdirSync3(dir, { recursive: true, mode: 448 });
-  const fd = openSync3(join9(dir, "events.jsonl"), "a", 384);
+  const fd = openSync3(join11(dir, "events.jsonl"), "a", 384);
   let child;
   try {
     child = spawn2(process.execPath, [entry, "--supervise", meta3.id], {
@@ -30224,7 +30967,7 @@ async function startRun(opts) {
   const parentEnv = opts.parentEnv ?? process.env;
   assertCanStart(parentEnv);
   const adapter = opts.adapter ?? claudeAdapter;
-  const exec = opts.exec ?? defaultExec;
+  const exec = opts.exec ?? defaultExec2;
   const depth = currentDepth(parentEnv) + 1;
   const tools = resolveTools({
     ...opts.preset !== void 0 ? { preset: opts.preset } : {},
@@ -30283,7 +31026,7 @@ async function startRun(opts) {
       lockPath = wt.lockPath;
       meta3.worktree = wt.path;
       if (wt.branch !== void 0) meta3.run_branch = wt.branch;
-      runCwd = offset ? join9(wt.path, offset) : wt.path;
+      runCwd = offset ? join11(wt.path, offset) : wt.path;
       meta3.run_cwd = runCwd;
       patchRunning(meta3.id, {
         worktree: wt.path,
@@ -30335,8 +31078,8 @@ async function startRun(opts) {
   }
 }
 function offsetInRepo(repo, cwd) {
-  const rel = relative(realpathSync3(repo), realpathSync3(cwd));
-  if (rel === ".." || rel.startsWith("../") || isAbsolute2(rel)) {
+  const rel = relative(realpathSync4(repo), realpathSync4(cwd));
+  if (rel === ".." || rel.startsWith("../") || isAbsolute4(rel)) {
     throw new Error("cwd resolves outside its git repository");
   }
   return rel;
@@ -30437,9 +31180,9 @@ async function cancelRun(runId) {
 }
 
 // src/tools.ts
-import { execFile } from "node:child_process";
-import { existsSync as existsSync7, statSync as statSync3 } from "node:fs";
-import { isAbsolute as isAbsolute3 } from "node:path";
+import { execFile as execFile2 } from "node:child_process";
+import { existsSync as existsSync7, statSync as statSync4 } from "node:fs";
+import { isAbsolute as isAbsolute5 } from "node:path";
 
 // node_modules/zod/v3/helpers/util.js
 var util;
@@ -36415,7 +37158,7 @@ var Protocol = class {
           return;
         }
         const pollInterval = task2.pollInterval ?? this._options?.defaultTaskPollInterval ?? 1e3;
-        await new Promise((resolve4) => setTimeout(resolve4, pollInterval));
+        await new Promise((resolve6) => setTimeout(resolve6, pollInterval));
         options?.signal?.throwIfAborted();
       }
     } catch (error62) {
@@ -36432,7 +37175,7 @@ var Protocol = class {
    */
   request(request, resultSchema, options) {
     const { relatedRequestId, resumptionToken, onresumptiontoken, task, relatedTask } = options ?? {};
-    return new Promise((resolve4, reject) => {
+    return new Promise((resolve6, reject) => {
       const earlyReject = (error62) => {
         reject(error62);
       };
@@ -36510,7 +37253,7 @@ var Protocol = class {
           if (!parseResult.success) {
             reject(parseResult.error);
           } else {
-            resolve4(parseResult.data);
+            resolve6(parseResult.data);
           }
         } catch (error62) {
           reject(error62);
@@ -36772,12 +37515,12 @@ var Protocol = class {
       }
     } catch {
     }
-    return new Promise((resolve4, reject) => {
+    return new Promise((resolve6, reject) => {
       if (signal.aborted) {
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
         return;
       }
-      const timeoutId = setTimeout(resolve4, interval);
+      const timeoutId = setTimeout(resolve6, interval);
       signal.addEventListener("abort", () => {
         clearTimeout(timeoutId);
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
@@ -37080,8 +37823,8 @@ var ExperimentalServerTasks = class {
    */
   elicitInputStream(params, options) {
     const clientCapabilities = this._server.getClientCapabilities();
-    const mode = params.mode ?? "form";
-    switch (mode) {
+    const mode2 = params.mode ?? "form";
+    switch (mode2) {
       case "url": {
         if (!clientCapabilities?.elicitation?.url) {
           throw new Error("Client does not support url elicitation.");
@@ -37095,7 +37838,7 @@ var ExperimentalServerTasks = class {
         break;
       }
     }
-    const normalizedParams = mode === "form" && params.mode === void 0 ? { ...params, mode: "form" } : params;
+    const normalizedParams = mode2 === "form" && params.mode === void 0 ? { ...params, mode: "form" } : params;
     return this.requestStream({
       method: "elicitation/create",
       params: normalizedParams
@@ -37469,8 +38212,8 @@ var Server = class extends Protocol {
    * @returns The result of the elicitation request.
    */
   async elicitInput(params, options) {
-    const mode = params.mode ?? "form";
-    switch (mode) {
+    const mode2 = params.mode ?? "form";
+    switch (mode2) {
       case "url": {
         if (!this._clientCapabilities?.elicitation?.url) {
           throw new Error("Client does not support url elicitation.");
@@ -37917,7 +38660,7 @@ var McpServer = class {
     let task = createTaskResult.task;
     const pollInterval = task.pollInterval ?? 5e3;
     while (task.status !== "completed" && task.status !== "failed" && task.status !== "cancelled") {
-      await new Promise((resolve4) => setTimeout(resolve4, pollInterval));
+      await new Promise((resolve6) => setTimeout(resolve6, pollInterval));
       const updatedTask = await extra.taskStore.getTask(taskId);
       if (!updatedTask) {
         throw new McpError(ErrorCode.InternalError, `Task ${taskId} not found during polling`);
@@ -38485,126 +39228,6 @@ var EMPTY_COMPLETION_RESULT = {
   }
 };
 
-// package.json
-var package_default = {
-  name: "wingman-server",
-  version: "0.2.0",
-  private: true,
-  type: "module",
-  engines: {
-    node: ">=22"
-  },
-  scripts: {
-    build: "node esbuild.config.mjs",
-    test: "vitest run",
-    coverage: "vitest run --coverage",
-    lint: "eslint .",
-    format: "prettier --check .",
-    typecheck: "tsc --noEmit",
-    check: "npm run typecheck && npm run lint && npm run format && npm run build && npm test"
-  },
-  dependencies: {
-    "@modelcontextprotocol/sdk": "1.32.2",
-    zod: "4.6.7"
-  },
-  devDependencies: {
-    "@eslint/js": "10.0.1",
-    "@types/node": "26.6.5",
-    "@vitest/coverage-v8": "5.0.5",
-    esbuild: "0.28.2",
-    eslint: "10.13.0",
-    prettier: "3.9.10",
-    typescript: "6.0.3",
-    "typescript-eslint": "8.72.1",
-    vitest: "5.0.5"
-  },
-  license: "MIT"
-};
-
-// src/registry.ts
-import { randomBytes as randomBytes3 } from "node:crypto";
-import { chmod, mkdir, realpath, rename, writeFile, readFile, unlink } from "node:fs/promises";
-import { dirname, resolve as resolve3 } from "node:path";
-var accountSchema = external_exports.object({
-  id: external_exports.string().min(1),
-  label: external_exports.string().min(1),
-  config_dir: external_exports.string().min(1),
-  provider: external_exports.string().min(1).default("claude"),
-  command: external_exports.string().min(1).default("claude"),
-  status: external_exports.string().min(1).optional()
-});
-var registrySchema = external_exports.object({ accounts: external_exports.array(accountSchema) });
-async function saveAccounts(registry2) {
-  const parsed = registrySchema.parse(registry2);
-  const ids = parsed.accounts.map((a) => a.id);
-  if (new Set(ids).size !== ids.length) throw new Error("accounts.json has duplicate account ids");
-  const file2 = accountsFile();
-  const dir = dirname(file2);
-  await mkdir(dir, { recursive: true, mode: 448 });
-  await chmod(dir, 448);
-  const tmp = `${file2}.${process.pid}.${randomBytes3(4).toString("hex")}.tmp`;
-  try {
-    await writeFile(tmp, `${JSON.stringify(parsed, null, 2)}
-`, { mode: 384 });
-    await chmod(tmp, 384);
-    await rename(tmp, file2);
-  } catch (err) {
-    await unlink(tmp).catch(() => void 0);
-    throw err;
-  }
-}
-async function loadAccounts() {
-  const file2 = accountsFile();
-  let raw;
-  try {
-    raw = await readFile(file2, "utf8");
-  } catch (err) {
-    if (err.code !== "ENOENT") throw err;
-    const empty = { accounts: [] };
-    await saveAccounts(empty);
-    return empty;
-  }
-  let json2;
-  try {
-    json2 = JSON.parse(raw);
-  } catch {
-    throw new Error(`accounts.json at ${file2} is not valid JSON`);
-  }
-  const result = registrySchema.safeParse(json2);
-  if (!result.success) {
-    throw new Error(`accounts.json at ${file2} is invalid: ${result.error.message}`);
-  }
-  return result.data;
-}
-async function getAccount(id) {
-  const { accounts } = await loadAccounts();
-  const found = accounts.find((a) => a.id === id);
-  if (!found) {
-    const known = accounts.map((a) => a.id).join(", ") || "none";
-    throw new Error(`Unknown account "${id}". Registered accounts: ${known}`);
-  }
-  return found;
-}
-async function canonical2(dir) {
-  try {
-    return await realpath(dir);
-  } catch {
-    return resolve3(dir);
-  }
-}
-async function targetsFor(callerProfileDir) {
-  const { accounts } = await loadAccounts();
-  const caller = await canonical2(callerProfileDir);
-  const result = [];
-  for (const account of accounts) {
-    if (await canonical2(account.config_dir) !== caller) result.push(account);
-  }
-  return result;
-}
-function isActive(account) {
-  return account.status === void 0 || account.status === "active";
-}
-
 // src/tools.ts
 var LIST_DEFAULT = 20;
 var LIST_MAX = 100;
@@ -38634,12 +39257,12 @@ function loadMeta(runId) {
   return reconcile(meta3);
 }
 function currentBranch(cwd) {
-  return new Promise((resolve4) => {
-    execFile(
+  return new Promise((resolve6) => {
+    execFile2(
       "git",
       ["rev-parse", "--abbrev-ref", "HEAD"],
       { cwd, timeout: GIT_TIMEOUT_MS },
-      (err, stdout) => resolve4(err ? void 0 : stdout.trim() || void 0)
+      (err, stdout) => resolve6(err ? void 0 : stdout.trim() || void 0)
     );
   });
 }
@@ -38659,7 +39282,7 @@ async function chooseAccount(env, accountId, random) {
   }
   const pool = targets.filter(isActive);
   if (pool.length === 0) {
-    throw new Error("No other active account is registered to run on");
+    throw new Error("No other active account is registered to run on; see `wingman accounts list`");
   }
   return pool[Math.min(Math.floor(random() * pool.length), pool.length - 1)];
 }
@@ -38697,7 +39320,7 @@ function createHandlers(deps = {}) {
   return {
     async start(input2) {
       const account = await chooseAccount(env, input2.account, random);
-      if (!isAbsolute3(input2.cwd) || !statSync3(input2.cwd, { throwIfNoEntry: false })?.isDirectory()) {
+      if (!isAbsolute5(input2.cwd) || !statSync4(input2.cwd, { throwIfNoEntry: false })?.isDirectory()) {
         throw new Error("cwd must be an absolute path of an existing directory");
       }
       const branch = await currentBranch(input2.cwd);
@@ -38742,6 +39365,10 @@ function createHandlers(deps = {}) {
           ...input2.limit !== void 0 ? { limit: input2.limit } : {}
         })
       };
+    },
+    async accounts() {
+      const { accounts } = await loadAccounts();
+      return { accounts: publicAccounts(accounts, callerProfile(env)) };
     },
     async cancel(input2) {
       loadMeta(input2.run_id);
@@ -38836,6 +39463,14 @@ function buildServer(deps = {}) {
       inputSchema: { limit: external_exports.number().int().positive().max(LIST_MAX).optional() }
     },
     wrap(h.list)
+  );
+  server.registerTool(
+    "wingman_accounts",
+    {
+      description: "List the registered accounts: id, label, status (active or disabled), is_caller (your own profile, never a target) and provider. Read-only on purpose: an account entry names a command the runner executes, so no tool adds, changes or removes accounts; the Human does that with `wingman accounts ...` in a terminal.",
+      inputSchema: {}
+    },
+    wrap(h.accounts)
   );
   server.registerTool(
     "wingman_cleanup",
