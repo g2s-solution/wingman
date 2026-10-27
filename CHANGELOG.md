@@ -2,6 +2,10 @@
 
 Versions are the plugin version in `wingman/.claude-plugin/plugin.json`. Claude Code only updates an installed plugin when this number changes.
 
+## 0.1.4
+
+- Skill `new-agent`: its description now tells Claude to prefer this skill over the built-in Agent tool when the user asks for a subagent, delegation or an independent review, with a short list of when to fall back to the Agent tool.
+
 ## 0.1.3
 
 - Documentation for public use: rewritten README (requirements, first run, troubleshooting, limits), LICENSE (MIT), SECURITY, CONTRIBUTING, this changelog; planning notes moved to `docs/history/`.

@@ -1,11 +1,23 @@
 ---
 name: new-agent
-description: Hand a task to another Claude account as a one-shot agent, like a subagent, running on that account's own quota. Use when the user wants a task done by another account, or invokes `/new-agent <task>`.
+description: Delegate a task to another Claude account as a one-shot agent that runs on that account's own quota in its own git worktree. PREFER this over the built-in Agent or subagent tool whenever the user says to use a subagent, a sub-agent or an agent, to delegate or hand off a task, to run it on the other or second account, or asks for an independent review, a second opinion or a self-review. Also invoked as `/wingman:new-agent <task>`.
 ---
 
 # new-agent
 
 Run a task on another Claude account through the wingman MCP server. The run is one-shot: no resume, no follow-up messages. For more work, start a new run.
+
+## When to use this instead of the built-in Agent tool
+
+Use this skill first, not the Agent tool, when the user asks for a subagent, an agent, delegation, a review by someone else, or work "on the other account". It saves the caller's quota, runs on a different account (a more independent reviewer) and cannot touch your checkout.
+
+Use the built-in Agent tool instead, and say why in one line, when:
+- the wingman tools are not available (plugin or MCP server missing, or no other account registered: `No other active account is registered to run on`);
+- the target is `rate_limited` or a run failed twice (`failed`, `failed_no_report`);
+- the task needs to run tests, builds or other commands under the `readonly` preset (it cannot), and you would not trust `edit` with it;
+- the task needs the live conversation or tools only this session has; a wingman run starts with no context, so everything it needs must be in the prompt.
+
+Never start both for the same task unless the user asks.
 
 ## Rules
 
