@@ -25,7 +25,16 @@ export interface DoctorDeps {
   exec: ExecFn;
 }
 
-const SHARED_ITEMS = ['CLAUDE.md', 'settings.json', 'skills', 'agents', 'commands', 'rules'];
+/** Mirrors `SHARED` in another-login.sh. */
+export const SHARED_ITEMS = [
+  'CLAUDE.md',
+  'settings.json',
+  'skills',
+  'agents',
+  'commands',
+  'rules',
+  'plugins',
+];
 const PLUGIN_KEY = 'wingman@wingman-marketplace';
 const ONLINE_TIMEOUT_MS = 20_000;
 const DOCTOR_USAGE = 'usage: wingman doctor [--online] [--json]';
@@ -261,8 +270,8 @@ function checkAccount(
   if (canonical(account.config_dir) === callerDir) {
     results.push({
       id: `${p}.self`,
-      level: 'warn',
-      message: `${account.id}: this is the caller's own profile, it is never used as a target`,
+      level: 'ok',
+      message: `${account.id}: info: this is the profile you are running in; it is skipped when you delegate from it and used when you delegate from another profile`,
     });
   }
 
@@ -297,10 +306,14 @@ function checkShared(account: RegistryAccount, defaultDir: string, results: Chec
       continue;
     }
     if (!st.isSymbolicLink()) {
+      const migrate =
+        item === 'plugins' && st.isDirectory()
+          ? `. To share it, run: mv ${target} ${target}.bak && ln -s ${source} ${target} (the backup can be deleted after checking that the plugins still work)`
+          : '';
       results.push({
         id,
         level: 'warn',
-        message: `${account.id}: ${item} is forked, no longer shared with the default profile`,
+        message: `${account.id}: ${item} is forked, no longer shared with the default profile${migrate}`,
       });
       continue;
     }
