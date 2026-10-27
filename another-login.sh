@@ -3,7 +3,7 @@ set -euo pipefail
 
 usage() {
   echo "usage: $(basename "$0") [--force] [--method claudeai|console|api_key] [config-dir]" >&2
-  echo "  config-dir: a bare name (e.g. claude-thinh) becomes ~/.claude-thinh; a value with / or ~ is used as given" >&2
+  echo "  config-dir: a bare name (e.g. claude-second) becomes ~/.claude-second; a value with / or ~ is used as given" >&2
   exit 2
 }
 
@@ -106,7 +106,7 @@ if command -v git >/dev/null; then
      && ! git -C "$p" check-ignore -q "$dir/$KEY_FILE" 2>/dev/null; then
     if [ "$method" = api_key ]; then
       echo "refusing: $dir is inside a git work tree and not ignored; the API key file could be committed" >&2
-      echo "choose a directory outside the repo (e.g. ~/.claude-thinh) or add it to .gitignore" >&2
+      echo "choose a directory outside the repo (e.g. ~/.claude-second) or add it to .gitignore" >&2
       exit 1
     else
       echo "warning: $dir is inside a git work tree; do not commit .credentials.json" >&2

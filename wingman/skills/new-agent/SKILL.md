@@ -11,14 +11,15 @@ Run a task on another Claude account through the wingman MCP server. The run is 
 
 - Never print, send or write sensitive values: tokens (Bearer, JWT, PAT, API keys), passwords, secrets, private keys, credentials in URLs, `.env` values, PII. Do not cat/Read files that may hold them.
 - Never read `events.jsonl`, run logs or account credential files. Use only `wingman_result`, `wingman_status`, `wingman_list` and `git`.
-- Every review comment posted to an MR/PR is written in English, whatever language the Human chats in.
 - Never push, and never commit to the base branch. Merging and pushing stay with the caller.
 
 ## Steps
 
 1. **Task and account.** The rest of the line after `/new-agent` is the task. An optional `--account <id>` names the target. Without it, call `wingman_start` without `account`; the server picks a random eligible target.
 2. **Preset.** Choose it yourself and say which: `readonly` for lookup, review and analysis; `edit` when files must change. `edit` runs arbitrary code under the target account; its deny rules are advisory, not a sandbox, so use it only for tasks you would trust a subagent with.
-   Inside a repo every run gets a worktree by default, also when you are on the base branch: the target never touches your checkout. An `edit` run commits on a run branch (`<branch>-wm-<id>`, or `wingman/<id>` from a base branch) that you merge into your own feature branch; a `readonly` run gets a detached worktree with no branch. Call `wingman_cleanup` afterwards. Pass `worktree: false` only for a pure lookup that needs no isolation (refused on a base branch or detached HEAD; `lock_key` needs a worktree). A detached HEAD is refused either way.
+   - **Worktree:** inside a git repo every run gets its own worktree by default, also when you are on the base branch (`main`, `master`): the target never touches your checkout. Pass `worktree: false` only for a pure lookup that needs no isolation; it is refused on a base branch. A detached HEAD is refused either way. `lock_key` (optional) stops two runs in the same repo with the same key, and needs a worktree.
+   - **Branch:** an `edit` run commits on a run branch (`<branch>-wm-<id>`, or `wingman/<id>` from a base branch) that you merge into your own feature branch. A `readonly` run gets a detached worktree and no branch.
+   - Call `wingman_cleanup` afterwards.
 3. **Prompt.** The run has no conversation context, so write a self-contained prompt: goal, paths, constraints, expected output. Ask for a short report with the conclusion and any open question first, details after. For `edit`, commit what the run needs first (the worktree is cut from your current HEAD); changes land on a run branch. Keep the returned `run_id` and run branch.
 4. **Wait without polling.** Start `${CLAUDE_PLUGIN_ROOT}/bin/wingman-wait <run_id>` with Bash `run_in_background`. It prints `WINGMAN_RUN <id> <status>` and wakes you on exit (0 for done/partial, 1 other terminal statuses, 2 unknown run, 3 timeout).
 5. **On wake, read `wingman_result` to the end.** It is masked and comes in pages of 4000 characters: while the answer has `result_next_offset`, call again with `offset` set to it, and only judge the report once that field is gone (`result_total_chars` is the full length). For `edit` runs, review the run branch from the main checkout:
@@ -35,5 +36,5 @@ Run a task on another Claude account through the wingman MCP server. The run is 
 - `needs_caller`: something must be done in the caller session: a plugin install or update, or a guardrail trip (the base branch, the caller branch ref or the git config changed while the run was active). For a plugin, do it and start a new run; for a guardrail note, inspect the refs with `git log --oneline` (never print config values) and decide with the user.
 - `rate_limited`: tell the user when the limit resets. The caller decides to wait or start a new run on another account; never reroute automatically.
 - `failed`: report it with the masked result and propose a new run or stop.
-- `failed_no_report`: the run ended without a result (for example killed by a DLP block). Inspect the run branch with `git log` and `git diff --stat` only, then start a new run or stop.
+- `failed_no_report`: the run ended without a result (for example killed by a content filter or a crash). Inspect the run branch with `git log` and `git diff --stat` only, then start a new run or stop.
 - `cancelled`: report it and clean up per step 6.
