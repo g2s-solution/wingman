@@ -1,19 +1,22 @@
 # wingman: implementation plan (Gate 0 to v0.1)
 
-Scope: everything needed for `os-apply` of a small change to run on a second account from the caller session, packaged as an installable plugin. Later phases are in `ROADMAP.md`; decisions, guardrails and the run lifecycle are in `DESIGN.md`.
+Scope: everything needed to delegate a small task as a one-shot run to a second account from the caller session, packaged as an installable plugin. Later phases are in `ROADMAP.md`; decisions, guardrails and the run lifecycle are in `DESIGN.md`.
 
 Rules for every step: no sensitive values read or printed (check files with `grep -c` first, report structure only, print env variable names but never values); work on a feature branch, never the base branch; each step ends with its check passing before the next starts.
 
 ## v0.1 scope
 
-In: one target chosen by `id` from the registry; `wingman_start`, `wingman_status`, `wingman_result`, `wingman_send`, `wingman_cancel`, `wingman_list`; env allowlist for the child; worktree cut from the caller's feature branch with setup and cleanup; guardrail prompt and the `WINGMAN_STATUS` line; the `os-apply` permission preset; no-recursion guard (`WINGMAN_DEPTH` plus disallowed wingman tools); masking and capping of everything returned; recording of `rate_limit_event` data on each run; `wingman-wait`; the `delegate-apply` skill; plugin packaging with a bundled server.
+In: one target, named by `id` or picked at random among eligible registry targets when `account` is omitted; one-shot runs (no resume or continue); `wingman_start`, `wingman_status`, `wingman_result`, `wingman_cancel`, `wingman_list`, `wingman_cleanup`; env allowlist for the child; worktree cut from the caller's feature branch with setup and cleanup; guardrail prompt and the `WINGMAN_STATUS` line; the `readonly` (default) and `edit` permission presets; no-recursion guard (`WINGMAN_DEPTH` plus disallowed wingman tools); masking and capping of everything returned; recording of `rate_limit_event` data on each run; `wingman-wait`; the `new-agent` skill; plugin packaging with a bundled server.
 
 Out (later phases): selection policy and `pick-account`, tags, scope, priority, account status machine, CLI subcommands, role-swap testing, queueing, other providers.
 
 ## Layout
 
 ```
-wingman/                      plugin root (this dir, to be renamed)
+.claude-plugin/marketplace.json   repo root is a marketplace; its one plugin has source ./wingman
+.mcp.json, .claude/, CLAUDE.md    repo tooling (context7, hooks), not part of the plugin
+another-login.sh, DESIGN.md ROADMAP.md PLAN.md   repo root
+wingman/                      plugin root (the repo-root .mcp.json stays separate)
   .claude-plugin/plugin.json
   .mcp.json                   points at ${CLAUDE_PLUGIN_ROOT}/server/dist/index.js
   server/                     TypeScript, Node 22, bundled with esbuild
@@ -29,9 +32,7 @@ wingman/                      plugin root (this dir, to be renamed)
     test/
     dist/index.js             committed bundle
   bin/wingman-wait            blocks until a run ends
-  skills/delegate-apply/SKILL.md
-  another-login.sh            first-time login helper
-  DESIGN.md ROADMAP.md PLAN.md
+  skills/new-agent/SKILL.md
 ```
 
 ## Steps
@@ -40,10 +41,10 @@ wingman/                      plugin root (this dir, to be renamed)
 1. User runs `./another-login.sh` (it signs in with `claude auth login` and prints the signed-in account).
 2. Isolation, without reading credential files: the second profile has its own `.credentials.json` (`ls -la`); `claude auth status --json` under each profile, compared with `jq` on account and organization fields, printing only `same` or `different`. Do not use the default profile's credentials mtime as a test (it changes on every token refresh).
 3. `CLAUDE_CONFIG_DIR=<dir> claude -p "reply ok" --output-format json` succeeds.
-4. Plugins and skills: `claude plugin list` under the second profile shows `ailab-agent`; a headless call runs a harmless skill (`os-onboard`); `/ailab-agent:os-apply` expands as a skill under `-p`.
+4. Plugins and skills: `claude plugin list` under the second profile lists the shared plugins; a headless call runs a harmless installed skill; a plugin skill invoked by name expands under `-p`.
 5. Real spawn context: spawn the child from inside a real Claude Code session (ideally from a stub MCP server), log env variable names only, and confirm the allowlist env makes the child serve the second account (same `auth status` comparison from the child).
 6. Shared state: compare `installed_plugins.json` hash and mtime before and after a second-profile start; change a setting in the second profile and confirm `settings.json` is still a symlink; check with `ls` that the second profile gets its own `remote-settings.json`.
-7. Engine comparison on the same trivial prompt: Agent SDK `query()`, `claude -p --output-format stream-json --verbose`, and the built-in background sessions (`--bg`, `claude agents --json`, `claude logs`, `claude stop`). Record what each loads (CLAUDE.md, skills, plugins), how resume works, whether `rate_limit_event` is emitted, how detach and cancel behave, whether detached children survive the desktop app ending a session, and whether the `Agent` tool needs an explicit allow in `-p`. Compare permission modes `acceptEdits` and `auto` for `os-apply`. Pick one engine; default if equal is `claude -p` stream-json.
+7. Engine comparison on the same trivial prompt: Agent SDK `query()`, `claude -p --output-format stream-json --verbose`, and the built-in background sessions (`--bg`, `claude agents --json`, `claude logs`, `claude stop`). Record what each loads (CLAUDE.md, skills, plugins), whether `rate_limit_event` is emitted, how detach and cancel behave, whether detached children survive the desktop app ending a session, and whether the `Agent` tool needs an explicit allow in `-p`. Compare permission modes `acceptEdits` and `auto` for the `edit` preset. Pick one engine; default if equal is `claude -p` stream-json.
 8. Note for the user: user-scope MCP servers (redmine, grafana) are per profile and will be absent in the target.
 
 Exit: engine, permission mode and env allowlist confirmed and written into `DESIGN.md`; findings listed.
@@ -65,28 +66,28 @@ Exit: engine, permission mode and env allowlist confirmed and written into `DESI
 
 ### 4. Runner (`runner.ts`, `adapters/claude.ts`, `guard.ts`, `worktree.ts`)
 - Runner talks to an adapter interface (build command, env, guard injection, event parsing, session id); only the Claude adapter exists.
-- Detached `spawn` in its own process group, `stdio` as a file fd (not a pipe). Child env from the allowlist in `DESIGN.md`; `WINGMAN_DEPTH` incremented; pre-assigned `--session-id`.
-- Appended prompt from `guard.ts` (sensitive values, base branch, no questions, `WINGMAN_STATUS` last line, "ask the Human" means `needs_input`); deny lists and the `os-apply` preset; `--permission-prompts none`; `AskUserQuestion`, plugin management and wingman tools disallowed; `git push` denied.
+- Detached `spawn` in its own process group, `stdio` as a file fd (not a pipe). Child env from the allowlist in `DESIGN.md`; `WINGMAN_DEPTH` incremented; pre-assigned `--session-id` (diagnostics only; no resume).
+- Appended prompt from `guard.ts` (sensitive values, base branch, no questions, `WINGMAN_STATUS` last line, "ask the Human" means `needs_input`); deny lists and the `readonly` and `edit` presets; `--permission-prompts none`; `AskUserQuestion`, plugin management and wingman tools disallowed; `git push` denied.
 - Status mapping: `WINGMAN_STATUS` line, missing line to `needs_input`, no result message to `failed_no_report`, plugin update detected to `needs_caller`, rate limit to `rate_limited` with `resetsAt` and `utilization` recorded.
-- Worktree: fetch with proxy variables removed (retry up to 4 times on a 503), `git worktree add` on `<caller-branch>-wm-<runid>` from the caller's feature-branch HEAD, refuse the base branch, per-repo and per-change lock, project setup command, cleanup on accept or discard, orphan pruning, cancel kills the process group after checking pid and start time.
-- Tests with a fake `claude` binary: normal finish, non-zero exit, timeout, cancel, rate limit, no result message, missing status line, worktree refused on the base branch, env allowlist drops `CLAUDE_CODE_*`, lock prevents a second run on the same change.
+- Worktree: fetch with proxy variables removed (retry up to 4 times on a 503), `git worktree add` on `<caller-branch>-wm-<runid>` from the caller's feature-branch HEAD, refuse the base branch, per-repo lock keyed by `lock_key`, setup command from the `setup` start parameter or a preset, cleanup on accept or discard, orphan pruning, cancel kills the process group after checking pid and start time.
+- Tests with a fake `claude` binary: normal finish, non-zero exit, timeout, cancel, rate limit, no result message, missing status line, worktree refused on the base branch, env allowlist drops `CLAUDE_CODE_*`, lock prevents a second run with the same `lock_key`.
 
 ### 5. MCP server (`index.ts`)
-- Tools: `wingman_start`, `wingman_status`, `wingman_result`, `wingman_send` (same account only, refused for `failed_no_report`), `wingman_cancel`, `wingman_list`.
+- Tools: `wingman_start`, `wingman_status`, `wingman_result`, `wingman_cancel`, `wingman_list`, `wingman_cleanup`. `account` is optional in `wingman_start` (random eligible target when omitted).
 - Stateless: every call reads run state from disk, so a run survives the caller session.
 - Check: MCP inspector call of each tool against the fake binary; then one real trivial run under the second profile.
 
 ### 6. `wingman-wait`
 - `bin/wingman-wait <run_id>`: poll `meta.json`, exit when the run is in a terminal status, print only the final status line.
 
-### 7. Skill `delegate-apply`
-- The caller runs `check-version-plugin.mjs --gate` first, commits the change artifacts on a feature branch, calls `wingman_start` with `/ailab-agent:os-apply <name>` and the `os-apply` preset, starts `wingman-wait` with `run_in_background`, then reads the masked report and the run branch with `git diff --stat` plus a sensitive-word `grep -c` before any hunk. It never reads `events.jsonl` or run logs. Unticked tasks and `Human:` findings go back to the user.
+### 7. Skill `new-agent`
+- Invoked as `/new-agent <task>`. The caller picks the `readonly` or `edit` preset and says which, writes a self-contained prompt, calls `wingman_start` (without `account` for a random target), starts `wingman-wait` with `run_in_background`, then reads the masked report; for edit runs it reviews the run branch with `git diff --stat` plus a sensitive-word `grep -c` before any hunk. It never reads `events.jsonl` or run logs. Cleanup is proposed case by case; merging and pushing stay with the caller.
 - The skill carries the sensitive-values rule and the English-for-review-comments rule.
 
 ### 8. End-to-end verification
 1. Trivial prompt on the second account through the MCP server.
 2. Detached survival: close the caller session mid-run, reopen, read the result.
-3. `os-apply` of a small real change in a throwaway repo: masked and capped report, run branch on the worktree, base branch and caller branch untouched, plugin install untouched.
+3. Delegate a small real task (for example a small code change in a throwaway repo): masked and capped report, run branch on the worktree, base branch and caller branch untouched, plugin install untouched.
 4. Rate-limit and `failed_no_report` paths with the fake binary.
 5. Review: independent reviewer subagent over the whole diff (correctness, security, DLP leakage, env leakage, process and worktree cleanup).
 
@@ -100,5 +101,5 @@ After step 1: steps 2 and 3 are independent (separate files); step 4 needs both;
 ## Open points
 
 - Engine and permission mode (decided in step 0).
-- The per-project setup command format for worktrees (from `openspec/config.yaml` or a preset).
+- The setup command format for worktrees (the `setup` start parameter or a preset).
 - Name of the plugin marketplace entry and where it is published internally.

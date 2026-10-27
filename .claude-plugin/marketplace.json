@@ -1,0 +1,11 @@
+{
+  "name": "wingman-marketplace",
+  "owner": { "name": "khoinv" },
+  "plugins": [
+    {
+      "name": "wingman",
+      "source": "./wingman",
+      "description": "Delegate work to a Claude Code session running under a second account."
+    }
+  ]
+}
