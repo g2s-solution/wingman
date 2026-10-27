@@ -4,10 +4,11 @@ import { isAbsolute } from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import pkg from '../package.json' with { type: 'json' };
+import { publicAccounts } from './accounts.js';
 import type { Account } from './types.js';
 import { TOOL_ITEM } from './guard.js';
 import { maskSecrets, safeSummary } from './mask.js';
-import { getAccount, isActive, targetsFor } from './registry.js';
+import { getAccount, isActive, loadAccounts, targetsFor } from './registry.js';
 import { reconcile } from './reconcile.js';
 import {
   listRuns,
@@ -95,7 +96,7 @@ async function chooseAccount(
   }
   const pool = targets.filter(isActive);
   if (pool.length === 0) {
-    throw new Error('No other active account is registered to run on');
+    throw new Error('No other active account is registered to run on; see `wingman accounts list`');
   }
   return pool[Math.min(Math.floor(random() * pool.length), pool.length - 1)]!;
 }
@@ -208,6 +209,11 @@ export function createHandlers(deps: ServerDeps = {}) {
           ...(input.limit !== undefined ? { limit: input.limit } : {}),
         }),
       };
+    },
+
+    async accounts(): Promise<Json> {
+      const { accounts } = await loadAccounts();
+      return { accounts: publicAccounts(accounts, callerProfile(env)) };
     },
 
     async cancel(input: { run_id: string }): Promise<Json> {
@@ -330,6 +336,15 @@ export function buildServer(deps: ServerDeps = {}): McpServer {
       inputSchema: { limit: z.number().int().positive().max(LIST_MAX).optional() },
     },
     wrap(h.list),
+  );
+  server.registerTool(
+    'wingman_accounts',
+    {
+      description:
+        'List the registered accounts: id, label, status (active or disabled), is_caller (your own profile, never a target) and provider. Read-only on purpose: an account entry names a command the runner executes, so no tool adds, changes or removes accounts; the Human does that with `wingman accounts ...` in a terminal.',
+      inputSchema: {},
+    },
+    wrap(h.accounts),
   );
   server.registerTool(
     'wingman_cleanup',

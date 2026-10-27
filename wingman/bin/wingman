@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 // usage: wingman wait <run_id> [--timeout-ms N] [--poll-ms N] [--grace-ms N]
 //        wingman gc [--older-than-days N] [--dry-run]
+//        wingman accounts <list|add|disable|enable|remove> [options]
+//        wingman doctor [--online] [--json]
 // Thin launcher: the commands live in the server bundle.
 'use strict';
 const { spawn } = require('node:child_process');
@@ -14,8 +16,8 @@ if (!existsSync(bundle)) {
 }
 const args = process.argv.slice(2);
 // anything else would start the MCP server
-if (!['wait', 'gc'].includes(args[0])) {
-  process.stderr.write('usage: wingman <wait|gc> [options]\n');
+if (!['wait', 'gc', 'accounts', 'doctor'].includes(args[0])) {
+  process.stderr.write('usage: wingman <wait|gc|accounts|doctor> [options]\n');
   process.exit(2);
 }
 const child = spawn(process.execPath, [bundle, ...args], { stdio: 'inherit' });

@@ -22,6 +22,7 @@ import {
 
 const DIST = join(import.meta.dirname, '..', 'dist', 'index.js');
 const TOOLS = [
+  'wingman_accounts',
   'wingman_cancel',
   'wingman_cleanup',
   'wingman_list',
@@ -386,7 +387,7 @@ describe('send, cancel, cleanup', () => {
     const client = await connect();
     const names = (await client.listTools()).tools.map((t) => t.name);
     expect(names).not.toContain('wingman_send');
-    expect(names).toHaveLength(6);
+    expect(names).toHaveLength(TOOLS.length);
   });
 });
 
