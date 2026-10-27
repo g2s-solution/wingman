@@ -23,6 +23,7 @@ import {
   makeRepo,
   readLog,
   tmp,
+  waitUntil,
 } from './helpers.js';
 
 let work: string;
@@ -69,6 +70,13 @@ function ctx(mode: string, extra: Partial<StartRunOptions> = {}, extraExports = 
     ...extra,
   };
   return { log, opts };
+}
+
+async function eventsContain(id: string, text: string): Promise<void> {
+  const events = join(runDir(id), 'events.jsonl');
+  await waitUntil(() => existsSync(events) && readFileSync(events, 'utf8').includes(text), {
+    what: `events.jsonl of ${id} to contain ${text}`,
+  });
 }
 
 async function finish(meta: RunMeta, timeoutMs = 20000): Promise<RunMeta> {
@@ -150,8 +158,7 @@ describe('process hygiene (M5)', () => {
     expect(meta.status).toBe('done');
     expect(Date.now() - t0).toBeLessThan(10000);
     const gc = Number(readFileSync(gcFile, 'utf8'));
-    const deadline = Date.now() + 5000;
-    while (isAlive(gc) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 50));
+    await waitUntil(() => !isAlive(gc), { what: 'the grandchild to be reaped' });
     expect(isAlive(gc)).toBe(false);
   });
 
@@ -179,7 +186,7 @@ describe('process hygiene (M5)', () => {
 describe('cancel', () => {
   it('kills the process group and marks the run cancelled', async () => {
     const started = await startRun(ctx('hang').opts);
-    await new Promise((r) => setTimeout(r, 400));
+    await eventsContain(started.id, '"type":"assistant"');
     const res = await cancelRun(started.id);
     expect(res).toMatchObject({ cancelled: true, killed: true });
     const meta = await finish(started);
@@ -277,7 +284,7 @@ describe('environment and secrets', () => {
   it('child output goes to events.jsonl only: supervisor stdout and stderr are that file, no pipe', async () => {
     const started = await startRun(ctx('hang').opts);
     try {
-      await new Promise((r) => setTimeout(r, 300));
+      await eventsContain(started.id, '"subtype":"init"');
       const pid = started.pid as number;
       const events = join(runDir(started.id), 'events.jsonl');
       expect(readlinkSync(`/proc/${pid}/fd/1`)).toBe(events);
@@ -353,7 +360,9 @@ describe('worktree runs', () => {
       expect(first.branch).toBe('feat/run');
       expect(first.run_branch).toBe(`feat/run-wm-${first.id}`);
       expect(first.worktree).toBe(join(worktreesDir(), first.id));
-      await new Promise((r) => setTimeout(r, 400));
+      await waitUntil(() => existsSync(log) && readFileSync(log, 'utf8').trim() !== '', {
+        what: 'the agent to log its start',
+      });
       const rec = readLog(log)[0]!;
       expect(rec.cwd).toBe(join(first.worktree as string, 'sub'));
       await expect(startRun({ ...opts })).rejects.toThrow(/already held/);
@@ -386,30 +395,23 @@ describe('waitForRun', () => {
   });
 });
 
-async function until(cond: () => boolean, what: string, ms = 45_000): Promise<void> {
-  const deadline = Date.now() + ms;
-  while (!cond()) {
-    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
-    await new Promise((r) => setTimeout(r, 50));
-  }
-}
-
 describe('agent outliving a killed supervisor', () => {
   it('reconcile takes down the orphaned process group', async () => {
     const started = await startRun(ctx('hang').opts);
     const pid = started.pid as number;
-    await until(() => groupMembers(pid).length >= 2, 'supervisor and agent in the group');
+    await waitUntil(() => groupMembers(pid).length >= 2, {
+      what: 'supervisor and agent in the group',
+    });
     // the agent writes to a pipe to the supervisor: killing it mid-startup would EPIPE the agent
-    const events = join(runDir(started.id), 'events.jsonl');
-    await until(
-      () => existsSync(events) && readFileSync(events, 'utf8').includes('"type":"assistant"'),
-      'the agent to be idle after its first output',
-    );
+    await eventsContain(started.id, '"type":"assistant"');
     process.kill(pid, 'SIGKILL'); // only the supervisor: the agent stays in its group
-    await until(() => !isAlive(pid), 'the killed supervisor to be reaped');
+    await waitUntil(() => !isAlive(pid), { what: 'the killed supervisor to be reaped' });
     expect(groupMembers(pid).length).toBeGreaterThan(0);
 
     expect(reconcile(readMeta(started.id)).status).toBe('failed_no_report');
-    await until(() => groupMembers(pid).length === 0, 'the orphaned group to be gone');
+    await waitUntil(() => groupMembers(pid).length === 0, {
+      timeoutMs: 45_000,
+      what: 'the orphaned group to be gone',
+    });
   }, 90_000);
 });

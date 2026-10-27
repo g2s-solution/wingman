@@ -69,3 +69,15 @@ export function makeRepo(branch = 'main'): string {
 export function git(dir: string, ...args: string[]): string {
   return execFileSync('git', args, { cwd: dir, encoding: 'utf8' }).trim();
 }
+
+export async function waitUntil(
+  cond: () => boolean | Promise<boolean>,
+  { timeoutMs = 20000, pollMs = 25, what = 'the condition' } = {},
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!(await cond())) {
+    if (Date.now() > deadline)
+      throw new Error(`timed out after ${timeoutMs} ms waiting for ${what}`);
+    await new Promise((r) => setTimeout(r, pollMs));
+  }
+}

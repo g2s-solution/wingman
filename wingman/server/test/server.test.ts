@@ -10,7 +10,15 @@ import { saveAccounts } from '../src/registry.js';
 import { readMeta } from '../src/runs.js';
 import { buildServer, createHandlers } from '../src/tools.js';
 import { waitForRun } from '../src/runner.js';
-import { bundleSupervisor, git, makeLauncher, makeRepo, readLog, tmp } from './helpers.js';
+import {
+  bundleSupervisor,
+  git,
+  makeLauncher,
+  makeRepo,
+  readLog,
+  tmp,
+  waitUntil,
+} from './helpers.js';
 
 const DIST = join(import.meta.dirname, '..', 'dist', 'index.js');
 const TOOLS = [
@@ -333,7 +341,8 @@ describe('output safety', () => {
 
 describe('send, cancel, cleanup', () => {
   it('result says still running, cleanup is refused, cancel works', async () => {
-    await register(launcher('hang').command);
+    const hang = launcher('hang');
+    await register(hang.command);
     const client = await connect();
     const started = await call(client, 'wingman_start', {
       account: 'target',
@@ -349,7 +358,7 @@ describe('send, cancel, cleanup', () => {
     expect(cleanup.isError).toBe(true);
     expect(cleanup.text).toMatch(/still running/);
 
-    await new Promise((r) => setTimeout(r, 400));
+    await waitUntil(() => existsSync(hang.log), { what: 'the agent to start' });
     const cancelled = await call(client, 'wingman_cancel', { run_id: id });
     expect(cancelled.data).toMatchObject({ run_id: id, cancelled: true });
     await settle(id);
