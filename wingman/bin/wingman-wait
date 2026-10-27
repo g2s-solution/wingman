@@ -1,0 +1,97 @@
+#!/usr/bin/env node
+// usage: wingman-wait <run_id> [--timeout-ms N] [--poll-ms N] [--grace-ms N]
+// Prints one line, `WINGMAN_RUN <id> <status>`, and nothing else on stdout.
+// Exit: 0 done|partial, 1 other terminal status, 2 unknown run or bad usage, 3 timeout.
+'use strict';
+const { readFileSync } = require('node:fs');
+const { homedir } = require('node:os');
+const { join } = require('node:path');
+
+// Keep in sync with TERMINAL_STATUSES in wingman/server/src/types.ts.
+const TERMINAL = new Set([
+  'done',
+  'partial',
+  'blocked',
+  'needs_input',
+  'needs_caller',
+  'failed',
+  'failed_no_report',
+  'rate_limited',
+  'cancelled',
+]);
+
+function usage(msg) {
+  process.stderr.write(`wingman-wait: ${msg}\nusage: wingman-wait <run_id> [--timeout-ms N] [--poll-ms N] [--grace-ms N]\n`);
+  process.exit(2);
+}
+
+const args = process.argv.slice(2);
+let id;
+const opt = { timeout: 0, poll: 1000, grace: 5000 };
+const flags = { '--timeout-ms': 'timeout', '--poll-ms': 'poll', '--grace-ms': 'grace' };
+for (let i = 0; i < args.length; i++) {
+  const a = args[i];
+  if (a in flags) {
+    const n = Number(args[++i]);
+    if (!Number.isFinite(n) || n < 0) usage(`${a} needs a non-negative number`);
+    opt[flags[a]] = n;
+  } else if (a.startsWith('-') || id !== undefined) {
+    usage(`unexpected argument ${a}`);
+  } else {
+    id = a;
+  }
+}
+if (id === undefined) usage('run_id is required');
+if (!/^[A-Za-z0-9_-]{1,64}$/.test(id)) usage('invalid run_id');
+opt.poll = Math.max(opt.poll, 10);
+
+const home = process.env.WINGMAN_HOME || join(homedir(), '.wingman');
+const metaPath = join(home, 'runs', id, 'meta.json');
+
+function finish(status) {
+  process.stdout.write(`WINGMAN_RUN ${id} ${status}\n`);
+  process.exit(status === 'done' || status === 'partial' ? 0 : 1);
+}
+
+function alive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return e.code === 'EPERM';
+  }
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function main() {
+  const start = Date.now();
+  let deadSince = 0;
+  let unreadable = 0;
+  for (;;) {
+    let meta;
+    try {
+      meta = JSON.parse(readFileSync(metaPath, 'utf8'));
+      unreadable = 0;
+    } catch (e) {
+      if (e.code === 'ENOENT') usage(`unknown run ${id}`);
+      // meta.json may be mid-write; tolerate a few torn reads
+      if (++unreadable > 5) usage(`unreadable meta for run ${id}`);
+    }
+    if (meta) {
+      const status = typeof meta.status === 'string' ? meta.status : '';
+      if (TERMINAL.has(status)) finish(status);
+      if (status !== 'running') usage(`unreadable meta for run ${id}`);
+      if (Number.isInteger(meta.pid) && meta.pid > 0 && !alive(meta.pid)) {
+        deadSince ||= Date.now();
+        if (Date.now() - deadSince >= opt.grace) finish('failed_no_report');
+      } else {
+        deadSince = 0;
+      }
+    }
+    if (opt.timeout > 0 && Date.now() - start >= opt.timeout) process.exit(3);
+    await sleep(opt.poll);
+  }
+}
+
+main();
