@@ -229,26 +229,20 @@ LAUNCH
 fi
 
 # Register the profile for wingman. The registry holds paths only, never credentials.
-if [ "${launcher_ok:-}" = 1 ] && command -v node >/dev/null 2>&1; then
-  WM_HOME="${WINGMAN_HOME:-$HOME/.wingman}" WM_ID="${name#claude-}" WM_LABEL="$name" \
-    WM_DIR="$dir" WM_CMD="$launcher" node -e '
-const fs = require("fs"), path = require("path");
-const home = process.env.WM_HOME, file = path.join(home, "accounts.json");
-fs.mkdirSync(home, { recursive: true, mode: 0o700 });
-let reg = { accounts: [] };
-if (fs.existsSync(file)) {
-  try { reg = JSON.parse(fs.readFileSync(file, "utf8")); } catch { console.error("skip wingman registration: " + file + " is not valid JSON"); process.exit(0); }
-}
-if (!Array.isArray(reg.accounts)) reg.accounts = [];
-const entry = { id: process.env.WM_ID, label: process.env.WM_LABEL, config_dir: process.env.WM_DIR, provider: "claude", command: process.env.WM_CMD };
-const i = reg.accounts.findIndex((a) => a.id === entry.id);
-const prev = i >= 0 ? reg.accounts[i] : {};
-if (i >= 0) reg.accounts[i] = { ...prev, ...entry }; else reg.accounts.push(entry);
-const tmp = file + "." + process.pid + ".tmp";
-fs.writeFileSync(tmp, JSON.stringify(reg, null, 2) + "\n", { mode: 0o600 });
-fs.renameSync(tmp, file);
-console.log("wingman account " + (i >= 0 ? "updated" : "registered") + ": " + entry.id + " (" + file + ")");
-'
+if [ "${launcher_ok:-}" = 1 ]; then
+  ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  bundle="$ROOT/wingman/server/dist/index.js"
+  wm_id="${name#claude-}"
+  wm_cmd=(node "$bundle" accounts add --upsert --id "$wm_id" --label "$name" --config-dir "$dir" --command "$launcher")
+  if ! command -v node >/dev/null 2>&1 || [ ! -f "$bundle" ]; then
+    echo "warning: wingman registration skipped (node or $bundle is missing); register later with:" >&2
+    echo "  $(printf '%q ' "${wm_cmd[@]}")" >&2
+  elif WINGMAN_HOME="${WINGMAN_HOME:-$HOME/.wingman}" "${wm_cmd[@]}"; then
+    :
+  else
+    echo "warning: wingman registration failed; register later with:" >&2
+    echo "  $(printf '%q ' "${wm_cmd[@]}")" >&2
+  fi
 fi
 
 after="$(default_logged_in)"
