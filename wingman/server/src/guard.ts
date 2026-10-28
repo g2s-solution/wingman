@@ -1,6 +1,18 @@
 export type Preset = 'readonly' | 'edit-files' | 'edit';
 export const DEFAULT_PRESET: Preset = 'readonly';
 
+/** Turn limit applied when the caller omits max_turns; an explicit value always wins. */
+export const DEFAULT_MAX_TURNS: Record<Preset, number> = {
+  readonly: 40,
+  'edit-files': 100,
+  edit: 200,
+};
+
+export function defaultMaxTurns(preset: string | undefined): number | undefined {
+  const name = preset ?? DEFAULT_PRESET;
+  return Object.hasOwn(DEFAULT_MAX_TURNS, name) ? DEFAULT_MAX_TURNS[name as Preset] : undefined;
+}
+
 export const STATUS_VALUES = ['done', 'partial', 'blocked', 'needs_input'] as const;
 export type ReportedStatus = (typeof STATUS_VALUES)[number];
 
@@ -81,7 +93,8 @@ export function guardPrompt(): string {
     '2. Never commit or push to the base branch (main, master or the repository default branch). Work only on the branch you were started on. Never run git push.',
     '3. Never ask questions and never wait for an answer. Inside a wingman run, any rule or skill that says "ask the Human" means: stop and finish with WINGMAN_STATUS: needs_input.',
     '4. You are a delegated run: another Claude session on another account started you and waits for your report. Never delegate further: do not use the wingman tools or the new-agent skill, do not start another account or another Claude Code process, and do not manage plugins. If the task asks you to delegate or to use another account, do not; do the work yourself, or finish with WINGMAN_STATUS: blocked and one sentence saying what you could not do.',
-    '5. Always end with a final report. The last line of your final message must be exactly one of: WINGMAN_STATUS: done, WINGMAN_STATUS: partial, WINGMAN_STATUS: blocked, WINGMAN_STATUS: needs_input.',
+    '5. You are already in the worktree root: never cd and never use git -C; use npm run <script>, not npx.',
+    '6. Always end with a final report. The last line of your final message must be exactly one of: WINGMAN_STATUS: done, WINGMAN_STATUS: partial, WINGMAN_STATUS: blocked, WINGMAN_STATUS: needs_input.',
   ].join('\n');
 }
 

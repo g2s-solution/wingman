@@ -1,4 +1,5 @@
 import { assertToolItems } from '../guard.js';
+import { safeSummary } from '../mask.js';
 import type { Account, Adapter, AgentEvent, RateLimitInfo, StartSpec } from '../types.js';
 
 const ALLOWED_ENV = new Set([
@@ -34,6 +35,19 @@ function str(value: unknown): string | undefined {
 
 function num(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+const DENIAL_HEAD_MAX = 40;
+
+/** Tool name, plus for Bash the first two masked words of the command: never the full command line. */
+function denialText(denial: Record<string, unknown>): string {
+  const tool = denial.tool_name as string;
+  if (tool !== 'Bash' || !isObject(denial.tool_input)) return tool;
+  const command = str(denial.tool_input.command);
+  if (command === undefined) return tool;
+  const head = command.trim().split(/\s+/).slice(0, 2).join(' ');
+  if (head === '') return tool;
+  return `Bash(${safeSummary(head, DENIAL_HEAD_MAX)})`;
 }
 
 export const claudeAdapter: Adapter = {
@@ -115,7 +129,7 @@ export const claudeAdapter: Adapter = {
         const denials: string[] = [];
         if (Array.isArray(data.permission_denials)) {
           for (const d of data.permission_denials) {
-            if (isObject(d) && typeof d.tool_name === 'string') denials.push(d.tool_name);
+            if (isObject(d) && typeof d.tool_name === 'string') denials.push(denialText(d));
           }
         }
         const isError =
