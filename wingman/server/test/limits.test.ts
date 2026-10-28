@@ -463,13 +463,17 @@ describe('doctor', () => {
   it('reports a limited account as a warning and does not fail', async () => {
     mkdirSync(join(home, 'state'), { recursive: true });
     mkdirSync(join(home, 'profile-a'));
-    await withCaller(
-      account('a', {
-        status: 'rate_limited',
-        limited_until: at(HOUR).toISOString(),
-        command: process.execPath,
-      }),
-    );
+    // every registered command must resolve, or the check fails on a machine without `claude`
+    await saveAccounts({
+      accounts: [
+        account('a', {
+          status: 'rate_limited',
+          limited_until: at(HOUR).toISOString(),
+          command: process.execPath,
+        }),
+        account('self', { config_dir: callerDir, command: process.execPath }),
+      ],
+    });
     const deps = {
       env: { ...process.env, WINGMAN_HOME: join(home, 'state'), CLAUDE_CONFIG_DIR: callerDir },
       homeDir: home,
