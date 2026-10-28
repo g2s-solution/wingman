@@ -28644,7 +28644,7 @@ var accountSchema = external_exports.object({
   command: external_exports.string().min(1).default("claude"),
   status: external_exports.string().min(1).optional(),
   limited_until: external_exports.string().min(1).optional()
-});
+}).passthrough();
 var registrySchema = external_exports.object({ accounts: external_exports.array(accountSchema) });
 async function saveAccounts(registry2) {
   const parsed = registrySchema.parse(registry2);
@@ -29127,11 +29127,17 @@ function publicAccounts(accounts, caller, now = /* @__PURE__ */ new Date(), coun
     runs: r.runs
   }));
 }
+var MAX_EPOCH_SECONDS = 4102444800;
 var ISO_TIME = /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2}))?$/;
 function parseUntil(raw, now) {
   const bad = "--until must be an ISO time with Z or an offset (2026-11-01T08:00:00Z), a date (2026-11-01) or epoch seconds";
   let until;
   if (/^\d{1,13}$/.test(raw)) {
+    if (Number(raw) > MAX_EPOCH_SECONDS) {
+      throw new AccountsUsageError(
+        `--until ${raw} is too far ahead for epoch seconds (a millisecond timestamp?); pass seconds`
+      );
+    }
     until = new Date(Number(raw) * 1e3);
   } else {
     const m = ISO_TIME.exec(raw);
@@ -31027,7 +31033,7 @@ async function runSupervisor(runId) {
   };
   if (sessionRateLimit) patch.rate_limit = sessionRateLimit;
   if (outcome.status === "rate_limited") {
-    await recordRateLimit(current2.account, rejectedRateLimit ?? sessionRateLimit);
+    await recordRateLimit(current2.account, rejectedRateLimit);
   }
   try {
     updateStatus(runId, outcome.status, patch);
@@ -39538,24 +39544,20 @@ function createHandlers(deps = {}) {
       };
     },
     async status(input2) {
-      const meta3 = loadMeta(input2.run_id);
+      loadMeta(input2.run_id);
       const { result, ...summary } = runSummary(input2.run_id);
-      return withHint({ ...summary, has_result: result !== null }, meta3);
+      return withHint({ ...summary, has_result: result !== null }, summary);
     },
     async result(input2) {
       const meta3 = loadMeta(input2.run_id);
       if (!TERMINAL_STATUSES.includes(meta3.status)) {
         return { id: meta3.id, status: meta3.status, message: "still running" };
       }
-      return withHint(
-        {
-          ...runSummary(input2.run_id, {
-            ...input2.offset !== void 0 ? { offset: input2.offset } : {},
-            ...input2.limit !== void 0 ? { limit: input2.limit } : {}
-          })
-        },
-        meta3
-      );
+      const summary = runSummary(input2.run_id, {
+        ...input2.offset !== void 0 ? { offset: input2.offset } : {},
+        ...input2.limit !== void 0 ? { limit: input2.limit } : {}
+      });
+      return withHint({ ...summary }, summary);
     },
     async accounts() {
       const { accounts } = await loadAccounts();

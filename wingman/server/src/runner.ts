@@ -313,7 +313,7 @@ export async function runSupervisor(runId: string): Promise<void> {
   if (sessionRateLimit) patch.rate_limit = sessionRateLimit;
   // before the status flips, so a caller that sees `rate_limited` also sees the account limited
   if (outcome.status === 'rate_limited') {
-    await recordRateLimit(current.account, rejectedRateLimit ?? sessionRateLimit);
+    await recordRateLimit(current.account, rejectedRateLimit);
   }
   try {
     updateStatus(runId, outcome.status, patch);

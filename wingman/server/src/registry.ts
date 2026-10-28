@@ -5,15 +5,18 @@ import { z } from 'zod';
 import { accountsFile } from './paths.js';
 import type { Account } from './types.js';
 
-const accountSchema = z.object({
-  id: z.string().min(1),
-  label: z.string().min(1),
-  config_dir: z.string().min(1),
-  provider: z.string().min(1).default('claude'),
-  command: z.string().min(1).default('claude'),
-  status: z.string().min(1).optional(),
-  limited_until: z.string().min(1).optional(),
-});
+// passthrough: a write-back must not drop keys a newer version or a hand edit added
+const accountSchema = z
+  .object({
+    id: z.string().min(1),
+    label: z.string().min(1),
+    config_dir: z.string().min(1),
+    provider: z.string().min(1).default('claude'),
+    command: z.string().min(1).default('claude'),
+    status: z.string().min(1).optional(),
+    limited_until: z.string().min(1).optional(),
+  })
+  .passthrough();
 
 const registrySchema = z.object({ accounts: z.array(accountSchema) });
 

@@ -247,9 +247,9 @@ export function createHandlers(deps: ServerDeps = {}) {
     },
 
     async status(input: { run_id: string }): Promise<Json> {
-      const meta = loadMeta(input.run_id);
+      loadMeta(input.run_id);
       const { result, ...summary } = runSummary(input.run_id);
-      return withHint({ ...summary, has_result: result !== null }, meta);
+      return withHint({ ...summary, has_result: result !== null }, summary);
     },
 
     async result(input: { run_id: string; offset?: number; limit?: number }): Promise<Json> {
@@ -257,15 +257,11 @@ export function createHandlers(deps: ServerDeps = {}) {
       if (!TERMINAL_STATUSES.includes(meta.status)) {
         return { id: meta.id, status: meta.status, message: 'still running' };
       }
-      return withHint(
-        {
-          ...runSummary(input.run_id, {
-            ...(input.offset !== undefined ? { offset: input.offset } : {}),
-            ...(input.limit !== undefined ? { limit: input.limit } : {}),
-          }),
-        },
-        meta,
-      );
+      const summary = runSummary(input.run_id, {
+        ...(input.offset !== undefined ? { offset: input.offset } : {}),
+        ...(input.limit !== undefined ? { limit: input.limit } : {}),
+      });
+      return withHint({ ...summary }, summary);
     },
 
     async accounts(): Promise<Json> {

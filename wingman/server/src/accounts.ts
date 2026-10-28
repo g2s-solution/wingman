@@ -88,6 +88,9 @@ export function publicAccounts(
   }));
 }
 
+// 2100-01-01: anything above is almost certainly milliseconds
+const MAX_EPOCH_SECONDS = 4102444800;
+
 const ISO_TIME =
   /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2}))?$/;
 
@@ -97,6 +100,11 @@ export function parseUntil(raw: string, now: Date): Date {
     '--until must be an ISO time with Z or an offset (2026-11-01T08:00:00Z), a date (2026-11-01) or epoch seconds';
   let until: Date;
   if (/^\d{1,13}$/.test(raw)) {
+    if (Number(raw) > MAX_EPOCH_SECONDS) {
+      throw new AccountsUsageError(
+        `--until ${raw} is too far ahead for epoch seconds (a millisecond timestamp?); pass seconds`,
+      );
+    }
     until = new Date(Number(raw) * 1000);
   } else {
     const m = ISO_TIME.exec(raw);

@@ -15,7 +15,7 @@ import {
   saveAccounts,
 } from '../src/registry.js';
 import { startRun, waitForRun } from '../src/runner.js';
-import { createRun, runCountsByAccount, updateStatus } from '../src/runs.js';
+import { createRun, readMeta, runCountsByAccount, updateStatus } from '../src/runs.js';
 import { createHandlers } from '../src/tools.js';
 import type { Account, RunMeta } from '../src/types.js';
 import { bundleSupervisor, makeLauncher, tmp } from './helpers.js';
@@ -220,6 +220,25 @@ describe('parseUntil', () => {
     expect(() => parseUntil('2026-11-01T00:00:00Z', T0)).toThrow(/not in the future/);
     expect(() => parseUntil('2026-10-31', T0)).toThrow(/not in the future/);
     expect(() => parseUntil('1', T0)).toThrow(/not in the future/);
+  });
+
+  it('rejects a millisecond timestamp passed as epoch seconds', () => {
+    expect(() => parseUntil('1793491260000', T0)).toThrow(/milliseconds?/);
+    expect(parseUntil('4102444800', T0).toISOString()).toBe('2100-01-01T00:00:00.000Z');
+    expect(() => parseUntil('4102444801', T0)).toThrow(/milliseconds?/);
+  });
+});
+
+describe('registry write-back keeps unknown keys', () => {
+  it('survives markLimited and clearLimited', async () => {
+    await withCaller(account('a'));
+    const raw = rawRegistry();
+    raw.accounts[0]!.future_field = { keep: 'me' };
+    writeFileSync(registryFile(), JSON.stringify(raw));
+    await markLimited('a', new Date(Date.now() + HOUR));
+    expect(rawRegistry().accounts[0]).toMatchObject({ future_field: { keep: 'me' } });
+    await clearLimited('a');
+    expect(rawRegistry().accounts[0]).toMatchObject({ future_field: { keep: 'me' } });
   });
 });
 
@@ -492,6 +511,15 @@ describe('a run that ends rate_limited marks its account', () => {
     const h = createHandlers({ env, supervisorEntry: entry, random: () => 0 });
 
     const started = await h.start({ account: 'a', prompt: 'task', cwd: tmp('cwd') });
+    // read the run first, the registry second: once a caller can see rate_limited, the account must already be limited
+    let seenLimitedRun = false;
+    for (let i = 0; i < 2000 && !seenLimitedRun; i++) {
+      seenLimitedRun = readMeta(started.run_id as string).status === 'rate_limited';
+      const acct = (await loadAccounts()).accounts.find((x) => x.id === 'a')!;
+      if (seenLimitedRun) expect(acct.status).toBe('rate_limited');
+      else await new Promise((r) => setTimeout(r, 5));
+    }
+    expect(seenLimitedRun).toBe(true);
     const finished = await waitForRun(started.run_id as string, { timeoutMs: 20000, pollMs: 50 });
     expect(finished.status).toBe('rate_limited');
 
