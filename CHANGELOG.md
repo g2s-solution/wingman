@@ -2,6 +2,16 @@
 
 Versions are the plugin version in `wingman/.claude-plugin/plugin.json`. Claude Code only updates an installed plugin when this number changes.
 
+## 0.4.1
+
+- Denied commands are reported: `permission_denials` keeps the tool name and, for `Bash`, the first two masked words of the command (for example `Bash(cd /work)`). A `partial` run with denials gets a `hint` in `wingman_status` and `wingman_result` naming up to 5 denied heads.
+- New rule 5 in the appended prompt: the run is already in the worktree root; no `cd`, no `git -C`, `npm run <script>` not `npx`. The final-report rule is now rule 6.
+- Every `wingman_*` tool rejects unknown parameters with an error naming the key and, when close, the key meant (`unknown parameter "result_offset" for wingman_result (did you mean "offset"?)`). `wingman_result` on a running run adds a hint to wait with `bin/wingman-wait`.
+- `wingman_result` paging adds `pages_left` and a `next` line next to `result_next_offset`.
+- `wingman_cleanup` `accept` on a run with a branch returns `run_branch`, `diff_stat` (capped, never the diff) and a review note; on a readonly run it returns a note that accept and discard are equivalent. `discard` is unchanged.
+- Default `max_turns` by preset when omitted: `readonly` 40, `edit-files` 100, `edit` 200; an explicit value always wins.
+- Skill `new-agent`: hard requirement to check `diff_stat`/`git diff --stat` and the secret-count grep before merging an edit run, a fallback checklist for the built-in Agent tool, guidance on `edit-files` and denied heads, and the paging fields.
+
 ## 0.4.0
 
 - Account status: a run that ends `rate_limited` marks its account `rate_limited` with `limited_until` (from the run's reset time) in the registry. The limit expires on read, with no background job; old registry files without the new field stay valid.

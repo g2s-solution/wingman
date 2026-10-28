@@ -19,6 +19,8 @@ Use the built-in Agent tool instead, and say why in one line, when:
 
 Never start both for the same task unless the user asks.
 
+Fallback checklist: when you use the built-in Agent tool instead of wingman, state in one line which bullet above applies (tools missing, target rate limited or two failed runs, commands needed under `readonly`, or live context needed). If none applies, use wingman.
+
 ## Rules
 
 - Never print, send or write sensitive values: tokens (Bearer, JWT, PAT, API keys), passwords, secrets, private keys, credentials in URLs, `.env` values, PII. Do not cat/Read files that may hold them.
@@ -29,17 +31,17 @@ Never start both for the same task unless the user asks.
 ## Steps
 
 1. **Task and account.** The rest of the line after `/new-agent` is the task. An optional `--account <id>` names the target. Without it, call `wingman_start` without `account`; the server picks a random eligible target.
-2. **Preset.** Choose it yourself and say which: `readonly` for lookup and review; `edit-files` when only files change and no command is needed (documentation, config, code edits that you will test yourself); `edit` when the run must run commands (tests, builds). `edit` runs arbitrary code under the target account; its deny rules are advisory, not a sandbox, so use it only for tasks you would trust a subagent with.
+2. **Preset.** Choose it yourself and say which: `readonly` for lookup and review; `edit-files` when only files change and no command is needed (documentation, config, code edits that you will test yourself): prefer it over `edit` whenever you can run the checks yourself afterwards; `edit` when the run must run commands (tests, builds). A command the preset does not allow is denied, not asked about: the run ends `partial` and the report lists the denied heads (the tool, and for `Bash` the first two words of the command) in `permission_denials` and in a `hint`; fix the prompt (the run starts in the worktree root: no `cd`, no `git -C`, `npm run <script>` not `npx`) or start a new run with another preset. `max_turns` defaults by preset (`readonly` 40, `edit-files` 100, `edit` 200); pass it only to change that. `edit` runs arbitrary code under the target account; its deny rules are advisory, not a sandbox, so use it only for tasks you would trust a subagent with.
    - **Worktree:** inside a git repo every run gets its own worktree by default, also when you are on the base branch (`main`, `master`): the target never touches your checkout. Pass `worktree: false` only for a pure lookup that needs no isolation; it is refused on a base branch. A detached HEAD is refused either way. `lock_key` (optional) stops two runs in the same repo with the same key, and needs a worktree.
    - **Branch:** an `edit-files` or `edit` run commits on a run branch (`<branch>-wm-<id>`, or `wingman/<id>` from a base branch) that you merge into your own feature branch. A `readonly` run gets a detached worktree and no branch.
    - Call `wingman_cleanup` afterwards.
 3. **Prompt.** The run has no conversation context, so write a self-contained prompt: goal, paths, constraints, expected output. Ask for a short report with the conclusion and any open question first, details after. For `edit`, commit what the run needs first (the worktree is cut from your current HEAD); changes land on a run branch. Keep the returned `run_id` and run branch.
 4. **Wait without polling.** Start `${CLAUDE_PLUGIN_ROOT}/bin/wingman-wait <run_id>` with Bash `run_in_background`. It prints `WINGMAN_RUN <id> <status>` and wakes you on exit (0 for done/partial, 1 other terminal statuses, 2 unknown run, 3 timeout).
-5. **On wake, read `wingman_result` to the end.** It is masked and comes in pages of 4000 characters: while the answer has `result_next_offset`, call again with `offset` set to it, and only judge the report once that field is gone (`result_total_chars` is the full length). For `edit` runs, review the run branch from the main checkout:
-   - `git diff --stat <caller-branch>...<run-branch>`
+5. **On wake, read `wingman_result` to the end.** It is masked and comes in pages of 4000 characters: while the answer has `result_next_offset`, call again with `offset` set to it (`pages_left` says how many pages remain, `next` says what to call), and only judge the report once that field is gone (`result_total_chars` is the full length). If `wingman_result` says `still running`, do not re-read: wait with `wingman-wait`. For `edit` and `edit-files` runs, before merging you must do both of these from the main checkout (a hard requirement, not a suggestion):
+   - `git diff --stat <caller-branch>...<run-branch>` (`wingman_cleanup` with `accept` also returns it as `diff_stat` with the `run_branch`; it is the same stat, not a review of the content)
    - `git diff <caller-branch>...<run-branch> | grep -c -iE 'bearer|token|secret|password|jwt|authorization|api[_-]?key'`
-   - Read a hunk only when the count is 0 or the match is judged harmless by file and function name, never by printing the line.
-6. **Cleanup, case by case.** Propose it yourself: accept or discard the worktree, then `wingman_cleanup` (the run branch, if there is one, is kept; readonly runs have none). Ask the user only for destructive or ambiguous cases. Merging and pushing stay with the caller.
+   - Read a hunk only when the count is 0 or the match is judged harmless by file and function name, never by printing the line. Do not merge a branch whose stat and count you have not seen.
+6. **Cleanup, case by case.** Propose it yourself: accept or discard the worktree, then `wingman_cleanup` (the run branch, if there is one, is kept; readonly runs have none, and for them `accept` and `discard` are equivalent). Ask the user only for destructive or ambiguous cases. Merging and pushing stay with the caller.
 
 ## Statuses
 
