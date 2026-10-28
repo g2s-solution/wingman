@@ -94,7 +94,7 @@ describe('maybeRunCli', () => {
 
   it('wait picks up a status written while it polls', async () => {
     writeMeta('r5', { status: 'running', pid: process.pid });
-    setTimeout(() => writeMeta('r5', { status: 'done', pid: process.pid }), 60);
+    setImmediate(() => writeMeta('r5', { status: 'done', pid: process.pid }));
     expect(await cli('wait', 'r5', '--poll-ms', '10', '--timeout-ms', '5000')).toBe(0);
     expect(out).toEqual(['WINGMAN_RUN r5 done\n']);
   });

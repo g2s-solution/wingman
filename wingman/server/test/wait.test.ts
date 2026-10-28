@@ -2,7 +2,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { tmp } from './helpers.js';
+import { tmp, waitUntil } from './helpers.js';
 
 const SCRIPT = resolve(__dirname, '../../bin/wingman-wait');
 
@@ -20,6 +20,9 @@ function writeMeta(id: string, meta: Record<string, unknown>): void {
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, 'meta.json'), JSON.stringify({ id, ...meta }));
 }
+
+// the launcher has spawned the real waiter once it has a child process
+const hasChild = (pid: number | undefined) => spawnSync('pgrep', ['-P', String(pid)]).status === 0;
 
 function run(args: string[]) {
   const r = spawnSync(process.execPath, [SCRIPT, ...args], {
@@ -83,7 +86,7 @@ describe('wingman-wait launcher', () => {
       env: { ...process.env, WINGMAN_HOME: home },
     });
     const exited = new Promise<number | null>((res) => child.on('exit', (code) => res(code)));
-    await new Promise((r) => setTimeout(r, 300));
+    await waitUntil(() => hasChild(child.pid), { what: 'the waiter to start' });
     child.kill('SIGTERM');
     // the launcher survives the signal long enough to relay it and to report the child's death
     expect(await exited).toBe(1);
@@ -117,8 +120,7 @@ describe('wingman-wait', () => {
     let out = '';
     child.stdout.on('data', (d) => (out += d));
     const exited = new Promise<number | null>((res) => child.on('exit', res));
-    // negative check: the script shows no sign of having polled, so observe briefly
-    await new Promise((r) => setTimeout(r, 300));
+    await waitUntil(() => hasChild(child.pid), { what: 'the waiter to start' });
     expect(out).toBe('');
     writeMeta('r2', { status: 'done', pid: process.pid });
     expect(await exited).toBe(0);
@@ -190,8 +192,7 @@ describe('wingman-wait', () => {
     let out = '';
     child.stdout.on('data', (d) => (out += d));
     const exited = new Promise<number | null>((res) => child.on('exit', res));
-    // lets the script enter its grace period; nothing observable marks that, and writing late still passes
-    await new Promise((r) => setTimeout(r, 200));
+    await waitUntil(() => hasChild(child.pid), { what: 'the waiter to start' });
     writeMeta('r5', { status: 'partial', pid: 1 });
     expect(await exited).toBe(0);
     expect(out).toBe('WINGMAN_RUN r5 partial\n');
