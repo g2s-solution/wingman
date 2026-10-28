@@ -2,6 +2,14 @@
 
 Versions are the plugin version in `wingman/.claude-plugin/plugin.json`. Claude Code only updates an installed plugin when this number changes.
 
+## 0.4.0
+
+- Account status: a run that ends `rate_limited` marks its account `rate_limited` with `limited_until` (from the run's reset time) in the registry. The limit expires on read, with no background job; old registry files without the new field stay valid.
+- A limited account is skipped when `wingman_start` has no `account`, and refused (naming `limited_until`) when named. The `rate_limited` result and a refused start list the other active accounts; nothing is rerouted.
+- New CLI: `wingman accounts mark-limited ID --until <ISO time with Z or an offset | date | epoch seconds>` and `wingman accounts clear-limited ID`. `enable` and `disable` drop `limited_until`.
+- `wingman accounts list` and the read-only `wingman_accounts` tool show the limited state and, per account, the number of finished runs by status (from `meta.json` only). `wingman_status` and `wingman_result` are now async handlers internally; their output only gains `other_active_accounts` and `hint` on a `rate_limited` run.
+- `wingman doctor` reports a limited account as a warning and still exits 0.
+
 ## 0.3.1
 
 - Role swap: `wingman accounts add` may register your own profile (a note is printed); every profile skips itself when choosing a target, so a registry listing all profiles lets each one delegate to the others. README has a new section "Delegate in both directions".

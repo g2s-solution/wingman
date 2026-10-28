@@ -27,14 +27,21 @@ The CLI `wingman accounts list|add|disable|enable|remove` is the normal way to c
 | `command` | executable that starts the agent for this profile, default `claude`; for a profile made by `another-login.sh` it is the launcher (for example `~/.local/bin/claude-second`), which sets `CLAUDE_CONFIG_DIR` and loads that profile's credential |
 | `scope` | data boundary (for example `company`); a run only goes to an account whose scope matches the work (v0.5) |
 | `tags`, `priority` | selection hints (v0.5) |
-| `status` | `active`, `disabled`, `rate_limited` (written back automatically in v0.4) |
-| `limited_until` | when `rate_limited` ends; expired values count as `active` (v0.4) |
+| `status` | `active` (or absent), `disabled`, `rate_limited` (written back automatically when a run ends `rate_limited`, or by `wingman accounts mark-limited`) |
+| `limited_until` | ISO time (UTC) when `rate_limited` ends; optional, so entries written before v0.4 stay valid |
 
-Quota: every run records the `rate_limit_event` data the CLI emits (`status`, `resetsAt`, `rateLimitType`, `utilization`). That is per-run feedback, not a reliable pre-run gauge. The account `status` state machine built on it is v0.4.
+Quota: every run records the `rate_limit_event` data the CLI emits (`status`, `resetsAt`, `rateLimitType`, `utilization`). That is per-run feedback, not a reliable pre-run gauge.
+
+Limit state (v0.4):
+
+- Write-back: when a run ends `rate_limited`, the supervisor converts `resetsAt` (unix seconds, from the rejected event) to `limited_until` and sets `status: rate_limited` on the run's account, before the run's own status flips. A missing or already-past `resetsAt`, and a `disabled` account, are left alone. The registry is read-modify-written without a lock; a concurrent edit by the Human can be lost, as with every other registry mutation.
+- Expiry on read: there is no background job. An account is limited while `status = rate_limited` and `limited_until` is later than now; at that instant and after it reads as `active` (the stale fields stay in the file until the next mutation or `clear-limited`; `enable` and `disable` drop them). A `rate_limited` entry without `limited_until` stays limited until `clear-limited`; an unparsable `limited_until` counts as expired, so a bad value never locks an account out.
+- The Human changes it with `wingman accounts mark-limited ID --until <ISO time with Z or an offset, a bare date (UTC), or epoch seconds>` (must be in the future; refused for a disabled account) and `clear-limited ID`. No MCP tool mutates it.
+- Run summary: `wingman accounts list` and `wingman_accounts` report per account `runs: {total, by_status}`, counted from the terminal runs' `meta.json` only (running runs and `events.jsonl` are never read).
 
 ## Account selection
 
-v0.1: `account` is optional in `wingman_start`. When omitted, the server picks one at random among the registry targets that are not the caller's profile and not `disabled`. When given, it is used as is.
+`account` is optional in `wingman_start`. When omitted, the server picks one at random among the registry targets that are not the caller's profile and are active (not `disabled`, not currently limited). When given, it must be a target that is active: a limited account is refused with an error naming `limited_until`. When a start is refused for a limit, or a run ends `rate_limited`, the tool response lists the other active accounts (`other_active_accounts` and a `hint` on `wingman_status` and `wingman_result`; the refusal message for a start); nothing is rerouted.
 
 v0.5 (skill `pick-account`) replaces the random pick with a smarter one:
 
