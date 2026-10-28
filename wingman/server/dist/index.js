@@ -2191,14 +2191,14 @@ var require_resolve = __commonJS({
       "enum",
       "const"
     ]);
-    function inlineRef(schema, limit = true) {
+    function inlineRef(schema, limit2 = true) {
       if (typeof schema == "boolean")
         return true;
-      if (limit === true)
+      if (limit2 === true)
         return !hasRef(schema);
-      if (!limit)
+      if (!limit2)
         return false;
-      return countKeys(schema) <= limit;
+      return countKeys(schema) <= limit2;
     }
     exports.inlineRef = inlineRef;
     var REF_KEYWORDS = /* @__PURE__ */ new Set([
@@ -28617,7 +28617,7 @@ import { join as join9 } from "node:path";
 
 // src/accounts.ts
 import { homedir as homedir3 } from "node:os";
-import { isAbsolute, join as join3, resolve as resolve3 } from "node:path";
+import { isAbsolute, join as join4, resolve as resolve3 } from "node:path";
 
 // src/registry.ts
 import { randomBytes } from "node:crypto";
@@ -28642,8 +28642,9 @@ var accountSchema = external_exports.object({
   config_dir: external_exports.string().min(1),
   provider: external_exports.string().min(1).default("claude"),
   command: external_exports.string().min(1).default("claude"),
-  status: external_exports.string().min(1).optional()
-});
+  status: external_exports.string().min(1).optional(),
+  limited_until: external_exports.string().min(1).optional()
+}).passthrough();
 var registrySchema = external_exports.object({ accounts: external_exports.array(accountSchema) });
 async function saveAccounts(registry2) {
   const parsed = registrySchema.parse(registry2);
@@ -28712,830 +28713,61 @@ async function targetsFor(callerProfileDir) {
   }
   return result;
 }
-function isActive(account) {
-  return account.status === void 0 || account.status === "active";
+var RATE_LIMITED = "rate_limited";
+function isLimited(account, now = /* @__PURE__ */ new Date()) {
+  if (account.status !== RATE_LIMITED) return false;
+  if (account.limited_until === void 0) return true;
+  const until = Date.parse(account.limited_until);
+  return !Number.isNaN(until) && until > now.getTime();
 }
-
-// src/self.ts
-import { realpathSync } from "node:fs";
-import { homedir as homedir2 } from "node:os";
-import { join as join2, resolve as resolve2 } from "node:path";
-function canonical2(dir) {
-  try {
-    return realpathSync(dir);
-  } catch {
-    return resolve2(dir);
-  }
+function effectiveStatus(account, now = /* @__PURE__ */ new Date()) {
+  if (account.status === RATE_LIMITED) return isLimited(account, now) ? RATE_LIMITED : "active";
+  return account.status ?? "active";
 }
-function callerProfile(env = process.env) {
-  const configured = env.CLAUDE_CONFIG_DIR;
-  return canonical2(configured ? configured : join2(homedir2(), ".claude"));
+function isActive(account, now = /* @__PURE__ */ new Date()) {
+  return effectiveStatus(account, now) === "active";
 }
-function currentDepth(env = process.env) {
-  const raw = env.WINGMAN_DEPTH;
-  if (raw === void 0 || !/^\d+$/.test(raw.trim())) return 0;
-  return Number.parseInt(raw.trim(), 10);
-}
-function assertCanStart(env = process.env, limit = 1) {
-  const depth = currentDepth(env);
-  if (depth >= limit) {
-    throw new Error(
-      `Refusing to start a nested run: WINGMAN_DEPTH=${depth} has reached the limit of ${limit}`
-    );
-  }
-}
-
-// src/accounts.ts
-var ID = /^[A-Za-z0-9_-]{1,64}$/;
-var USAGE = `usage: wingman accounts list [--json]
-       wingman accounts add --id ID --config-dir DIR [--label L] [--command CMD] [--provider P] [--upsert]
-       wingman accounts disable ID
-       wingman accounts enable ID
-       wingman accounts remove ID --yes`;
-var AccountsUsageError = class extends Error {
-};
-function accountRows(accounts, caller) {
-  return accounts.map((a) => ({
-    id: a.id,
-    label: a.label,
-    status: a.status ?? "active",
-    provider: a.provider,
-    config_dir: a.config_dir,
-    command: a.command,
-    is_caller: canonical2(a.config_dir) === caller
-  }));
-}
-function publicAccounts(accounts, caller) {
-  return accountRows(accounts, caller).map((r) => ({
-    id: r.id,
-    label: r.label,
-    status: r.status,
-    is_caller: r.is_caller,
-    provider: r.provider
-  }));
-}
-function normalizeConfigDir(raw) {
-  const expanded = raw === "~" || raw.startsWith("~/") ? join3(homedir3(), raw.slice(1)) : raw;
-  if (!isAbsolute(expanded)) {
-    throw new AccountsUsageError("--config-dir must be an absolute path (or start with ~/)");
-  }
-  return resolve3(expanded);
-}
-function parse3(args, valueFlags, boolFlags) {
-  const out = { positional: [], values: {}, flags: /* @__PURE__ */ new Set() };
-  for (let i = 0; i < args.length; i++) {
-    const a = args[i];
-    if (valueFlags.includes(a)) {
-      const v = args[++i];
-      if (v === void 0) throw new AccountsUsageError(`${a} needs a value
-${USAGE}`);
-      out.values[a] = v;
-    } else if (boolFlags.includes(a)) {
-      out.flags.add(a);
-    } else if (a.startsWith("-")) {
-      throw new AccountsUsageError(`unexpected argument ${a}
-${USAGE}`);
-    } else {
-      out.positional.push(a);
-    }
-  }
-  return out;
-}
-function write(text) {
-  process.stdout.write(`${text}
-`);
-}
-function table(rows) {
-  const widths = rows[0].map((_, c) => Math.max(...rows.map((r) => r[c].length)));
-  return rows.map(
-    (r) => r.map((cell, c) => cell.padEnd(widths[c])).join("  ").trimEnd()
-  ).join("\n");
-}
-async function list(args) {
-  const p = parse3(args, [], ["--json"]);
-  if (p.positional.length > 0) throw new AccountsUsageError(`unexpected argument
-${USAGE}`);
-  const { accounts } = await loadAccounts();
-  const rows = accountRows(accounts, callerProfile());
-  if (p.flags.has("--json")) {
-    write(JSON.stringify(rows, null, 2));
-  } else if (rows.length === 0) {
-    write("no accounts registered");
-  } else {
-    write(
-      table([
-        ["ID", "LABEL", "STATUS", "CONFIG_DIR", "COMMAND", ""],
-        ...rows.map((r) => [
-          r.id,
-          r.label,
-          r.status,
-          r.config_dir,
-          r.command,
-          r.is_caller ? "this profile" : ""
-        ])
-      ])
-    );
-  }
-  return 0;
-}
-async function add(args) {
-  const p = parse3(
-    args,
-    ["--id", "--config-dir", "--label", "--command", "--provider"],
-    ["--upsert"]
-  );
-  if (p.positional.length > 0) throw new AccountsUsageError(`unexpected argument
-${USAGE}`);
-  const id = p.values["--id"];
-  const rawDir = p.values["--config-dir"];
-  if (id === void 0 || rawDir === void 0) {
-    throw new AccountsUsageError(`--id and --config-dir are required
-${USAGE}`);
-  }
-  if (!ID.test(id)) throw new AccountsUsageError("--id must match [A-Za-z0-9_-]{1,64}");
-  const configDir = normalizeConfigDir(rawDir);
-  for (const flag of ["--label", "--command", "--provider"]) {
-    if (p.values[flag] !== void 0 && p.values[flag].trim() === "") {
-      throw new AccountsUsageError(`${flag} must not be empty`);
-    }
-  }
-  const isCaller = canonical2(configDir) === callerProfile();
-  const registry2 = await loadAccounts();
-  const i = registry2.accounts.findIndex((a) => a.id === id);
-  if (i >= 0 && !p.flags.has("--upsert")) {
-    throw new AccountsUsageError(`account "${id}" already exists; pass --upsert to update it`);
-  }
-  const given = { config_dir: configDir };
-  if (p.values["--label"] !== void 0) given.label = p.values["--label"];
-  if (p.values["--command"] !== void 0) given.command = p.values["--command"];
-  if (p.values["--provider"] !== void 0) given.provider = p.values["--provider"];
-  if (i >= 0) {
-    registry2.accounts[i] = { ...registry2.accounts[i], ...given };
-  } else {
-    registry2.accounts.push({
-      id,
-      label: id,
-      provider: "claude",
-      command: "claude",
-      ...given,
-      config_dir: configDir
-    });
-  }
-  await saveAccounts(registry2);
-  write(`${i >= 0 ? "updated" : "registered"} ${id}`);
-  if (isCaller) {
-    write(
-      `note: ${id} is the profile you are running in; it is skipped when you delegate from it and used when you delegate from another profile`
-    );
-  }
-  return 0;
-}
-async function change(verb, args) {
-  const p = parse3(args, [], ["--yes"]);
-  const id = p.positional[0];
-  if (id === void 0 || p.positional.length > 1) {
-    throw new AccountsUsageError(`${verb} needs exactly one account id
-${USAGE}`);
-  }
-  if (verb !== "remove" && p.flags.has("--yes")) {
-    throw new AccountsUsageError(`unexpected argument --yes
-${USAGE}`);
-  }
-  const registry2 = await loadAccounts();
+function indexOfAccount(registry2, id) {
   const i = registry2.accounts.findIndex((a) => a.id === id);
   if (i < 0) {
     const known = registry2.accounts.map((a) => a.id).join(", ") || "none";
-    throw new AccountsUsageError(`unknown account "${id}". Registered accounts: ${known}`);
+    throw new Error(`Unknown account "${id}". Registered accounts: ${known}`);
   }
-  if (verb === "remove") {
-    if (!p.flags.has("--yes")) {
-      write(
-        `would remove ${id} from the registry (the profile directory and its credentials stay untouched); pass --yes to do it`
-      );
-      return 2;
-    }
-    registry2.accounts.splice(i, 1);
-    await saveAccounts(registry2);
-    write(`removed ${id}`);
-    return 0;
+  return i;
+}
+async function markLimited(id, until) {
+  const registry2 = await loadAccounts();
+  const i = indexOfAccount(registry2, id);
+  const account = registry2.accounts[i];
+  if (account.status !== void 0 && account.status !== "active" && account.status !== RATE_LIMITED) {
+    throw new Error(`Account "${id}" is ${account.status}; enable it before marking it limited`);
   }
-  if (verb === "disable") {
-    registry2.accounts[i] = { ...registry2.accounts[i], status: "disabled" };
-  } else {
-    const entry = { ...registry2.accounts[i] };
-    delete entry.status;
-    registry2.accounts[i] = entry;
-  }
+  registry2.accounts[i] = { ...account, status: RATE_LIMITED, limited_until: until.toISOString() };
   await saveAccounts(registry2);
-  write(`${verb}d ${id}`);
-  return 0;
 }
-async function accountsCommand(args) {
-  const [sub, ...rest] = args;
-  try {
-    switch (sub) {
-      case "list":
-        return await list(rest);
-      case "add":
-        return await add(rest);
-      case "disable":
-      case "enable":
-      case "remove":
-        return await change(sub, rest);
-      default:
-        throw new AccountsUsageError(USAGE);
-    }
-  } catch (err) {
-    if (err instanceof AccountsUsageError) {
-      process.stderr.write(`wingman accounts: ${err.message}
-`);
-      return 2;
-    }
-    throw err;
-  }
-}
-
-// src/doctor.ts
-import { execFile } from "node:child_process";
-import { createHash } from "node:crypto";
-import { accessSync, constants, lstatSync, readFileSync, realpathSync as realpathSync2, statSync } from "node:fs";
-import { homedir as homedir4 } from "node:os";
-import { delimiter, isAbsolute as isAbsolute2, join as join4, resolve as resolve4 } from "node:path";
-
-// package.json
-var package_default = {
-  name: "wingman-server",
-  version: "0.3.1",
-  private: true,
-  type: "module",
-  engines: {
-    node: ">=22"
-  },
-  scripts: {
-    build: "node esbuild.config.mjs",
-    test: "vitest run",
-    coverage: "vitest run --coverage",
-    lint: "eslint .",
-    format: "prettier --check .",
-    typecheck: "tsc --noEmit",
-    check: "npm run typecheck && npm run lint && npm run format && npm run build && npm test"
-  },
-  dependencies: {
-    "@modelcontextprotocol/sdk": "1.32.2",
-    zod: "4.6.7"
-  },
-  devDependencies: {
-    "@eslint/js": "10.0.1",
-    "@types/node": "26.6.5",
-    "@vitest/coverage-v8": "5.0.5",
-    esbuild: "0.28.2",
-    eslint: "10.13.0",
-    prettier: "3.9.10",
-    typescript: "6.0.3",
-    "typescript-eslint": "8.72.1",
-    vitest: "5.0.5"
-  },
-  license: "MIT"
-};
-
-// src/doctor.ts
-var SHARED_ITEMS = [
-  "CLAUDE.md",
-  "settings.json",
-  "skills",
-  "agents",
-  "commands",
-  "rules",
-  "plugins"
-];
-var PLUGIN_KEY = "wingman@wingman-marketplace";
-var ONLINE_TIMEOUT_MS = 2e4;
-var DOCTOR_USAGE = "usage: wingman doctor [--online] [--json]";
-var AUTH_METHOD = /^[A-Za-z0-9_.-]{1,40}$/;
-var defaultExec = (file2, args, { env, timeoutMs }) => new Promise((res, rej) => {
-  execFile(
-    file2,
-    args,
-    { env, timeout: timeoutMs, maxBuffer: 1024 * 1024, encoding: "utf8" },
-    (err, stdout) => err ? rej(err) : res({ stdout })
-  );
-});
-function defaultDeps() {
-  return { env: process.env, homeDir: homedir4(), exec: defaultExec };
-}
-function canonical3(path) {
-  try {
-    return realpathSync2(path);
-  } catch {
-    return resolve4(path);
-  }
-}
-function isDir(path) {
-  try {
-    return statSync(path).isDirectory();
-  } catch {
-    return false;
-  }
-}
-function exists(path) {
-  try {
-    lstatSync(path);
-    return true;
-  } catch {
-    return false;
-  }
-}
-function mode(path) {
-  return statSync(path).mode & 511;
-}
-function octal(m) {
-  return m.toString(8).padStart(4, "0");
-}
-function readJson(path) {
-  return JSON.parse(readFileSync(path, "utf8"));
-}
-function checkState(stateDir, results) {
-  if (!isDir(stateDir)) {
-    results.push({
-      id: "state.dir",
-      level: "warn",
-      message: `state directory ${stateDir} does not exist yet (the server creates it on first start)`
-    });
-    return void 0;
-  }
-  const dirMode = mode(stateDir);
-  results.push(
-    (dirMode & 63) === 0 ? { id: "state.dir", level: "ok", message: `state directory ${stateDir} has mode 0700` } : {
-      id: "state.dir",
-      level: "warn",
-      message: `state directory ${stateDir} has mode ${octal(dirMode)}, expected 0700 (fix: chmod 700)`
-    }
-  );
-  const file2 = join4(stateDir, "accounts.json");
-  if (!exists(file2)) {
-    results.push({
-      id: "registry.file",
-      level: "warn",
-      message: "accounts.json does not exist yet (no account registered)"
-    });
-    return void 0;
-  }
-  const fileMode = mode(file2);
-  results.push(
-    (fileMode & 63) === 0 ? { id: "registry.mode", level: "ok", message: "accounts.json has mode 0600" } : {
-      id: "registry.mode",
-      level: "warn",
-      message: `accounts.json has mode ${octal(fileMode)}, expected 0600 (fix: chmod 600)`
-    }
-  );
-  let json2;
-  try {
-    json2 = readJson(file2);
-  } catch {
-    results.push({
-      id: "registry.parse",
-      level: "fail",
-      message: "accounts.json is not valid JSON"
-    });
-    return void 0;
-  }
-  const list2 = json2?.accounts;
-  if (!Array.isArray(list2)) {
-    results.push({
-      id: "registry.parse",
-      level: "fail",
-      message: 'accounts.json has no "accounts" array'
-    });
-    return void 0;
-  }
-  const accounts = [];
-  for (const item of list2) {
-    const a = item;
-    if (a === null || typeof a !== "object" || typeof a.id !== "string" || a.id === "" || typeof a.config_dir !== "string" || a.config_dir === "") {
-      results.push({
-        id: "registry.parse",
-        level: "fail",
-        message: "accounts.json has an entry without a valid id and config_dir"
-      });
-      return void 0;
-    }
-    accounts.push({
-      id: a.id,
-      config_dir: a.config_dir,
-      command: typeof a.command === "string" && a.command !== "" ? a.command : "claude",
-      ...typeof a.status === "string" && a.status !== "" ? { status: a.status } : {}
-    });
-  }
-  const ids = accounts.map((a) => a.id);
-  const dupes = [...new Set(ids.filter((id, i) => ids.indexOf(id) !== i))];
-  if (dupes.length > 0) {
-    results.push({
-      id: "registry.parse",
-      level: "fail",
-      message: `accounts.json has duplicate account ids: ${dupes.join(", ")}`
-    });
-    return accounts;
-  }
-  results.push({
-    id: "registry.parse",
-    level: "ok",
-    message: `accounts.json parses, ${accounts.length} account(s), no duplicate ids`
-  });
-  return accounts;
-}
-function resolveCommand(command, pathVar, cwd) {
-  const candidates = command.includes("/") ? [isAbsolute2(command) ? command : resolve4(cwd, command)] : pathVar.split(delimiter).filter((d) => d !== "").map((d) => join4(d, command));
-  for (const c of candidates) {
-    try {
-      if (statSync(c).isFile()) return c;
-    } catch {
-    }
-  }
-  return void 0;
-}
-function isExecutable(path) {
-  try {
-    accessSync(path, constants.X_OK);
-    return true;
-  } catch {
-    return false;
-  }
-}
-function checkAccount(account, callerDir, defaultDir, deps, results) {
-  const p = `account.${account.id}`;
-  const dirOk = isDir(account.config_dir);
-  results.push(
-    dirOk ? { id: `${p}.config_dir`, level: "ok", message: `${account.id}: config_dir exists` } : {
-      id: `${p}.config_dir`,
-      level: "fail",
-      message: `${account.id}: config_dir ${account.config_dir} does not exist`
-    }
-  );
-  const found = resolveCommand(account.command, deps.env.PATH ?? "", process.cwd());
-  if (found === void 0) {
-    results.push({
-      id: `${p}.command`,
-      level: "fail",
-      message: `${account.id}: command "${account.command}" not found`
-    });
-  } else if (!isExecutable(found)) {
-    results.push({
-      id: `${p}.command`,
-      level: "fail",
-      message: `${account.id}: command ${found} is not executable (fix: chmod +x)`
-    });
-  } else {
-    results.push({
-      id: `${p}.command`,
-      level: "ok",
-      message: `${account.id}: command ${found} is executable`
-    });
-  }
-  if (canonical3(account.config_dir) === callerDir) {
-    results.push({
-      id: `${p}.self`,
-      level: "ok",
-      message: `${account.id}: info: this is the profile you are running in; it is skipped when you delegate from it and used when you delegate from another profile`
-    });
-  }
-  const status = account.status ?? "active";
-  results.push({
-    id: `${p}.status`,
-    level: "ok",
-    message: `${account.id}: status ${status}${status === "active" || status === "disabled" ? "" : " (unknown value, treated as disabled)"}`
-  });
-  if (dirOk && canonical3(account.config_dir) !== canonical3(defaultDir)) {
-    checkShared(account, defaultDir, results);
-  }
-  if (dirOk) checkPlugin(account, results);
-}
-function checkShared(account, defaultDir, results) {
-  for (const item of SHARED_ITEMS) {
-    const source = join4(defaultDir, item);
-    if (!exists(source)) continue;
-    const id = `account.${account.id}.shared.${item}`;
-    const target = join4(account.config_dir, item);
-    let st;
-    try {
-      st = lstatSync(target);
-    } catch {
-      results.push({
-        id,
-        level: "ok",
-        message: `${account.id}: ${item} absent (not shared, fine)`
-      });
-      continue;
-    }
-    if (!st.isSymbolicLink()) {
-      const migrate = item === "plugins" && st.isDirectory() ? `. To share it, run: mv ${target} ${target}.bak && ln -s ${source} ${target} (the backup can be deleted after checking that the plugins still work)` : "";
-      results.push({
-        id,
-        level: "warn",
-        message: `${account.id}: ${item} is forked, no longer shared with the default profile${migrate}`
-      });
-      continue;
-    }
-    let real;
-    try {
-      real = realpathSync2(target);
-    } catch {
-      results.push({ id, level: "fail", message: `${account.id}: ${item} is a broken link` });
-      continue;
-    }
-    results.push(
-      real === canonical3(source) ? { id, level: "ok", message: `${account.id}: ${item} is linked to the default profile` } : {
-        id,
-        level: "warn",
-        message: `${account.id}: ${item} links somewhere other than the default profile`
-      }
-    );
-  }
-}
-function checkPlugin(account, results) {
-  const id = `account.${account.id}.plugin`;
-  const file2 = join4(account.config_dir, "plugins", "installed_plugins.json");
-  if (!exists(file2)) {
-    results.push({
-      id,
-      level: "ok",
-      message: `${account.id}: wingman plugin not installed (targets do not need it)`
-    });
-    return;
-  }
-  let version2;
-  try {
-    const entries = readJson(file2)?.plugins?.[PLUGIN_KEY];
-    if (Array.isArray(entries)) {
-      for (const e of entries) {
-        const v = e?.version;
-        if (typeof v === "string") {
-          version2 = v;
-          break;
-        }
-      }
-    }
-  } catch {
-    results.push({
-      id,
-      level: "warn",
-      message: `${account.id}: installed_plugins.json is not valid JSON`
-    });
-    return;
-  }
-  if (version2 === void 0) {
-    results.push({
-      id,
-      level: "ok",
-      message: `${account.id}: wingman plugin not installed (targets do not need it)`
-    });
-  } else if (version2 === package_default.version) {
-    results.push({
-      id,
-      level: "ok",
-      message: `${account.id}: wingman plugin ${version2} matches the running server`
-    });
-  } else {
-    results.push({
-      id,
-      level: "warn",
-      message: `${account.id}: wingman plugin ${version2} differs from the running server ${package_default.version} (run: claude plugin update)`
-    });
-  }
-}
-async function authStatus(command, deps) {
-  let stdout;
-  try {
-    ({ stdout } = await deps.exec(command, ["auth", "status", "--json"], {
-      env: deps.env,
-      timeoutMs: ONLINE_TIMEOUT_MS
-    }));
-  } catch (err) {
-    const e = err;
-    return {
-      error: e.killed === true ? "timed out after 20 s" : `exited with an error${typeof e.code === "number" ? ` (code ${e.code})` : ""}`
-    };
-  }
-  let json2;
-  try {
-    json2 = JSON.parse(stdout);
-  } catch {
-    return { error: "returned output that is not JSON" };
-  }
-  if (json2 === null || typeof json2 !== "object" || Array.isArray(json2)) {
-    return { error: "returned output that is not a JSON object" };
-  }
-  const o = json2;
-  const method = typeof o.authMethod === "string" && AUTH_METHOD.test(o.authMethod) ? o.authMethod : "unknown";
-  const identity = typeof o.email === "string" && typeof o.orgId === "string" ? createHash("sha256").update(`${o.email}\0${o.orgId}`).digest("hex") : void 0;
-  return { auth: { signedIn: o.loggedIn === true, method, identity } };
-}
-async function checkOnline(accounts, deps, results) {
-  const caller = await authStatus("claude", deps);
-  if ("error" in caller) {
-    results.push({
-      id: "online.caller",
-      level: "warn",
-      message: `caller: claude auth status ${caller.error}`
-    });
-  } else {
-    results.push({
-      id: "online.caller",
-      level: caller.auth.signedIn ? "ok" : "warn",
-      message: `caller: signed in ${caller.auth.signedIn ? "yes" : "no"}, authMethod ${caller.auth.method}`
-    });
-  }
-  const callerIdentity = "auth" in caller ? caller.auth.identity : void 0;
-  for (const account of accounts) {
-    const id = `online.${account.id}`;
-    const r = await authStatus(account.command, deps);
-    if ("error" in r) {
-      results.push({ id, level: "warn", message: `${account.id}: auth status ${r.error}` });
-      continue;
-    }
-    const { signedIn, method, identity } = r.auth;
-    const different = identity === void 0 || callerIdentity === void 0 ? "unknown" : identity !== callerIdentity ? "yes" : "no";
-    results.push({
-      id,
-      level: signedIn && different !== "no" ? "ok" : "warn",
-      message: `${account.id}: signed in ${signedIn ? "yes" : "no"}, authMethod ${method}, different account from the caller: ${different}${different === "no" ? " (CLAUDE_CONFIG_DIR of this profile may not take effect)" : ""}`
-    });
-  }
-}
-async function runChecks(online, deps) {
-  const results = [];
-  const stateDir = deps.env.WINGMAN_HOME || join4(deps.homeDir, ".wingman");
-  const defaultDir = deps.env.CLAUDE_DEFAULT_DIR || join4(deps.homeDir, ".claude");
-  const callerDir = canonical3(deps.env.CLAUDE_CONFIG_DIR || join4(deps.homeDir, ".claude"));
-  const accounts = checkState(stateDir, results) ?? [];
-  const others = accounts.filter((a) => canonical3(a.config_dir) !== callerDir);
-  if (others.length === 0) {
-    results.push({
-      id: "registry.accounts",
-      level: "warn",
-      message: "no account other than the caller's own is registered (run another-login.sh)"
-    });
-  }
-  for (const account of accounts) checkAccount(account, callerDir, defaultDir, deps, results);
-  if (online) await checkOnline(accounts, deps, results);
-  return results;
-}
-async function doctorCommand(args, deps) {
-  let online = false;
-  let json2 = false;
-  for (const a of args) {
-    if (a === "--online") online = true;
-    else if (a === "--json") json2 = true;
-    else {
-      process.stderr.write(`wingman doctor: unexpected argument ${a}
-${DOCTOR_USAGE}
-`);
-      return 2;
-    }
-  }
-  const results = await runChecks(online, deps);
-  const count = (l) => results.filter((r) => r.level === l).length;
-  if (json2) {
-    process.stdout.write(`${JSON.stringify(results, null, 2)}
-`);
-  } else {
-    for (const r of results) process.stdout.write(`[${r.level}] ${r.message}
-`);
-    process.stdout.write(
-      `wingman doctor: ${count("ok")} ok, ${count("warn")} warn, ${count("fail")} fail
-`
-    );
-  }
-  return count("fail") > 0 ? 1 : 0;
-}
-
-// src/gc.ts
-import { existsSync as existsSync4, readdirSync as readdirSync4, rmSync as rmSync3, statSync as statSync2 } from "node:fs";
-import { join as join8 } from "node:path";
-
-// src/proc.ts
-import { execFileSync } from "node:child_process";
-import { readFileSync as readFileSync2, readdirSync } from "node:fs";
-var defaultPsExec = (file2, args) => execFileSync(file2, args, {
-  encoding: "utf8",
-  env: { ...process.env, LC_ALL: "C" },
-  stdio: ["ignore", "pipe", "ignore"],
-  timeout: 5e3,
-  maxBuffer: 16 * 1024 * 1024
-});
-function procfsBackend() {
-  return {
-    startTime(pid) {
-      try {
-        const stat = readFileSync2(`/proc/${pid}/stat`, "utf8");
-        const rest = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
-        return rest[19];
-      } catch {
-        return void 0;
-      }
-    },
-    groupMembers(pgid) {
-      let names;
-      try {
-        names = readdirSync("/proc");
-      } catch {
-        return [];
-      }
-      const members2 = [];
-      for (const name of names) {
-        if (!/^\d+$/.test(name)) continue;
-        try {
-          const stat = readFileSync2(`/proc/${name}/stat`, "utf8");
-          const rest = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
-          if (rest[0] !== "Z" && Number(rest[2]) === pgid) members2.push(Number(name));
-        } catch {
-        }
-      }
-      return members2;
-    }
-  };
-}
-function psBackend(exec = defaultPsExec) {
-  return {
-    startTime(pid) {
-      if (!Number.isInteger(pid) || pid <= 0) return void 0;
-      try {
-        const out = exec("ps", ["-o", "lstart=", "-p", String(pid)]).trim().replace(/\s+/g, " ");
-        return out === "" ? void 0 : out;
-      } catch {
-        return void 0;
-      }
-    },
-    groupMembers(pgid) {
-      let out;
-      try {
-        out = exec("ps", ["-A", "-o", "pid=,pgid=,stat="]);
-      } catch {
-        return [];
-      }
-      const members2 = [];
-      for (const line of out.split("\n")) {
-        const m = /^\s*(\d+)\s+(\d+)\s+(\S+)\s*$/.exec(line);
-        if (!m || m[3].startsWith("Z")) continue;
-        if (Number(m[2]) === pgid) members2.push(Number(m[1]));
-      }
-      return members2;
-    }
-  };
-}
-function backendFor(platform, exec) {
-  return platform === "linux" ? procfsBackend() : psBackend(exec);
-}
-var current;
-function defaultBackend() {
-  current ??= backendFor(process.platform);
-  return current;
-}
-function readStartTime(pid, backend = defaultBackend()) {
-  return backend.startTime(pid);
-}
-function isAlive(pid) {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (err) {
-    return err.code === "EPERM";
-  }
-}
-function isSameProcess(pid, startTime, backend = defaultBackend()) {
-  if (!isAlive(pid)) return false;
-  if (startTime === void 0) return true;
-  const actual = backend.startTime(pid);
-  return actual === void 0 || actual === startTime;
-}
-var GROUP_KILL_GRACE_MS = 3e3;
-function groupMembers(pgid, backend = defaultBackend()) {
-  return backend.groupMembers(pgid);
-}
-function hasOrphanedGroup(pgid, backend = defaultBackend()) {
-  if (!Number.isInteger(pgid) || pgid <= 1 || isAlive(pgid)) return false;
-  const members2 = backend.groupMembers(pgid);
-  return members2.length > 0 && !members2.includes(process.pid);
-}
-function terminateOrphanedGroup(pgid, graceMs2 = GROUP_KILL_GRACE_MS) {
-  if (!hasOrphanedGroup(pgid)) return false;
-  try {
-    process.kill(-pgid, "SIGTERM");
-  } catch {
-    return false;
-  }
-  setTimeout(() => {
-    if (!hasOrphanedGroup(pgid)) return;
-    try {
-      process.kill(-pgid, "SIGKILL");
-    } catch {
-    }
-  }, graceMs2).unref();
+async function clearLimited(id) {
+  const registry2 = await loadAccounts();
+  const i = indexOfAccount(registry2, id);
+  const entry = { ...registry2.accounts[i] };
+  if (entry.status !== RATE_LIMITED) return false;
+  delete entry.status;
+  delete entry.limited_until;
+  registry2.accounts[i] = entry;
+  await saveAccounts(registry2);
   return true;
 }
-
-// src/reconcile.ts
-import { existsSync as existsSync2 } from "node:fs";
-import { join as join6 } from "node:path";
+async function recordRateLimit(id, info, now = /* @__PURE__ */ new Date()) {
+  const resets = info?.resetsAt;
+  if (typeof resets !== "number" || !Number.isFinite(resets) || resets * 1e3 <= now.getTime()) {
+    return false;
+  }
+  try {
+    await markLimited(id, new Date(resets * 1e3));
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 // src/runs.ts
 import { randomBytes as randomBytes2 } from "node:crypto";
@@ -29546,16 +28778,16 @@ import {
   fstatSync,
   mkdirSync,
   openSync,
-  readFileSync as readFileSync3,
+  readFileSync,
   readSync,
-  readdirSync as readdirSync2,
+  readdirSync,
   renameSync,
   rmSync,
   unlinkSync,
   writeFileSync,
   appendFileSync
 } from "node:fs";
-import { join as join5 } from "node:path";
+import { join as join2 } from "node:path";
 
 // src/mask.ts
 var MASK = "[MASKED]";
@@ -29703,7 +28935,7 @@ function writeMeta(meta3) {
   const parsed = metaSchema.parse(meta3);
   const dir = dirOf(parsed.id);
   ensureDir(dir);
-  writeAtomic(join5(dir, "meta.json"), `${JSON.stringify(parsed, null, 2)}
+  writeAtomic(join2(dir, "meta.json"), `${JSON.stringify(parsed, null, 2)}
 `);
 }
 function patchRunning(id, patch) {
@@ -29716,7 +28948,7 @@ function patchRunning(id, patch) {
   return next;
 }
 function readMeta(id) {
-  return metaSchema.parse(JSON.parse(readFileSync3(join5(dirOf(id), "meta.json"), "utf8")));
+  return metaSchema.parse(JSON.parse(readFileSync(join2(dirOf(id), "meta.json"), "utf8")));
 }
 function updateStatus(id, status, patch = {}) {
   const current2 = readMeta(id);
@@ -29733,13 +28965,13 @@ function updateStatus(id, status, patch = {}) {
 function appendEvent(id, rawLine) {
   const dir = dirOf(id);
   ensureDir(dir);
-  const path = join5(dir, "events.jsonl");
+  const path = join2(dir, "events.jsonl");
   appendFileSync(path, rawLine.endsWith("\n") ? rawLine : `${rawLine}
 `, { mode: FILE_MODE });
   chmodSync(path, FILE_MODE);
 }
 function pruneEvents(id, maxBytes) {
-  const path = join5(dirOf(id), "events.jsonl");
+  const path = join2(dirOf(id), "events.jsonl");
   if (!existsSync(path)) return;
   const fd = openSync(path, "r");
   let tail;
@@ -29765,7 +28997,7 @@ function pruneOldEvents(maxAgeMs = EVENTS_RETENTION_MS) {
   for (const meta3 of listRuns()) {
     if (!TERMINAL_STATUSES.includes(meta3.status) || !meta3.finished_at) continue;
     if (Date.now() - Date.parse(meta3.finished_at) < maxAgeMs) continue;
-    const path = join5(dirOf(meta3.id), "events.jsonl");
+    const path = join2(dirOf(meta3.id), "events.jsonl");
     if (!existsSync(path)) continue;
     rmSync(path, { force: true });
     pruned.push(meta3.id);
@@ -29775,12 +29007,12 @@ function pruneOldEvents(maxAgeMs = EVENTS_RETENTION_MS) {
 function writeResult(id, text) {
   const dir = dirOf(id);
   ensureDir(dir);
-  writeAtomic(join5(dir, "result.md"), text);
+  writeAtomic(join2(dir, "result.md"), text);
 }
 function listRuns() {
   if (!existsSync(runsDir())) return [];
   const runs = [];
-  for (const entry of readdirSync2(runsDir())) {
+  for (const entry of readdirSync(runsDir())) {
     if (!RUN_ID.test(entry)) continue;
     try {
       runs.push(readMeta(entry));
@@ -29789,10 +29021,20 @@ function listRuns() {
   }
   return runs.sort((a, b) => b.created_at.localeCompare(a.created_at));
 }
+function runCountsByAccount(runs = listRuns()) {
+  const counts = {};
+  for (const run of runs) {
+    if (!TERMINAL_STATUSES.includes(run.status)) continue;
+    const entry = counts[run.account] ??= { total: 0, by_status: {} };
+    entry.total += 1;
+    entry.by_status[run.status] = (entry.by_status[run.status] ?? 0) + 1;
+  }
+  return counts;
+}
 function runSummary(id, page = {}) {
   const meta3 = readMeta(id);
-  const resultPath = join5(dirOf(id), "result.md");
-  const masked = existsSync(resultPath) ? maskSecrets(readFileSync3(resultPath, "utf8")) : null;
+  const resultPath = join2(dirOf(id), "result.md");
+  const masked = existsSync(resultPath) ? maskSecrets(readFileSync(resultPath, "utf8")) : null;
   const summary = {
     id: meta3.id,
     account: meta3.account,
@@ -29802,9 +29044,9 @@ function runSummary(id, page = {}) {
     result: null
   };
   if (masked !== null) {
-    const limit = Math.min(Math.max(page.limit ?? RESULT_PAGE_CHARS, 1), RESULT_PAGE_MAX_CHARS);
+    const limit2 = Math.min(Math.max(page.limit ?? RESULT_PAGE_CHARS, 1), RESULT_PAGE_MAX_CHARS);
     const start = Math.min(Math.max(page.offset ?? 0, 0), masked.length);
-    let end = Math.min(start + limit, masked.length);
+    let end = Math.min(start + limit2, masked.length);
     const last = masked.charCodeAt(end - 1);
     if (end < masked.length && end > start && last >= 55296 && last <= 56319) {
       end = end - 1 > start ? end - 1 : end + 1;
@@ -29821,7 +29063,908 @@ function runSummary(id, page = {}) {
   return summary;
 }
 
+// src/self.ts
+import { realpathSync } from "node:fs";
+import { homedir as homedir2 } from "node:os";
+import { join as join3, resolve as resolve2 } from "node:path";
+function canonical2(dir) {
+  try {
+    return realpathSync(dir);
+  } catch {
+    return resolve2(dir);
+  }
+}
+function callerProfile(env = process.env) {
+  const configured = env.CLAUDE_CONFIG_DIR;
+  return canonical2(configured ? configured : join3(homedir2(), ".claude"));
+}
+function currentDepth(env = process.env) {
+  const raw = env.WINGMAN_DEPTH;
+  if (raw === void 0 || !/^\d+$/.test(raw.trim())) return 0;
+  return Number.parseInt(raw.trim(), 10);
+}
+function assertCanStart(env = process.env, limit2 = 1) {
+  const depth = currentDepth(env);
+  if (depth >= limit2) {
+    throw new Error(
+      `Refusing to start a nested run: WINGMAN_DEPTH=${depth} has reached the limit of ${limit2}`
+    );
+  }
+}
+
+// src/accounts.ts
+var ID = /^[A-Za-z0-9_-]{1,64}$/;
+var USAGE = `usage: wingman accounts list [--json]
+       wingman accounts add --id ID --config-dir DIR [--label L] [--command CMD] [--provider P] [--upsert]
+       wingman accounts disable ID
+       wingman accounts enable ID
+       wingman accounts mark-limited ID --until <ISO time with Z or offset, or epoch seconds>
+       wingman accounts clear-limited ID
+       wingman accounts remove ID --yes`;
+var AccountsUsageError = class extends Error {
+};
+function accountRows(accounts, caller, now = /* @__PURE__ */ new Date(), counts = runCountsByAccount()) {
+  return accounts.map((a) => ({
+    id: a.id,
+    label: a.label,
+    status: effectiveStatus(a, now),
+    ...isLimited(a, now) && a.limited_until !== void 0 ? { limited_until: a.limited_until } : {},
+    provider: a.provider,
+    config_dir: a.config_dir,
+    command: a.command,
+    is_caller: canonical2(a.config_dir) === caller,
+    runs: counts[a.id] ?? { total: 0, by_status: {} }
+  }));
+}
+function publicAccounts(accounts, caller, now = /* @__PURE__ */ new Date(), counts) {
+  return accountRows(accounts, caller, now, counts).map((r) => ({
+    id: r.id,
+    label: r.label,
+    status: r.status,
+    ...r.limited_until !== void 0 ? { limited_until: r.limited_until } : {},
+    is_caller: r.is_caller,
+    provider: r.provider,
+    runs: r.runs
+  }));
+}
+var MAX_EPOCH_SECONDS = 4102444800;
+var ISO_TIME = /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2}))?$/;
+function parseUntil(raw, now) {
+  const bad = "--until must be an ISO time with Z or an offset (2026-11-01T08:00:00Z), a date (2026-11-01) or epoch seconds";
+  let until;
+  if (/^\d{1,13}$/.test(raw)) {
+    if (Number(raw) > MAX_EPOCH_SECONDS) {
+      throw new AccountsUsageError(
+        `--until ${raw} is too far ahead for epoch seconds (a millisecond timestamp?); pass seconds`
+      );
+    }
+    until = new Date(Number(raw) * 1e3);
+  } else {
+    const m = ISO_TIME.exec(raw);
+    if (m === null) throw new AccountsUsageError(bad);
+    until = new Date(raw.includes("T") ? raw : `${raw}T00:00:00Z`);
+    const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
+    const hour = m[4] === void 0 ? 0 : Number(m[4]);
+    const minute = m[5] === void 0 ? 0 : Number(m[5]);
+    const second = m[6] === void 0 ? 0 : Number(m[6]);
+    const calendar = new Date(Date.UTC(y, mo - 1, d));
+    if (calendar.getUTCFullYear() !== y || calendar.getUTCMonth() !== mo - 1 || calendar.getUTCDate() !== d || hour > 23 || minute > 59 || second > 59) {
+      throw new AccountsUsageError(bad);
+    }
+  }
+  if (Number.isNaN(until.getTime())) throw new AccountsUsageError(bad);
+  if (until.getTime() <= now.getTime()) {
+    throw new AccountsUsageError(`--until ${raw} is not in the future`);
+  }
+  return until;
+}
+function normalizeConfigDir(raw) {
+  const expanded = raw === "~" || raw.startsWith("~/") ? join4(homedir3(), raw.slice(1)) : raw;
+  if (!isAbsolute(expanded)) {
+    throw new AccountsUsageError("--config-dir must be an absolute path (or start with ~/)");
+  }
+  return resolve3(expanded);
+}
+function parse3(args, valueFlags, boolFlags) {
+  const out = { positional: [], values: {}, flags: /* @__PURE__ */ new Set() };
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (valueFlags.includes(a)) {
+      const v = args[++i];
+      if (v === void 0) throw new AccountsUsageError(`${a} needs a value
+${USAGE}`);
+      out.values[a] = v;
+    } else if (boolFlags.includes(a)) {
+      out.flags.add(a);
+    } else if (a.startsWith("-")) {
+      throw new AccountsUsageError(`unexpected argument ${a}
+${USAGE}`);
+    } else {
+      out.positional.push(a);
+    }
+  }
+  return out;
+}
+function write(text) {
+  process.stdout.write(`${text}
+`);
+}
+function table(rows) {
+  const widths = rows[0].map((_, c) => Math.max(...rows.map((r) => r[c].length)));
+  return rows.map(
+    (r) => r.map((cell, c) => cell.padEnd(widths[c])).join("  ").trimEnd()
+  ).join("\n");
+}
+function runsCell(runs) {
+  const parts = Object.entries(runs.by_status).sort(([a], [b]) => a.localeCompare(b)).map(([status, n]) => `${status}=${n}`);
+  return parts.length === 0 ? "-" : parts.join(" ");
+}
+async function list(args, now) {
+  const p = parse3(args, [], ["--json"]);
+  if (p.positional.length > 0) throw new AccountsUsageError(`unexpected argument
+${USAGE}`);
+  const { accounts } = await loadAccounts();
+  const rows = accountRows(accounts, callerProfile(), now());
+  if (p.flags.has("--json")) {
+    write(JSON.stringify(rows, null, 2));
+  } else if (rows.length === 0) {
+    write("no accounts registered");
+  } else {
+    write(
+      table([
+        ["ID", "LABEL", "STATUS", "LIMITED_UNTIL", "RUNS", "CONFIG_DIR", "COMMAND", ""],
+        ...rows.map((r) => [
+          r.id,
+          r.label,
+          r.status,
+          r.limited_until ?? "-",
+          runsCell(r.runs),
+          r.config_dir,
+          r.command,
+          r.is_caller ? "this profile" : ""
+        ])
+      ])
+    );
+  }
+  return 0;
+}
+async function limit(verb, args, now) {
+  const p = parse3(args, verb === "mark-limited" ? ["--until"] : [], []);
+  const id = p.positional[0];
+  if (id === void 0 || p.positional.length > 1) {
+    throw new AccountsUsageError(`${verb} needs exactly one account id
+${USAGE}`);
+  }
+  const registry2 = await loadAccounts();
+  if (!registry2.accounts.some((a) => a.id === id)) {
+    const known = registry2.accounts.map((a) => a.id).join(", ") || "none";
+    throw new AccountsUsageError(`unknown account "${id}". Registered accounts: ${known}`);
+  }
+  if (verb === "clear-limited") {
+    write(await clearLimited(id) ? `cleared the limit on ${id}` : `${id} is not marked limited`);
+    return 0;
+  }
+  const raw = p.values["--until"];
+  if (raw === void 0) throw new AccountsUsageError(`--until is required
+${USAGE}`);
+  const until = parseUntil(raw, now());
+  try {
+    await markLimited(id, until);
+  } catch (err) {
+    throw new AccountsUsageError(err.message);
+  }
+  write(`marked ${id} limited until ${until.toISOString()}`);
+  return 0;
+}
+async function add(args) {
+  const p = parse3(
+    args,
+    ["--id", "--config-dir", "--label", "--command", "--provider"],
+    ["--upsert"]
+  );
+  if (p.positional.length > 0) throw new AccountsUsageError(`unexpected argument
+${USAGE}`);
+  const id = p.values["--id"];
+  const rawDir = p.values["--config-dir"];
+  if (id === void 0 || rawDir === void 0) {
+    throw new AccountsUsageError(`--id and --config-dir are required
+${USAGE}`);
+  }
+  if (!ID.test(id)) throw new AccountsUsageError("--id must match [A-Za-z0-9_-]{1,64}");
+  const configDir = normalizeConfigDir(rawDir);
+  for (const flag of ["--label", "--command", "--provider"]) {
+    if (p.values[flag] !== void 0 && p.values[flag].trim() === "") {
+      throw new AccountsUsageError(`${flag} must not be empty`);
+    }
+  }
+  const isCaller = canonical2(configDir) === callerProfile();
+  const registry2 = await loadAccounts();
+  const i = registry2.accounts.findIndex((a) => a.id === id);
+  if (i >= 0 && !p.flags.has("--upsert")) {
+    throw new AccountsUsageError(`account "${id}" already exists; pass --upsert to update it`);
+  }
+  const given = { config_dir: configDir };
+  if (p.values["--label"] !== void 0) given.label = p.values["--label"];
+  if (p.values["--command"] !== void 0) given.command = p.values["--command"];
+  if (p.values["--provider"] !== void 0) given.provider = p.values["--provider"];
+  if (i >= 0) {
+    registry2.accounts[i] = { ...registry2.accounts[i], ...given };
+  } else {
+    registry2.accounts.push({
+      id,
+      label: id,
+      provider: "claude",
+      command: "claude",
+      ...given,
+      config_dir: configDir
+    });
+  }
+  await saveAccounts(registry2);
+  write(`${i >= 0 ? "updated" : "registered"} ${id}`);
+  if (isCaller) {
+    write(
+      `note: ${id} is the profile you are running in; it is skipped when you delegate from it and used when you delegate from another profile`
+    );
+  }
+  return 0;
+}
+async function change(verb, args) {
+  const p = parse3(args, [], ["--yes"]);
+  const id = p.positional[0];
+  if (id === void 0 || p.positional.length > 1) {
+    throw new AccountsUsageError(`${verb} needs exactly one account id
+${USAGE}`);
+  }
+  if (verb !== "remove" && p.flags.has("--yes")) {
+    throw new AccountsUsageError(`unexpected argument --yes
+${USAGE}`);
+  }
+  const registry2 = await loadAccounts();
+  const i = registry2.accounts.findIndex((a) => a.id === id);
+  if (i < 0) {
+    const known = registry2.accounts.map((a) => a.id).join(", ") || "none";
+    throw new AccountsUsageError(`unknown account "${id}". Registered accounts: ${known}`);
+  }
+  if (verb === "remove") {
+    if (!p.flags.has("--yes")) {
+      write(
+        `would remove ${id} from the registry (the profile directory and its credentials stay untouched); pass --yes to do it`
+      );
+      return 2;
+    }
+    registry2.accounts.splice(i, 1);
+    await saveAccounts(registry2);
+    write(`removed ${id}`);
+    return 0;
+  }
+  const entry = { ...registry2.accounts[i] };
+  delete entry.limited_until;
+  if (verb === "disable") entry.status = "disabled";
+  else delete entry.status;
+  registry2.accounts[i] = entry;
+  await saveAccounts(registry2);
+  write(`${verb}d ${id}`);
+  return 0;
+}
+async function accountsCommand(args, now = () => /* @__PURE__ */ new Date()) {
+  const [sub, ...rest] = args;
+  try {
+    switch (sub) {
+      case "list":
+        return await list(rest, now);
+      case "mark-limited":
+      case "clear-limited":
+        return await limit(sub, rest, now);
+      case "add":
+        return await add(rest);
+      case "disable":
+      case "enable":
+      case "remove":
+        return await change(sub, rest);
+      default:
+        throw new AccountsUsageError(USAGE);
+    }
+  } catch (err) {
+    if (err instanceof AccountsUsageError) {
+      process.stderr.write(`wingman accounts: ${err.message}
+`);
+      return 2;
+    }
+    throw err;
+  }
+}
+
+// src/doctor.ts
+import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
+import { accessSync, constants, lstatSync, readFileSync as readFileSync2, realpathSync as realpathSync2, statSync } from "node:fs";
+import { homedir as homedir4 } from "node:os";
+import { delimiter, isAbsolute as isAbsolute2, join as join5, resolve as resolve4 } from "node:path";
+
+// package.json
+var package_default = {
+  name: "wingman-server",
+  version: "0.4.0",
+  private: true,
+  type: "module",
+  engines: {
+    node: ">=22"
+  },
+  scripts: {
+    build: "node esbuild.config.mjs",
+    test: "vitest run",
+    coverage: "vitest run --coverage",
+    lint: "eslint .",
+    format: "prettier --check .",
+    typecheck: "tsc --noEmit",
+    check: "npm run typecheck && npm run lint && npm run format && npm run build && npm test"
+  },
+  dependencies: {
+    "@modelcontextprotocol/sdk": "1.32.2",
+    zod: "4.6.7"
+  },
+  devDependencies: {
+    "@eslint/js": "10.0.1",
+    "@types/node": "26.6.5",
+    "@vitest/coverage-v8": "5.0.5",
+    esbuild: "0.28.2",
+    eslint: "10.13.0",
+    prettier: "3.9.10",
+    typescript: "6.0.3",
+    "typescript-eslint": "8.72.1",
+    vitest: "5.0.5"
+  },
+  license: "MIT"
+};
+
+// src/doctor.ts
+var SHARED_ITEMS = [
+  "CLAUDE.md",
+  "settings.json",
+  "skills",
+  "agents",
+  "commands",
+  "rules",
+  "plugins"
+];
+var PLUGIN_KEY = "wingman@wingman-marketplace";
+var ONLINE_TIMEOUT_MS = 2e4;
+var DOCTOR_USAGE = "usage: wingman doctor [--online] [--json]";
+var AUTH_METHOD = /^[A-Za-z0-9_.-]{1,40}$/;
+var defaultExec = (file2, args, { env, timeoutMs }) => new Promise((res, rej) => {
+  execFile(
+    file2,
+    args,
+    { env, timeout: timeoutMs, maxBuffer: 1024 * 1024, encoding: "utf8" },
+    (err, stdout) => err ? rej(err) : res({ stdout })
+  );
+});
+function defaultDeps() {
+  return { env: process.env, homeDir: homedir4(), exec: defaultExec };
+}
+function canonical3(path) {
+  try {
+    return realpathSync2(path);
+  } catch {
+    return resolve4(path);
+  }
+}
+function isDir(path) {
+  try {
+    return statSync(path).isDirectory();
+  } catch {
+    return false;
+  }
+}
+function exists(path) {
+  try {
+    lstatSync(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+function mode(path) {
+  return statSync(path).mode & 511;
+}
+function octal(m) {
+  return m.toString(8).padStart(4, "0");
+}
+function readJson(path) {
+  return JSON.parse(readFileSync2(path, "utf8"));
+}
+function checkState(stateDir, results) {
+  if (!isDir(stateDir)) {
+    results.push({
+      id: "state.dir",
+      level: "warn",
+      message: `state directory ${stateDir} does not exist yet (the server creates it on first start)`
+    });
+    return void 0;
+  }
+  const dirMode = mode(stateDir);
+  results.push(
+    (dirMode & 63) === 0 ? { id: "state.dir", level: "ok", message: `state directory ${stateDir} has mode 0700` } : {
+      id: "state.dir",
+      level: "warn",
+      message: `state directory ${stateDir} has mode ${octal(dirMode)}, expected 0700 (fix: chmod 700)`
+    }
+  );
+  const file2 = join5(stateDir, "accounts.json");
+  if (!exists(file2)) {
+    results.push({
+      id: "registry.file",
+      level: "warn",
+      message: "accounts.json does not exist yet (no account registered)"
+    });
+    return void 0;
+  }
+  const fileMode = mode(file2);
+  results.push(
+    (fileMode & 63) === 0 ? { id: "registry.mode", level: "ok", message: "accounts.json has mode 0600" } : {
+      id: "registry.mode",
+      level: "warn",
+      message: `accounts.json has mode ${octal(fileMode)}, expected 0600 (fix: chmod 600)`
+    }
+  );
+  let json2;
+  try {
+    json2 = readJson(file2);
+  } catch {
+    results.push({
+      id: "registry.parse",
+      level: "fail",
+      message: "accounts.json is not valid JSON"
+    });
+    return void 0;
+  }
+  const list2 = json2?.accounts;
+  if (!Array.isArray(list2)) {
+    results.push({
+      id: "registry.parse",
+      level: "fail",
+      message: 'accounts.json has no "accounts" array'
+    });
+    return void 0;
+  }
+  const accounts = [];
+  for (const item of list2) {
+    const a = item;
+    if (a === null || typeof a !== "object" || typeof a.id !== "string" || a.id === "" || typeof a.config_dir !== "string" || a.config_dir === "") {
+      results.push({
+        id: "registry.parse",
+        level: "fail",
+        message: "accounts.json has an entry without a valid id and config_dir"
+      });
+      return void 0;
+    }
+    accounts.push({
+      id: a.id,
+      config_dir: a.config_dir,
+      command: typeof a.command === "string" && a.command !== "" ? a.command : "claude",
+      ...typeof a.status === "string" && a.status !== "" ? { status: a.status } : {},
+      ...typeof a.limited_until === "string" && a.limited_until !== "" ? { limited_until: a.limited_until } : {}
+    });
+  }
+  const ids = accounts.map((a) => a.id);
+  const dupes = [...new Set(ids.filter((id, i) => ids.indexOf(id) !== i))];
+  if (dupes.length > 0) {
+    results.push({
+      id: "registry.parse",
+      level: "fail",
+      message: `accounts.json has duplicate account ids: ${dupes.join(", ")}`
+    });
+    return accounts;
+  }
+  results.push({
+    id: "registry.parse",
+    level: "ok",
+    message: `accounts.json parses, ${accounts.length} account(s), no duplicate ids`
+  });
+  return accounts;
+}
+function resolveCommand(command, pathVar, cwd) {
+  const candidates = command.includes("/") ? [isAbsolute2(command) ? command : resolve4(cwd, command)] : pathVar.split(delimiter).filter((d) => d !== "").map((d) => join5(d, command));
+  for (const c of candidates) {
+    try {
+      if (statSync(c).isFile()) return c;
+    } catch {
+    }
+  }
+  return void 0;
+}
+function isExecutable(path) {
+  try {
+    accessSync(path, constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+function checkAccount(account, callerDir, defaultDir, deps, results) {
+  const p = `account.${account.id}`;
+  const dirOk = isDir(account.config_dir);
+  results.push(
+    dirOk ? { id: `${p}.config_dir`, level: "ok", message: `${account.id}: config_dir exists` } : {
+      id: `${p}.config_dir`,
+      level: "fail",
+      message: `${account.id}: config_dir ${account.config_dir} does not exist`
+    }
+  );
+  const found = resolveCommand(account.command, deps.env.PATH ?? "", process.cwd());
+  if (found === void 0) {
+    results.push({
+      id: `${p}.command`,
+      level: "fail",
+      message: `${account.id}: command "${account.command}" not found`
+    });
+  } else if (!isExecutable(found)) {
+    results.push({
+      id: `${p}.command`,
+      level: "fail",
+      message: `${account.id}: command ${found} is not executable (fix: chmod +x)`
+    });
+  } else {
+    results.push({
+      id: `${p}.command`,
+      level: "ok",
+      message: `${account.id}: command ${found} is executable`
+    });
+  }
+  if (canonical3(account.config_dir) === callerDir) {
+    results.push({
+      id: `${p}.self`,
+      level: "ok",
+      message: `${account.id}: info: this is the profile you are running in; it is skipped when you delegate from it and used when you delegate from another profile`
+    });
+  }
+  const now = (deps.now ?? (() => /* @__PURE__ */ new Date()))();
+  const status = effectiveStatus(account, now);
+  if (status === RATE_LIMITED) {
+    results.push({
+      id: `${p}.status`,
+      level: "warn",
+      message: `${account.id}: rate limited${account.limited_until === void 0 ? " with no end time (fix: wingman accounts clear-limited)" : ` until ${account.limited_until}`}; skipped as a target until then`
+    });
+  } else {
+    results.push({
+      id: `${p}.status`,
+      level: "ok",
+      message: `${account.id}: status ${status}${status === "active" || status === "disabled" ? "" : " (unknown value, treated as disabled)"}`
+    });
+  }
+  if (dirOk && canonical3(account.config_dir) !== canonical3(defaultDir)) {
+    checkShared(account, defaultDir, results);
+  }
+  if (dirOk) checkPlugin(account, results);
+}
+function checkShared(account, defaultDir, results) {
+  for (const item of SHARED_ITEMS) {
+    const source = join5(defaultDir, item);
+    if (!exists(source)) continue;
+    const id = `account.${account.id}.shared.${item}`;
+    const target = join5(account.config_dir, item);
+    let st;
+    try {
+      st = lstatSync(target);
+    } catch {
+      results.push({
+        id,
+        level: "ok",
+        message: `${account.id}: ${item} absent (not shared, fine)`
+      });
+      continue;
+    }
+    if (!st.isSymbolicLink()) {
+      const migrate = item === "plugins" && st.isDirectory() ? `. To share it, run: mv ${target} ${target}.bak && ln -s ${source} ${target} (the backup can be deleted after checking that the plugins still work)` : "";
+      results.push({
+        id,
+        level: "warn",
+        message: `${account.id}: ${item} is forked, no longer shared with the default profile${migrate}`
+      });
+      continue;
+    }
+    let real;
+    try {
+      real = realpathSync2(target);
+    } catch {
+      results.push({ id, level: "fail", message: `${account.id}: ${item} is a broken link` });
+      continue;
+    }
+    results.push(
+      real === canonical3(source) ? { id, level: "ok", message: `${account.id}: ${item} is linked to the default profile` } : {
+        id,
+        level: "warn",
+        message: `${account.id}: ${item} links somewhere other than the default profile`
+      }
+    );
+  }
+}
+function checkPlugin(account, results) {
+  const id = `account.${account.id}.plugin`;
+  const file2 = join5(account.config_dir, "plugins", "installed_plugins.json");
+  if (!exists(file2)) {
+    results.push({
+      id,
+      level: "ok",
+      message: `${account.id}: wingman plugin not installed (targets do not need it)`
+    });
+    return;
+  }
+  let version2;
+  try {
+    const entries = readJson(file2)?.plugins?.[PLUGIN_KEY];
+    if (Array.isArray(entries)) {
+      for (const e of entries) {
+        const v = e?.version;
+        if (typeof v === "string") {
+          version2 = v;
+          break;
+        }
+      }
+    }
+  } catch {
+    results.push({
+      id,
+      level: "warn",
+      message: `${account.id}: installed_plugins.json is not valid JSON`
+    });
+    return;
+  }
+  if (version2 === void 0) {
+    results.push({
+      id,
+      level: "ok",
+      message: `${account.id}: wingman plugin not installed (targets do not need it)`
+    });
+  } else if (version2 === package_default.version) {
+    results.push({
+      id,
+      level: "ok",
+      message: `${account.id}: wingman plugin ${version2} matches the running server`
+    });
+  } else {
+    results.push({
+      id,
+      level: "warn",
+      message: `${account.id}: wingman plugin ${version2} differs from the running server ${package_default.version} (run: claude plugin update)`
+    });
+  }
+}
+async function authStatus(command, deps) {
+  let stdout;
+  try {
+    ({ stdout } = await deps.exec(command, ["auth", "status", "--json"], {
+      env: deps.env,
+      timeoutMs: ONLINE_TIMEOUT_MS
+    }));
+  } catch (err) {
+    const e = err;
+    return {
+      error: e.killed === true ? "timed out after 20 s" : `exited with an error${typeof e.code === "number" ? ` (code ${e.code})` : ""}`
+    };
+  }
+  let json2;
+  try {
+    json2 = JSON.parse(stdout);
+  } catch {
+    return { error: "returned output that is not JSON" };
+  }
+  if (json2 === null || typeof json2 !== "object" || Array.isArray(json2)) {
+    return { error: "returned output that is not a JSON object" };
+  }
+  const o = json2;
+  const method = typeof o.authMethod === "string" && AUTH_METHOD.test(o.authMethod) ? o.authMethod : "unknown";
+  const identity = typeof o.email === "string" && typeof o.orgId === "string" ? createHash("sha256").update(`${o.email}\0${o.orgId}`).digest("hex") : void 0;
+  return { auth: { signedIn: o.loggedIn === true, method, identity } };
+}
+async function checkOnline(accounts, deps, results) {
+  const caller = await authStatus("claude", deps);
+  if ("error" in caller) {
+    results.push({
+      id: "online.caller",
+      level: "warn",
+      message: `caller: claude auth status ${caller.error}`
+    });
+  } else {
+    results.push({
+      id: "online.caller",
+      level: caller.auth.signedIn ? "ok" : "warn",
+      message: `caller: signed in ${caller.auth.signedIn ? "yes" : "no"}, authMethod ${caller.auth.method}`
+    });
+  }
+  const callerIdentity = "auth" in caller ? caller.auth.identity : void 0;
+  for (const account of accounts) {
+    const id = `online.${account.id}`;
+    const r = await authStatus(account.command, deps);
+    if ("error" in r) {
+      results.push({ id, level: "warn", message: `${account.id}: auth status ${r.error}` });
+      continue;
+    }
+    const { signedIn, method, identity } = r.auth;
+    const different = identity === void 0 || callerIdentity === void 0 ? "unknown" : identity !== callerIdentity ? "yes" : "no";
+    results.push({
+      id,
+      level: signedIn && different !== "no" ? "ok" : "warn",
+      message: `${account.id}: signed in ${signedIn ? "yes" : "no"}, authMethod ${method}, different account from the caller: ${different}${different === "no" ? " (CLAUDE_CONFIG_DIR of this profile may not take effect)" : ""}`
+    });
+  }
+}
+async function runChecks(online, deps) {
+  const results = [];
+  const stateDir = deps.env.WINGMAN_HOME || join5(deps.homeDir, ".wingman");
+  const defaultDir = deps.env.CLAUDE_DEFAULT_DIR || join5(deps.homeDir, ".claude");
+  const callerDir = canonical3(deps.env.CLAUDE_CONFIG_DIR || join5(deps.homeDir, ".claude"));
+  const accounts = checkState(stateDir, results) ?? [];
+  const others = accounts.filter((a) => canonical3(a.config_dir) !== callerDir);
+  if (others.length === 0) {
+    results.push({
+      id: "registry.accounts",
+      level: "warn",
+      message: "no account other than the caller's own is registered (run another-login.sh)"
+    });
+  }
+  for (const account of accounts) checkAccount(account, callerDir, defaultDir, deps, results);
+  if (online) await checkOnline(accounts, deps, results);
+  return results;
+}
+async function doctorCommand(args, deps) {
+  let online = false;
+  let json2 = false;
+  for (const a of args) {
+    if (a === "--online") online = true;
+    else if (a === "--json") json2 = true;
+    else {
+      process.stderr.write(`wingman doctor: unexpected argument ${a}
+${DOCTOR_USAGE}
+`);
+      return 2;
+    }
+  }
+  const results = await runChecks(online, deps);
+  const count = (l) => results.filter((r) => r.level === l).length;
+  if (json2) {
+    process.stdout.write(`${JSON.stringify(results, null, 2)}
+`);
+  } else {
+    for (const r of results) process.stdout.write(`[${r.level}] ${r.message}
+`);
+    process.stdout.write(
+      `wingman doctor: ${count("ok")} ok, ${count("warn")} warn, ${count("fail")} fail
+`
+    );
+  }
+  return count("fail") > 0 ? 1 : 0;
+}
+
+// src/gc.ts
+import { existsSync as existsSync4, readdirSync as readdirSync4, rmSync as rmSync3, statSync as statSync2 } from "node:fs";
+import { join as join8 } from "node:path";
+
+// src/proc.ts
+import { execFileSync } from "node:child_process";
+import { readFileSync as readFileSync3, readdirSync as readdirSync2 } from "node:fs";
+var defaultPsExec = (file2, args) => execFileSync(file2, args, {
+  encoding: "utf8",
+  env: { ...process.env, LC_ALL: "C" },
+  stdio: ["ignore", "pipe", "ignore"],
+  timeout: 5e3,
+  maxBuffer: 16 * 1024 * 1024
+});
+function procfsBackend() {
+  return {
+    startTime(pid) {
+      try {
+        const stat = readFileSync3(`/proc/${pid}/stat`, "utf8");
+        const rest = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
+        return rest[19];
+      } catch {
+        return void 0;
+      }
+    },
+    groupMembers(pgid) {
+      let names;
+      try {
+        names = readdirSync2("/proc");
+      } catch {
+        return [];
+      }
+      const members2 = [];
+      for (const name of names) {
+        if (!/^\d+$/.test(name)) continue;
+        try {
+          const stat = readFileSync3(`/proc/${name}/stat`, "utf8");
+          const rest = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
+          if (rest[0] !== "Z" && Number(rest[2]) === pgid) members2.push(Number(name));
+        } catch {
+        }
+      }
+      return members2;
+    }
+  };
+}
+function psBackend(exec = defaultPsExec) {
+  return {
+    startTime(pid) {
+      if (!Number.isInteger(pid) || pid <= 0) return void 0;
+      try {
+        const out = exec("ps", ["-o", "lstart=", "-p", String(pid)]).trim().replace(/\s+/g, " ");
+        return out === "" ? void 0 : out;
+      } catch {
+        return void 0;
+      }
+    },
+    groupMembers(pgid) {
+      let out;
+      try {
+        out = exec("ps", ["-A", "-o", "pid=,pgid=,stat="]);
+      } catch {
+        return [];
+      }
+      const members2 = [];
+      for (const line of out.split("\n")) {
+        const m = /^\s*(\d+)\s+(\d+)\s+(\S+)\s*$/.exec(line);
+        if (!m || m[3].startsWith("Z")) continue;
+        if (Number(m[2]) === pgid) members2.push(Number(m[1]));
+      }
+      return members2;
+    }
+  };
+}
+function backendFor(platform, exec) {
+  return platform === "linux" ? procfsBackend() : psBackend(exec);
+}
+var current;
+function defaultBackend() {
+  current ??= backendFor(process.platform);
+  return current;
+}
+function readStartTime(pid, backend = defaultBackend()) {
+  return backend.startTime(pid);
+}
+function isAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return err.code === "EPERM";
+  }
+}
+function isSameProcess(pid, startTime, backend = defaultBackend()) {
+  if (!isAlive(pid)) return false;
+  if (startTime === void 0) return true;
+  const actual = backend.startTime(pid);
+  return actual === void 0 || actual === startTime;
+}
+var GROUP_KILL_GRACE_MS = 3e3;
+function groupMembers(pgid, backend = defaultBackend()) {
+  return backend.groupMembers(pgid);
+}
+function hasOrphanedGroup(pgid, backend = defaultBackend()) {
+  if (!Number.isInteger(pgid) || pgid <= 1 || isAlive(pgid)) return false;
+  const members2 = backend.groupMembers(pgid);
+  return members2.length > 0 && !members2.includes(process.pid);
+}
+function terminateOrphanedGroup(pgid, graceMs2 = GROUP_KILL_GRACE_MS) {
+  if (!hasOrphanedGroup(pgid)) return false;
+  try {
+    process.kill(-pgid, "SIGTERM");
+  } catch {
+    return false;
+  }
+  setTimeout(() => {
+    if (!hasOrphanedGroup(pgid)) return;
+    try {
+      process.kill(-pgid, "SIGKILL");
+    } catch {
+    }
+  }, graceMs2).unref();
+  return true;
+}
+
 // src/reconcile.ts
+import { existsSync as existsSync2 } from "node:fs";
+import { join as join6 } from "node:path";
 var DEFAULT_NO_PID_GRACE_MS = 20 * 60 * 1e3;
 function graceMs(opts) {
   if (opts.noPidGraceMs !== void 0) return opts.noPidGraceMs;
@@ -30235,11 +30378,11 @@ var GC_USAGE = "usage: wingman gc [--older-than-days N] [--dry-run]";
 var UsageError = class extends Error {
 };
 var sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-async function maybeRunCli(argv, doctorDeps = defaultDeps()) {
+async function maybeRunCli(argv, doctorDeps = defaultDeps(), now = () => /* @__PURE__ */ new Date()) {
   const [command, ...args] = argv.slice(2);
   if (command === void 0 || !COMMANDS.includes(command)) return void 0;
   try {
-    if (command === "accounts") return await accountsCommand(args);
+    if (command === "accounts") return await accountsCommand(args, now);
     if (command === "doctor") return await doctorCommand(args, doctorDeps);
     return command === "wait" ? await waitCommand(args) : await gcCommand(args);
   } catch (err) {
@@ -30799,6 +30942,7 @@ async function runSupervisor(runId) {
   process.env.WINGMAN_HOME = payload.wingman_home;
   const adapter = getAdapter(payload.provider);
   let sessionRateLimit;
+  let rejectedRateLimit;
   let rateRejected = false;
   let finished;
   let timedOut = false;
@@ -30834,7 +30978,10 @@ async function runSupervisor(runId) {
       for (const event of adapter.parseLine(line)) {
         if (event.kind === "rate_limited") {
           sessionRateLimit = event.info;
-          if (isRateLimitRejected(event.info)) rateRejected = true;
+          if (isRateLimitRejected(event.info)) {
+            rateRejected = true;
+            rejectedRateLimit = event.info;
+          }
         } else if (event.kind === "finished") {
           finished = event;
         }
@@ -30885,6 +31032,9 @@ async function runSupervisor(runId) {
     permission_denials: [...new Set(finished?.permission_denials ?? [])]
   };
   if (sessionRateLimit) patch.rate_limit = sessionRateLimit;
+  if (outcome.status === "rate_limited") {
+    await recordRateLimit(current2.account, rejectedRateLimit);
+  }
   try {
     updateStatus(runId, outcome.status, patch);
   } catch {
@@ -39278,23 +39428,44 @@ function currentBranch(cwd) {
     );
   });
 }
-async function chooseAccount(env, accountId, random) {
+async function alternativesTo(env, exceptId, now) {
+  try {
+    const targets = await targetsFor(callerProfile(env));
+    return targets.filter((a) => a.id !== exceptId && isActive(a, now)).map((a) => a.id);
+  } catch {
+    return [];
+  }
+}
+function alternativesHint(ids) {
+  return ids.length === 0 ? "" : `; other active accounts: ${ids.join(", ")} (pass one as "account" to retry)`;
+}
+async function chooseAccount(env, accountId, random, now) {
   const targets = await targetsFor(callerProfile(env));
   if (accountId !== void 0) {
     const account = await getAccount(accountId);
     if (!targets.some((a) => a.id === accountId)) {
       throw new Error(`Account "${accountId}" is the caller's own profile; pick another account`);
     }
-    if (!isActive(account)) {
+    if (isLimited(account, now)) {
+      const until = account.limited_until === void 0 ? "no end time, until cleared" : `limited_until ${account.limited_until}`;
+      throw new Error(
+        `Account "${accountId}" is rate limited (${until}); pick another account${alternativesHint(await alternativesTo(env, accountId, now))}`
+      );
+    }
+    if (!isActive(account, now)) {
       throw new Error(
         `Account "${accountId}" is ${account.status}, not active; pick another account`
       );
     }
     return account;
   }
-  const pool = targets.filter(isActive);
+  const pool = targets.filter((a) => isActive(a, now));
   if (pool.length === 0) {
-    throw new Error("No other active account is registered to run on; see `wingman accounts list`");
+    const limited = targets.filter((a) => isLimited(a, now));
+    const note = limited.length === 0 ? "" : `; rate limited: ${limited.map((a) => `${a.id} (limited_until ${a.limited_until ?? "none"})`).join(", ")}`;
+    throw new Error(
+      `No other active account is registered to run on${note}; see \`wingman accounts list\``
+    );
   }
   return pool[Math.min(Math.floor(random() * pool.length), pool.length - 1)];
 }
@@ -39325,13 +39496,24 @@ var runIdInput = { run_id: external_exports.string().min(1).max(64) };
 function createHandlers(deps = {}) {
   const env = deps.env ?? process.env;
   const random = deps.random ?? Math.random;
+  const now = deps.now ?? (() => /* @__PURE__ */ new Date());
+  const withHint = async (payload, run) => {
+    if (run.status !== "rate_limited") return payload;
+    const others = await alternativesTo(env, run.account, now());
+    if (others.length === 0) return payload;
+    return {
+      ...payload,
+      other_active_accounts: others,
+      hint: `Account ${run.account} hit its rate limit. Other active accounts: ${others.join(", ")}. Start a new run with "account" set to one of them if you want to retry; nothing is rerouted automatically.`
+    };
+  };
   const runOpts = () => ({
     parentEnv: env,
     ...deps.supervisorEntry !== void 0 ? { supervisorEntry: deps.supervisorEntry } : {}
   });
   return {
     async start(input2) {
-      const account = await chooseAccount(env, input2.account, random);
+      const account = await chooseAccount(env, input2.account, random, now());
       if (!isAbsolute5(input2.cwd) || !statSync4(input2.cwd, { throwIfNoEntry: false })?.isDirectory()) {
         throw new Error("cwd must be an absolute path of an existing directory");
       }
@@ -39361,26 +39543,25 @@ function createHandlers(deps = {}) {
         ...meta3.run_branch !== void 0 ? { run_branch: meta3.run_branch } : {}
       };
     },
-    status(input2) {
+    async status(input2) {
       loadMeta(input2.run_id);
       const { result, ...summary } = runSummary(input2.run_id);
-      return { ...summary, has_result: result !== null };
+      return withHint({ ...summary, has_result: result !== null }, summary);
     },
-    result(input2) {
+    async result(input2) {
       const meta3 = loadMeta(input2.run_id);
       if (!TERMINAL_STATUSES.includes(meta3.status)) {
         return { id: meta3.id, status: meta3.status, message: "still running" };
       }
-      return {
-        ...runSummary(input2.run_id, {
-          ...input2.offset !== void 0 ? { offset: input2.offset } : {},
-          ...input2.limit !== void 0 ? { limit: input2.limit } : {}
-        })
-      };
+      const summary = runSummary(input2.run_id, {
+        ...input2.offset !== void 0 ? { offset: input2.offset } : {},
+        ...input2.limit !== void 0 ? { limit: input2.limit } : {}
+      });
+      return withHint({ ...summary }, summary);
     },
     async accounts() {
       const { accounts } = await loadAccounts();
-      return { accounts: publicAccounts(accounts, callerProfile(env)) };
+      return { accounts: publicAccounts(accounts, callerProfile(env), now()) };
     },
     async cancel(input2) {
       loadMeta(input2.run_id);
@@ -39392,8 +39573,8 @@ function createHandlers(deps = {}) {
       };
     },
     list(input2) {
-      const limit = Math.min(input2.limit ?? LIST_DEFAULT, LIST_MAX);
-      const runs = listRuns().slice(0, limit).map((m) => reconcile(m)).map((m) => ({
+      const limit2 = Math.min(input2.limit ?? LIST_DEFAULT, LIST_MAX);
+      const runs = listRuns().slice(0, limit2).map((m) => reconcile(m)).map((m) => ({
         id: m.id,
         account: m.account,
         status: m.status,
@@ -39479,7 +39660,7 @@ function buildServer(deps = {}) {
   server.registerTool(
     "wingman_accounts",
     {
-      description: "List the registered accounts: id, label, status (active or disabled), is_caller (your own profile, never a target) and provider. Read-only on purpose: an account entry names a command the runner executes, so no tool adds, changes or removes accounts; the Human does that with `wingman accounts ...` in a terminal.",
+      description: "List the registered accounts: id, label, status (active, disabled or rate_limited, with limited_until while limited; a limited account is skipped until then), is_caller (your own profile, never a target), provider and runs (finished runs by status). Read-only on purpose: an account entry names a command the runner executes, so no tool adds, changes or removes accounts; the Human does that with `wingman accounts ...` in a terminal.",
       inputSchema: {}
     },
     wrap(h.accounts)

@@ -262,6 +262,23 @@ export function listRuns(): RunMeta[] {
   return runs.sort((a, b) => b.created_at.localeCompare(a.created_at));
 }
 
+export interface AccountRunCounts {
+  total: number;
+  by_status: Record<string, number>;
+}
+
+/** Finished runs per account by terminal status, from meta.json only (never the event log). */
+export function runCountsByAccount(runs: RunMeta[] = listRuns()): Record<string, AccountRunCounts> {
+  const counts: Record<string, AccountRunCounts> = {};
+  for (const run of runs) {
+    if (!TERMINAL_STATUSES.includes(run.status)) continue;
+    const entry = (counts[run.account] ??= { total: 0, by_status: {} });
+    entry.total += 1;
+    entry.by_status[run.status] = (entry.by_status[run.status] ?? 0) + 1;
+  }
+  return counts;
+}
+
 export function runSummary(id: string, page: ResultPage = {}): RunSummary {
   const meta = readMeta(id);
   const resultPath = join(dirOf(id), 'result.md');

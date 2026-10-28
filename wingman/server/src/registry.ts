@@ -5,14 +5,18 @@ import { z } from 'zod';
 import { accountsFile } from './paths.js';
 import type { Account } from './types.js';
 
-const accountSchema = z.object({
-  id: z.string().min(1),
-  label: z.string().min(1),
-  config_dir: z.string().min(1),
-  provider: z.string().min(1).default('claude'),
-  command: z.string().min(1).default('claude'),
-  status: z.string().min(1).optional(),
-});
+// passthrough: a write-back must not drop keys a newer version or a hand edit added
+const accountSchema = z
+  .object({
+    id: z.string().min(1),
+    label: z.string().min(1),
+    config_dir: z.string().min(1),
+    provider: z.string().min(1).default('claude'),
+    command: z.string().min(1).default('claude'),
+    status: z.string().min(1).optional(),
+    limited_until: z.string().min(1).optional(),
+  })
+  .passthrough();
 
 const registrySchema = z.object({ accounts: z.array(accountSchema) });
 
@@ -93,6 +97,86 @@ export async function targetsFor(callerProfileDir: string): Promise<Account[]> {
   return result;
 }
 
-export function isActive(account: Account): boolean {
-  return account.status === undefined || account.status === 'active';
+type Limitable = Pick<Account, 'status' | 'limited_until'>;
+
+export const RATE_LIMITED = 'rate_limited';
+
+/**
+ * Limited while `limited_until` is in the future. A `rate_limited` entry with no end stays limited
+ * until `clear-limited`; an unparsable end counts as expired, so a bad value never locks an account.
+ */
+export function isLimited(account: Limitable, now: Date = new Date()): boolean {
+  if (account.status !== RATE_LIMITED) return false;
+  if (account.limited_until === undefined) return true;
+  const until = Date.parse(account.limited_until);
+  return !Number.isNaN(until) && until > now.getTime();
+}
+
+/** The status as seen now: an expired limit reads as `active` without rewriting the file. */
+export function effectiveStatus(account: Limitable, now: Date = new Date()): string {
+  if (account.status === RATE_LIMITED) return isLimited(account, now) ? RATE_LIMITED : 'active';
+  return account.status ?? 'active';
+}
+
+export function isActive(account: Limitable, now: Date = new Date()): boolean {
+  return effectiveStatus(account, now) === 'active';
+}
+
+function indexOfAccount(registry: Registry, id: string): number {
+  const i = registry.accounts.findIndex((a) => a.id === id);
+  if (i < 0) {
+    const known = registry.accounts.map((a) => a.id).join(', ') || 'none';
+    throw new Error(`Unknown account "${id}". Registered accounts: ${known}`);
+  }
+  return i;
+}
+
+/** Marks an account limited until `until`; refuses a disabled (or unknown-status) account. */
+export async function markLimited(id: string, until: Date): Promise<void> {
+  const registry = await loadAccounts();
+  const i = indexOfAccount(registry, id);
+  const account = registry.accounts[i]!;
+  if (
+    account.status !== undefined &&
+    account.status !== 'active' &&
+    account.status !== RATE_LIMITED
+  ) {
+    throw new Error(`Account "${id}" is ${account.status}; enable it before marking it limited`);
+  }
+  registry.accounts[i] = { ...account, status: RATE_LIMITED, limited_until: until.toISOString() };
+  await saveAccounts(registry);
+}
+
+/** Removes the limit; returns false when the account was not marked limited. */
+export async function clearLimited(id: string): Promise<boolean> {
+  const registry = await loadAccounts();
+  const i = indexOfAccount(registry, id);
+  const entry = { ...registry.accounts[i]! };
+  if (entry.status !== RATE_LIMITED) return false;
+  delete entry.status;
+  delete entry.limited_until;
+  registry.accounts[i] = entry;
+  await saveAccounts(registry);
+  return true;
+}
+
+/**
+ * Writes a run's rate limit back to its account: `resetsAt` is a unix timestamp in seconds.
+ * Does nothing without a usable future reset time, or for a disabled or unknown account.
+ */
+export async function recordRateLimit(
+  id: string,
+  info: { resetsAt?: number | undefined } | undefined,
+  now: Date = new Date(),
+): Promise<boolean> {
+  const resets = info?.resetsAt;
+  if (typeof resets !== 'number' || !Number.isFinite(resets) || resets * 1000 <= now.getTime()) {
+    return false;
+  }
+  try {
+    await markLimited(id, new Date(resets * 1000));
+    return true;
+  } catch {
+    return false;
+  }
 }

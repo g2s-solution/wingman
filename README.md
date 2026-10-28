@@ -80,16 +80,20 @@ The registry is a plain file (directory mode 0700, file mode 0600). `another-log
 Run these in a terminal: `node <plugin dir>/wingman/bin/wingman accounts <command>`.
 
 ```sh
-wingman accounts list [--json]            # id, label, status, config_dir, command; marks your own profile
+wingman accounts list [--json]            # id, label, status, limited_until, runs by status, config_dir, command; marks your own profile
 wingman accounts add --id ID --config-dir DIR [--label L] [--command CMD] [--provider P] [--upsert]
 wingman accounts disable ID               # status disabled: never picked, and refused when named
 wingman accounts enable ID                # back to active
+wingman accounts mark-limited ID --until T   # T: ISO time with Z or an offset, a date (UTC) or epoch seconds
+wingman accounts clear-limited ID         # make a limited account selectable again
 wingman accounts remove ID --yes          # registry entry only; the profile directory and credentials are not touched
 ```
 
 `add` needs an absolute `--config-dir` (a leading `~` is expanded), refuses a duplicate id unless `--upsert` (which keeps fields you set by hand, such as `status`). Registering your own profile is allowed and prints a note: it is skipped when you delegate from it and used when you delegate from another profile. `remove` without `--yes` only prints what it would do and exits 2. Exit codes: 0 ok, 2 usage or validation error, 1 unexpected error. The commands never read or write credentials.
 
-Claude can list the accounts through the read-only `wingman_accounts` tool, but no tool adds, changes or removes one: an entry's `command` is run by wingman, so only you, in a terminal, can change it.
+When a run ends `rate_limited`, wingman marks its account `rate_limited` until the reset time the run reported (`limited_until`). A limited account is skipped when Claude does not name one, and refused when it does; once the time has passed it counts as active again, with no job running. The `rate_limited` answer names the other active accounts, if any, and Claude (not wingman) decides whether to retry on one. `mark-limited` and `clear-limited` set or lift the state by hand. `wingman doctor` lists limited accounts as warnings and does not fail because of them.
+
+Claude can list the accounts (with their limited state and run counts per outcome) through the read-only `wingman_accounts` tool, but no tool adds, changes or removes one: an entry's `command` is run by wingman, so only you, in a terminal, can change it.
 
 ### Delegate in both directions (role swap)
 
@@ -164,7 +168,7 @@ The skill drives these; you can also call them directly.
 | `wingman_result` | the final report, masked, in pages (`offset`, `limit`; default 4000, max 8000 characters): keep calling with `result_next_offset` until it is absent |
 | `wingman_cancel` | stop a run |
 | `wingman_list` | recent runs |
-| `wingman_accounts` | the registered accounts: id, label, status, `is_caller`, provider (read-only; no command or paths; accounts are changed only with the `wingman accounts` CLI) |
+| `wingman_accounts` | the registered accounts: id, label, status (with `limited_until` while limited), `is_caller`, provider, `runs` by status (read-only; no command or paths; accounts are changed only with the `wingman accounts` CLI) |
 | `wingman_cleanup` | remove a run's worktree (`accept` refuses uncommitted changes); the run branch, when there is one, is kept |
 
 Run state lives in `~/.wingman/runs/<id>/`. Do not read `events.jsonl`: it holds raw tool output.
@@ -179,7 +183,7 @@ Run state lives in `~/.wingman/runs/<id>/`. Do not read `events.jsonl`: it holds
 | the run ends `failed_no_report`, or the report says "Not logged in" | the target's login expired or its launcher cannot find its key | run `<launcher> auth status`; sign in again with `another-login.sh --force` |
 | `Refusing to start a run on a detached HEAD` | HEAD is not on a branch | `git switch` to a branch |
 | `Refusing to start a run on the base branch ... without a worktree` | `worktree: false` on `main` | drop `worktree: false` |
-| status `rate_limited` | the target hit its usage limit | wait for the reset time in the report, or start a new run on another account |
+| status `rate_limited` | the target hit its usage limit | the account is marked limited until the reset time; the answer lists other active accounts: start a new run on one of them, or wait |
 | status `needs_caller` | the run changed your base branch, branch ref, repo config or git hooks, or needs a plugin change | inspect with `git log --oneline` and `git diff`; start a new run |
 | `wingman_cleanup` refuses | the run is still running, or the worktree has uncommitted changes | cancel it, or commit or discard the changes (`action: discard`) |
 
@@ -210,7 +214,7 @@ Run state lives in `~/.wingman/runs/<id>/`. Do not read `events.jsonl`: it holds
 - A run that changes your base branch, your branch ref, the repository's local git config or its git hooks ends as `needs_caller`. This is an after-the-fact check, not prevention.
 - The prompt reaches the agent over stdin, so it does not show in the process list. The appended system prompt (the guard text) is still a command-line argument; it is static and not secret.
 - On macOS the process checks use `ps` and have had little real-world use (see Requirements).
-- A run cannot be resumed; start a new one. There is no automatic failover when an account is rate limited.
+- A run cannot be resumed; start a new one. There is no automatic failover when an account is rate limited: the answer names the alternatives and you decide.
 - Wingman relies on `--strict-mcp-config` and the stream-json output of Claude Code; other Claude Code versions than the tested one may behave differently.
 
 ## More

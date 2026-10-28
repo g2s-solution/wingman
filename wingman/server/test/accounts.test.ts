@@ -171,9 +171,9 @@ describe('wingman accounts list', () => {
     out.length = 0;
     expect(await cli('list')).toBe(0);
     const lines = stdout().trimEnd().split('\n');
-    expect(lines[0]).toMatch(/^ID\s+LABEL\s+STATUS\s+CONFIG_DIR\s+COMMAND/);
-    expect(lines[1]).toMatch(/^other\s+claude-other\s+active\s+\S+\s+\/bin\/o$/);
-    expect(lines[2]).toMatch(/^me\s+me\s+disabled\s+\S+\s+claude\s+this profile$/);
+    expect(lines[0]).toMatch(/^ID\s+LABEL\s+STATUS\s+LIMITED_UNTIL\s+RUNS\s+CONFIG_DIR\s+COMMAND/);
+    expect(lines[1]).toMatch(/^other\s+claude-other\s+active\s+-\s+-\s+\S+\s+\/bin\/o$/);
+    expect(lines[2]).toMatch(/^me\s+me\s+disabled\s+-\s+-\s+\S+\s+claude\s+this profile$/);
   });
 
   it('--json prints the same fields plus is_caller', async () => {
@@ -189,6 +189,7 @@ describe('wingman accounts list', () => {
         config_dir: join(home, 'o'),
         command: 'claude',
         is_caller: false,
+        runs: { total: 0, by_status: {} },
       },
     ]);
   });
@@ -291,7 +292,14 @@ describe('wingman_accounts tool', () => {
     const text = (res.content as { text: string }[])[0]!.text;
     expect(JSON.parse(text)).toEqual({
       accounts: [
-        { id: 'other', label: 'other', status: 'disabled', is_caller: false, provider: 'claude' },
+        {
+          id: 'other',
+          label: 'other',
+          status: 'disabled',
+          is_caller: false,
+          provider: 'claude',
+          runs: { total: 0, by_status: {} },
+        },
       ],
     });
     expect(text).not.toMatch(/launcher|command|config_dir|\/o"/);

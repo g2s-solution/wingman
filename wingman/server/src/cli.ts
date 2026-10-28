@@ -1,6 +1,6 @@
 import { chmodSync, existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { accountsCommand } from './accounts.js';
+import { accountsCommand, type Clock } from './accounts.js';
 import { defaultDeps, doctorCommand, type DoctorDeps } from './doctor.js';
 import { DEFAULT_OLDER_THAN_DAYS, runGc } from './gc.js';
 import { runDir } from './paths.js';
@@ -25,11 +25,12 @@ const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms
 export async function maybeRunCli(
   argv: string[],
   doctorDeps: DoctorDeps = defaultDeps(),
+  now: Clock = () => new Date(),
 ): Promise<number | undefined> {
   const [command, ...args] = argv.slice(2);
   if (command === undefined || !COMMANDS.includes(command)) return undefined;
   try {
-    if (command === 'accounts') return await accountsCommand(args);
+    if (command === 'accounts') return await accountsCommand(args, now);
     if (command === 'doctor') return await doctorCommand(args, doctorDeps);
     return command === 'wait' ? await waitCommand(args) : await gcCommand(args);
   } catch (err) {

@@ -4,6 +4,7 @@ import { accessSync, constants, lstatSync, readFileSync, realpathSync, statSync 
 import { homedir } from 'node:os';
 import { delimiter, isAbsolute, join, resolve } from 'node:path';
 import pkg from '../package.json' with { type: 'json' };
+import { effectiveStatus, RATE_LIMITED } from './registry.js';
 
 export type Level = 'ok' | 'warn' | 'fail';
 
@@ -23,6 +24,8 @@ export interface DoctorDeps {
   env: NodeJS.ProcessEnv;
   homeDir: string;
   exec: ExecFn;
+  /** Clock for rate-limit expiry; defaults to the system clock. */
+  now?: () => Date;
 }
 
 /** Mirrors `SHARED` in another-login.sh. */
@@ -45,6 +48,7 @@ interface RegistryAccount {
   config_dir: string;
   command: string;
   status?: string;
+  limited_until?: string;
 }
 
 const defaultExec: ExecFn = (file, args, { env, timeoutMs }) =>
@@ -181,6 +185,9 @@ function checkState(stateDir: string, results: CheckResult[]): RegistryAccount[]
       config_dir: a.config_dir,
       command: typeof a.command === 'string' && a.command !== '' ? a.command : 'claude',
       ...(typeof a.status === 'string' && a.status !== '' ? { status: a.status } : {}),
+      ...(typeof a.limited_until === 'string' && a.limited_until !== ''
+        ? { limited_until: a.limited_until }
+        : {}),
     });
   }
   const ids = accounts.map((a) => a.id);
@@ -275,12 +282,21 @@ function checkAccount(
     });
   }
 
-  const status = account.status ?? 'active';
-  results.push({
-    id: `${p}.status`,
-    level: 'ok',
-    message: `${account.id}: status ${status}${status === 'active' || status === 'disabled' ? '' : ' (unknown value, treated as disabled)'}`,
-  });
+  const now = (deps.now ?? (() => new Date()))();
+  const status = effectiveStatus(account, now);
+  if (status === RATE_LIMITED) {
+    results.push({
+      id: `${p}.status`,
+      level: 'warn',
+      message: `${account.id}: rate limited${account.limited_until === undefined ? ' with no end time (fix: wingman accounts clear-limited)' : ` until ${account.limited_until}`}; skipped as a target until then`,
+    });
+  } else {
+    results.push({
+      id: `${p}.status`,
+      level: 'ok',
+      message: `${account.id}: status ${status}${status === 'active' || status === 'disabled' ? '' : ' (unknown value, treated as disabled)'}`,
+    });
+  }
 
   if (dirOk && canonical(account.config_dir) !== canonical(defaultDir)) {
     checkShared(account, defaultDir, results);

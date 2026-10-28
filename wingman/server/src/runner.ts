@@ -26,6 +26,7 @@ import {
   resolveTools,
 } from './guard.js';
 import { runDir, wingmanHome } from './paths.js';
+import { recordRateLimit } from './registry.js';
 import {
   appendEvent,
   createRun,
@@ -203,6 +204,7 @@ export async function runSupervisor(runId: string): Promise<void> {
   const adapter = getAdapter(payload.provider);
 
   let sessionRateLimit: RateLimitInfo | undefined;
+  let rejectedRateLimit: RateLimitInfo | undefined;
   let rateRejected = false;
   let finished:
     | {
@@ -251,7 +253,10 @@ export async function runSupervisor(runId: string): Promise<void> {
       for (const event of adapter.parseLine(line)) {
         if (event.kind === 'rate_limited') {
           sessionRateLimit = event.info;
-          if (isRateLimitRejected(event.info)) rateRejected = true;
+          if (isRateLimitRejected(event.info)) {
+            rateRejected = true;
+            rejectedRateLimit = event.info;
+          }
         } else if (event.kind === 'finished') {
           finished = event;
         }
@@ -306,6 +311,10 @@ export async function runSupervisor(runId: string): Promise<void> {
     permission_denials: [...new Set(finished?.permission_denials ?? [])],
   };
   if (sessionRateLimit) patch.rate_limit = sessionRateLimit;
+  // before the status flips, so a caller that sees `rate_limited` also sees the account limited
+  if (outcome.status === 'rate_limited') {
+    await recordRateLimit(current.account, rejectedRateLimit);
+  }
   try {
     updateStatus(runId, outcome.status, patch);
   } catch {
