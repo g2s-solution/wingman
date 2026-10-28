@@ -8,7 +8,7 @@ import { publicAccounts } from './accounts.js';
 import type { Account } from './types.js';
 import { TOOL_ITEM } from './guard.js';
 import { maskSecrets, safeSummary } from './mask.js';
-import { getAccount, isActive, loadAccounts, targetsFor } from './registry.js';
+import { getAccount, isActive, isLimited, loadAccounts, targetsFor } from './registry.js';
 import { reconcile } from './reconcile.js';
 import {
   listRuns,
@@ -27,6 +27,8 @@ export interface ServerDeps {
   env?: NodeJS.ProcessEnv;
   /** Random source for picking an account; defaults to Math.random. */
   random?: () => number;
+  /** Clock for rate-limit expiry; defaults to the system clock. */
+  now?: () => Date;
   /** Script the supervisor is started from; defaults to the running entry. */
   supervisorEntry?: string;
 }
@@ -76,10 +78,31 @@ function currentBranch(cwd: string): Promise<string | undefined> {
   });
 }
 
+/** Ids of the accounts the caller could use instead of `exceptId`: active, not limited, not its own. */
+async function alternativesTo(
+  env: NodeJS.ProcessEnv,
+  exceptId: string,
+  now: Date,
+): Promise<string[]> {
+  try {
+    const targets = await targetsFor(callerProfile(env));
+    return targets.filter((a) => a.id !== exceptId && isActive(a, now)).map((a) => a.id);
+  } catch {
+    return [];
+  }
+}
+
+function alternativesHint(ids: string[]): string {
+  return ids.length === 0
+    ? ''
+    : `; other active accounts: ${ids.join(', ')} (pass one as "account" to retry)`;
+}
+
 async function chooseAccount(
   env: NodeJS.ProcessEnv,
   accountId: string | undefined,
   random: () => number,
+  now: Date,
 ): Promise<Account> {
   const targets = await targetsFor(callerProfile(env));
   if (accountId !== undefined) {
@@ -87,16 +110,32 @@ async function chooseAccount(
     if (!targets.some((a) => a.id === accountId)) {
       throw new Error(`Account "${accountId}" is the caller's own profile; pick another account`);
     }
-    if (!isActive(account)) {
+    if (isLimited(account, now)) {
+      const until =
+        account.limited_until === undefined
+          ? 'no end time, until cleared'
+          : `limited_until ${account.limited_until}`;
+      throw new Error(
+        `Account "${accountId}" is rate limited (${until}); pick another account${alternativesHint(await alternativesTo(env, accountId, now))}`,
+      );
+    }
+    if (!isActive(account, now)) {
       throw new Error(
         `Account "${accountId}" is ${account.status}, not active; pick another account`,
       );
     }
     return account;
   }
-  const pool = targets.filter(isActive);
+  const pool = targets.filter((a) => isActive(a, now));
   if (pool.length === 0) {
-    throw new Error('No other active account is registered to run on; see `wingman accounts list`');
+    const limited = targets.filter((a) => isLimited(a, now));
+    const note =
+      limited.length === 0
+        ? ''
+        : `; rate limited: ${limited.map((a) => `${a.id} (limited_until ${a.limited_until ?? 'none'})`).join(', ')}`;
+    throw new Error(
+      `No other active account is registered to run on${note}; see \`wingman accounts list\``,
+    );
   }
   return pool[Math.min(Math.floor(random() * pool.length), pool.length - 1)]!;
 }
@@ -151,6 +190,21 @@ const runIdInput = { run_id: z.string().min(1).max(64) };
 export function createHandlers(deps: ServerDeps = {}) {
   const env = deps.env ?? process.env;
   const random = deps.random ?? Math.random;
+  const now = deps.now ?? ((): Date => new Date());
+  /** On a rate_limited run: names the other usable accounts; the caller decides, nothing is rerouted. */
+  const withHint = async (
+    payload: Json,
+    run: { status: string; account: string },
+  ): Promise<Json> => {
+    if (run.status !== 'rate_limited') return payload;
+    const others = await alternativesTo(env, run.account, now());
+    if (others.length === 0) return payload;
+    return {
+      ...payload,
+      other_active_accounts: others,
+      hint: `Account ${run.account} hit its rate limit. Other active accounts: ${others.join(', ')}. Start a new run with "account" set to one of them if you want to retry; nothing is rerouted automatically.`,
+    };
+  };
   const runOpts = (): Partial<StartRunOptions> => ({
     parentEnv: env,
     ...(deps.supervisorEntry !== undefined ? { supervisorEntry: deps.supervisorEntry } : {}),
@@ -158,7 +212,7 @@ export function createHandlers(deps: ServerDeps = {}) {
 
   return {
     async start(input: z.infer<z.ZodObject<typeof startInput>>): Promise<Json> {
-      const account = await chooseAccount(env, input.account, random);
+      const account = await chooseAccount(env, input.account, random, now());
       if (
         !isAbsolute(input.cwd) ||
         !statSync(input.cwd, { throwIfNoEntry: false })?.isDirectory()
@@ -192,28 +246,31 @@ export function createHandlers(deps: ServerDeps = {}) {
       };
     },
 
-    status(input: { run_id: string }): Json {
-      loadMeta(input.run_id);
+    async status(input: { run_id: string }): Promise<Json> {
+      const meta = loadMeta(input.run_id);
       const { result, ...summary } = runSummary(input.run_id);
-      return { ...summary, has_result: result !== null };
+      return withHint({ ...summary, has_result: result !== null }, meta);
     },
 
-    result(input: { run_id: string; offset?: number; limit?: number }): Json {
+    async result(input: { run_id: string; offset?: number; limit?: number }): Promise<Json> {
       const meta = loadMeta(input.run_id);
       if (!TERMINAL_STATUSES.includes(meta.status)) {
         return { id: meta.id, status: meta.status, message: 'still running' };
       }
-      return {
-        ...runSummary(input.run_id, {
-          ...(input.offset !== undefined ? { offset: input.offset } : {}),
-          ...(input.limit !== undefined ? { limit: input.limit } : {}),
-        }),
-      };
+      return withHint(
+        {
+          ...runSummary(input.run_id, {
+            ...(input.offset !== undefined ? { offset: input.offset } : {}),
+            ...(input.limit !== undefined ? { limit: input.limit } : {}),
+          }),
+        },
+        meta,
+      );
     },
 
     async accounts(): Promise<Json> {
       const { accounts } = await loadAccounts();
-      return { accounts: publicAccounts(accounts, callerProfile(env)) };
+      return { accounts: publicAccounts(accounts, callerProfile(env), now()) };
     },
 
     async cancel(input: { run_id: string }): Promise<Json> {
@@ -341,7 +398,7 @@ export function buildServer(deps: ServerDeps = {}): McpServer {
     'wingman_accounts',
     {
       description:
-        'List the registered accounts: id, label, status (active or disabled), is_caller (your own profile, never a target) and provider. Read-only on purpose: an account entry names a command the runner executes, so no tool adds, changes or removes accounts; the Human does that with `wingman accounts ...` in a terminal.',
+        'List the registered accounts: id, label, status (active, disabled or rate_limited, with limited_until while limited; a limited account is skipped until then), is_caller (your own profile, never a target), provider and runs (finished runs by status). Read-only on purpose: an account entry names a command the runner executes, so no tool adds, changes or removes accounts; the Human does that with `wingman accounts ...` in a terminal.',
       inputSchema: {},
     },
     wrap(h.accounts),

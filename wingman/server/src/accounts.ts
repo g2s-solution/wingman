@@ -1,6 +1,14 @@
 import { homedir } from 'node:os';
 import { isAbsolute, join, resolve } from 'node:path';
-import { loadAccounts, saveAccounts } from './registry.js';
+import {
+  clearLimited,
+  effectiveStatus,
+  isLimited,
+  loadAccounts,
+  markLimited,
+  saveAccounts,
+} from './registry.js';
+import { runCountsByAccount, type AccountRunCounts } from './runs.js';
 import { callerProfile, canonical } from './self.js';
 import type { Account } from './types.js';
 
@@ -10,18 +18,25 @@ const USAGE = `usage: wingman accounts list [--json]
        wingman accounts add --id ID --config-dir DIR [--label L] [--command CMD] [--provider P] [--upsert]
        wingman accounts disable ID
        wingman accounts enable ID
+       wingman accounts mark-limited ID --until <ISO time with Z or offset, or epoch seconds>
+       wingman accounts clear-limited ID
        wingman accounts remove ID --yes`;
 
 class AccountsUsageError extends Error {}
+
+export type Clock = () => Date;
 
 export interface AccountRow {
   id: string;
   label: string;
   status: string;
+  /** Present only while the account is limited. */
+  limited_until?: string;
   provider: string;
   config_dir: string;
   command: string;
   is_caller: boolean;
+  runs: AccountRunCounts;
 }
 
 /** Account fields safe to show a model: no command, no paths. */
@@ -29,30 +44,85 @@ export interface PublicAccount {
   id: string;
   label: string;
   status: string;
+  limited_until?: string;
   is_caller: boolean;
   provider: string;
+  runs: AccountRunCounts;
 }
 
-export function accountRows(accounts: Account[], caller: string): AccountRow[] {
+export function accountRows(
+  accounts: Account[],
+  caller: string,
+  now: Date = new Date(),
+  counts: Record<string, AccountRunCounts> = runCountsByAccount(),
+): AccountRow[] {
   return accounts.map((a) => ({
     id: a.id,
     label: a.label,
-    status: a.status ?? 'active',
+    status: effectiveStatus(a, now),
+    ...(isLimited(a, now) && a.limited_until !== undefined
+      ? { limited_until: a.limited_until }
+      : {}),
     provider: a.provider,
     config_dir: a.config_dir,
     command: a.command,
     is_caller: canonical(a.config_dir) === caller,
+    runs: counts[a.id] ?? { total: 0, by_status: {} },
   }));
 }
 
-export function publicAccounts(accounts: Account[], caller: string): PublicAccount[] {
-  return accountRows(accounts, caller).map((r) => ({
+export function publicAccounts(
+  accounts: Account[],
+  caller: string,
+  now: Date = new Date(),
+  counts?: Record<string, AccountRunCounts>,
+): PublicAccount[] {
+  return accountRows(accounts, caller, now, counts).map((r) => ({
     id: r.id,
     label: r.label,
     status: r.status,
+    ...(r.limited_until !== undefined ? { limited_until: r.limited_until } : {}),
     is_caller: r.is_caller,
     provider: r.provider,
+    runs: r.runs,
   }));
+}
+
+const ISO_TIME =
+  /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2}))?$/;
+
+/** An ISO date or date-time with an explicit zone (a bare date is UTC), or epoch seconds. */
+export function parseUntil(raw: string, now: Date): Date {
+  const bad =
+    '--until must be an ISO time with Z or an offset (2026-11-01T08:00:00Z), a date (2026-11-01) or epoch seconds';
+  let until: Date;
+  if (/^\d{1,13}$/.test(raw)) {
+    until = new Date(Number(raw) * 1000);
+  } else {
+    const m = ISO_TIME.exec(raw);
+    if (m === null) throw new AccountsUsageError(bad);
+    until = new Date(raw.includes('T') ? raw : `${raw}T00:00:00Z`);
+    const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
+    const hour = m[4] === undefined ? 0 : Number(m[4]);
+    const minute = m[5] === undefined ? 0 : Number(m[5]);
+    const second = m[6] === undefined ? 0 : Number(m[6]);
+    const calendar = new Date(Date.UTC(y, mo - 1, d));
+    if (
+      calendar.getUTCFullYear() !== y ||
+      calendar.getUTCMonth() !== mo - 1 ||
+      calendar.getUTCDate() !== d ||
+      hour > 23 ||
+      minute > 59 ||
+      second > 59
+    ) {
+      throw new AccountsUsageError(bad);
+    }
+  }
+  if (Number.isNaN(until.getTime())) throw new AccountsUsageError(bad);
+  if (until.getTime() <= now.getTime()) {
+    throw new AccountsUsageError(`--until ${raw} is not in the future`);
+  }
+  return until;
 }
 
 export function normalizeConfigDir(raw: string): string {
@@ -104,11 +174,18 @@ function table(rows: string[][]): string {
     .join('\n');
 }
 
-async function list(args: string[]): Promise<number> {
+function runsCell(runs: AccountRunCounts): string {
+  const parts = Object.entries(runs.by_status)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([status, n]) => `${status}=${n}`);
+  return parts.length === 0 ? '-' : parts.join(' ');
+}
+
+async function list(args: string[], now: Clock): Promise<number> {
   const p = parse(args, [], ['--json']);
   if (p.positional.length > 0) throw new AccountsUsageError(`unexpected argument\n${USAGE}`);
   const { accounts } = await loadAccounts();
-  const rows = accountRows(accounts, callerProfile());
+  const rows = accountRows(accounts, callerProfile(), now());
   if (p.flags.has('--json')) {
     write(JSON.stringify(rows, null, 2));
   } else if (rows.length === 0) {
@@ -116,11 +193,13 @@ async function list(args: string[]): Promise<number> {
   } else {
     write(
       table([
-        ['ID', 'LABEL', 'STATUS', 'CONFIG_DIR', 'COMMAND', ''],
+        ['ID', 'LABEL', 'STATUS', 'LIMITED_UNTIL', 'RUNS', 'CONFIG_DIR', 'COMMAND', ''],
         ...rows.map((r) => [
           r.id,
           r.label,
           r.status,
+          r.limited_until ?? '-',
+          runsCell(r.runs),
           r.config_dir,
           r.command,
           r.is_caller ? 'this profile' : '',
@@ -128,6 +207,37 @@ async function list(args: string[]): Promise<number> {
       ]),
     );
   }
+  return 0;
+}
+
+async function limit(
+  verb: 'mark-limited' | 'clear-limited',
+  args: string[],
+  now: Clock,
+): Promise<number> {
+  const p = parse(args, verb === 'mark-limited' ? ['--until'] : [], []);
+  const id = p.positional[0];
+  if (id === undefined || p.positional.length > 1) {
+    throw new AccountsUsageError(`${verb} needs exactly one account id\n${USAGE}`);
+  }
+  const registry = await loadAccounts();
+  if (!registry.accounts.some((a) => a.id === id)) {
+    const known = registry.accounts.map((a) => a.id).join(', ') || 'none';
+    throw new AccountsUsageError(`unknown account "${id}". Registered accounts: ${known}`);
+  }
+  if (verb === 'clear-limited') {
+    write((await clearLimited(id)) ? `cleared the limit on ${id}` : `${id} is not marked limited`);
+    return 0;
+  }
+  const raw = p.values['--until'];
+  if (raw === undefined) throw new AccountsUsageError(`--until is required\n${USAGE}`);
+  const until = parseUntil(raw, now());
+  try {
+    await markLimited(id, until);
+  } catch (err) {
+    throw new AccountsUsageError((err as Error).message);
+  }
+  write(`marked ${id} limited until ${until.toISOString()}`);
   return 0;
 }
 
@@ -210,25 +320,29 @@ async function change(verb: 'disable' | 'enable' | 'remove', args: string[]): Pr
     write(`removed ${id}`);
     return 0;
   }
-  if (verb === 'disable') {
-    registry.accounts[i] = { ...registry.accounts[i]!, status: 'disabled' };
-  } else {
-    const entry = { ...registry.accounts[i]! };
-    delete entry.status;
-    registry.accounts[i] = entry;
-  }
+  const entry = { ...registry.accounts[i]! };
+  delete entry.limited_until;
+  if (verb === 'disable') entry.status = 'disabled';
+  else delete entry.status;
+  registry.accounts[i] = entry;
   await saveAccounts(registry);
   write(`${verb}d ${id}`);
   return 0;
 }
 
 /** Runs `wingman accounts ...` and returns its exit code; unexpected errors propagate. */
-export async function accountsCommand(args: string[]): Promise<number> {
+export async function accountsCommand(
+  args: string[],
+  now: Clock = () => new Date(),
+): Promise<number> {
   const [sub, ...rest] = args;
   try {
     switch (sub) {
       case 'list':
-        return await list(rest);
+        return await list(rest, now);
+      case 'mark-limited':
+      case 'clear-limited':
+        return await limit(sub, rest, now);
       case 'add':
         return await add(rest);
       case 'disable':

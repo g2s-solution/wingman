@@ -8,6 +8,8 @@ export interface Account {
   command: string;
   /** Absent or 'active' means usable; anything else disables the account. */
   status?: string;
+  /** ISO time; with status 'rate_limited', the account is skipped until then. */
+  limited_until?: string;
 }
 
 export type RunStatus =

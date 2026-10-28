@@ -55,7 +55,7 @@ const rate = (status) =>
     type: 'rate_limit_event',
     rate_limit_info: {
       status,
-      resetsAt: 1900000000,
+      resetsAt: Number(process.env.FAKE_CLAUDE_RESETS_AT ?? 1900000000),
       rateLimitType: 'five_hour',
       isUsingOverage: false,
     },

@@ -65,8 +65,8 @@ describe('tool paths reconcile without waitForRun', () => {
   it('status, result, list, cancel and cleanup see a dead run as failed_no_report', async () => {
     const h = createHandlers({ env: { PATH: process.env.PATH } });
     const ids = [1, 2, 3, 4].map(() => running({ pid: deadPid() }).id);
-    expect(h.status({ run_id: ids[0]! }).status).toBe('failed_no_report');
-    expect(h.result({ run_id: ids[1]! }).status).toBe('failed_no_report');
+    expect((await h.status({ run_id: ids[0]! })).status).toBe('failed_no_report');
+    expect((await h.result({ run_id: ids[1]! })).status).toBe('failed_no_report');
     expect((await h.cancel({ run_id: ids[2]! })).reason).toMatch(/failed_no_report/);
     expect((await h.cleanup({ run_id: ids[3]!, action: 'discard' })).run_id).toBe(ids[3]);
     const listed = (h.list({}).runs as { id: string; status: string }[]).map((r) => r.status);
