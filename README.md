@@ -202,6 +202,7 @@ Run state lives in `~/.wingman/runs/<id>/`. Do not read `events.jsonl`: it holds
   It deletes the whole directory of runs that are over and finished more than N days ago (default 30), never a run that is still running (a dead one is first ended as `failed_no_report`), and keeps a run whose worktree still exists. It also prunes orphan worktrees as the server does at start and removes lock files whose owner process is gone or whose run no longer exists. It never deletes git branches. It prints counts only and exits 0 (2 on bad arguments).
 - `worktrees/` holds one git worktree per run. `wingman_cleanup` (`accept` or `discard`) removes the worktree and releases its lock. It keeps the `wingman/<runid>` branch in your repository: delete it yourself with `git branch -D` when you no longer need it.
 - `locks/` holds one small lock file per `lock_key` in use. It is removed when the run is cleaned up, and a lock left by a dead process is reclaimed the next time the same key is used.
+- To delete everything wingman stored, make sure no run is active (`wingman_cleanup` or cancel them first), remove the worktrees with `git worktree remove --force <path>` (or `git worktree prune` after deleting the directory), then `rm -rf ~/.wingman` (or `$WINGMAN_HOME`). The `wingman/<runid>` branches stay in your repositories until you delete them. Removing `accounts.json` unregisters your accounts, so run the add-account setup again afterwards.
 
 ## Limits
 
