@@ -4,6 +4,7 @@ import { getAdapter } from '../src/adapters/index.js';
 import { guardPrompt } from '../src/guard.js';
 import { mapOutcome, startRun } from '../src/runner.js';
 import type { Account } from '../src/types.js';
+import { tmp } from './helpers.js';
 
 describe('adapter registry', () => {
   it('returns the claude adapter and refuses unknown providers', () => {
@@ -88,5 +89,31 @@ describe('model names in startRun', () => {
     await expect(
       startRun({ account, prompt: 'p', cwd: '/tmp', worktree: false, model: '--evil' }),
     ).rejects.toThrow('not a valid model name');
+  });
+});
+
+describe('a rejected model leaves nothing behind', () => {
+  it('creates no run and no worktree', async () => {
+    const saved = process.env.WINGMAN_HOME;
+    process.env.WINGMAN_HOME = tmp('home-model');
+    try {
+      const { runsDir } = await import('../src/paths.js');
+      const { existsSync, readdirSync } = await import('node:fs');
+      const account = {
+        id: 'x',
+        config_dir: '/tmp/x',
+        provider: 'claude',
+        command: 'x',
+      } as Account;
+      const before = existsSync(runsDir()) ? readdirSync(runsDir()).length : 0;
+      await expect(
+        startRun({ account, prompt: 'p', cwd: '/tmp', worktree: false, model: '--evil' }),
+      ).rejects.toThrow('not a valid model name');
+      const after = existsSync(runsDir()) ? readdirSync(runsDir()).length : 0;
+      expect(after).toBe(before);
+    } finally {
+      if (saved === undefined) delete process.env.WINGMAN_HOME;
+      else process.env.WINGMAN_HOME = saved;
+    }
   });
 });

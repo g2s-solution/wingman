@@ -29450,7 +29450,7 @@ import { delimiter, isAbsolute as isAbsolute2, join as join5, resolve as resolve
 // package.json
 var package_default = {
   name: "wingman-server",
-  version: "0.5.1",
+  version: "0.5.2",
   private: true,
   type: "module",
   engines: {
@@ -31418,6 +31418,8 @@ async function startRun(opts) {
       `allowed_tools are Claude tool rules and are not supported for provider "${adapter.provider}"; choose a preset instead`
     );
   }
+  const model = resolveModel(opts.account, opts.model);
+  if (model !== void 0) assertModelName(model);
   if (!adapter.capabilities.maxTurns && opts.max_turns !== void 0) {
     throw new Error(
       `max_turns is not supported for provider "${adapter.provider}"; the run is bounded by its time limit`
@@ -31516,8 +31518,6 @@ async function startRun(opts) {
       patchRunning(meta3.id, { ref_snapshot: snapshot });
     }
   }
-  const model = resolveModel(opts.account, opts.model);
-  if (model !== void 0) assertModelName(model);
   const maxTurns = adapter.capabilities.maxTurns ? opts.max_turns ?? defaultMaxTurns(opts.preset) : void 0;
   const spec = {
     prompt: opts.prompt,

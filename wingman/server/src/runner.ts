@@ -516,6 +516,8 @@ export async function startRun(opts: StartRunOptions): Promise<RunMeta> {
       `allowed_tools are Claude tool rules and are not supported for provider "${adapter.provider}"; choose a preset instead`,
     );
   }
+  const model = resolveModel(opts.account, opts.model);
+  if (model !== undefined) assertModelName(model);
   if (!adapter.capabilities.maxTurns && opts.max_turns !== undefined) {
     throw new Error(
       `max_turns is not supported for provider "${adapter.provider}"; the run is bounded by its time limit`,
@@ -624,8 +626,6 @@ export async function startRun(opts: StartRunOptions): Promise<RunMeta> {
     }
   }
 
-  const model = resolveModel(opts.account, opts.model);
-  if (model !== undefined) assertModelName(model);
   const maxTurns = adapter.capabilities.maxTurns
     ? (opts.max_turns ?? defaultMaxTurns(opts.preset))
     : undefined;
