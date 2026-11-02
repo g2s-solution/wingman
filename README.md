@@ -55,6 +55,8 @@ A bare name such as `claude-second` becomes `~/.claude-second`; a value containi
 - Writes a launcher (for example `~/.local/bin/claude-second`) that sets `CLAUDE_CONFIG_DIR` and loads the profile's key file, if any.
 - Registers the profile in `~/.wingman/accounts.json` (id = the name without a leading `claude-`, so `claude-second` becomes `second`).
 
+To remove a profile again, run `./another-logout.sh [--yes] [--keep-dir] <config-dir>`. It shows what it will remove and asks first; it unregisters the account from wingman, deletes the launcher this script made and (unless `--keep-dir`) the profile directory with its credentials. It refuses the default profile, and the shared items it linked are unlinked, never deleted.
+
 The wingman MCP server never reads credentials: it only runs the launcher named in the registry. `CLAUDE_CONFIG_DIR` is not a documented Claude Code setting, so treat profile isolation as working but unsupported.
 
 The registry is a plain file (directory mode 0700, file mode 0600). `another-login.sh` writes it through `wingman accounts add --upsert`, and that CLI is the normal way to change it (see "Manage accounts" below). The format, if you ever need to read or edit it by hand:
