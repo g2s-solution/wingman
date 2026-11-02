@@ -2,6 +2,15 @@
 
 Versions are the plugin version in `wingman/.claude-plugin/plugin.json`. Claude Code only updates an installed plugin when this number changes.
 
+## 0.4.2
+
+- The hooks guardrail now hashes the directory from `git rev-parse --git-path hooks`, so a repository with `core.hooksPath` (for example husky) is covered; before, edits to the hooks that actually run went unnoticed.
+- `setup` is refused with a clear error when the run has no worktree, instead of being accepted and silently ignored.
+- `WINGMAN_HOME` is resolved to an absolute path, so a relative value means the same directory in the supervisor as in the MCP server.
+- `wingman_cleanup` only deletes a leftover worktree directory that is inside `~/.wingman/worktrees`; the old string-prefix check also matched sibling paths such as `worktrees-old/`.
+- `meta.json` keeps unknown fields when an older run is read and rewritten, so a newer version's data is not dropped.
+- Docs: `edit-files` is described as running git and `date` (not "no commands"); paging fields on the last page; run-branch names in the cleanup section; `accounts remove` needs `--yes` after the preview; `CLAUDE.md` status; `wingman accounts` usage lists `mark-limited` and `clear-limited`.
+
 ## 0.4.1
 
 - Denied commands are reported: `permission_denials` keeps the tool name and, for `Bash`, the first two masked words of the command (for example `Bash(cd /work)`). A `partial` run with denials gets a `hint` in `wingman_status` and `wingman_result` naming up to 5 denied heads.

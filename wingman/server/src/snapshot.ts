@@ -46,10 +46,10 @@ async function observe(
     ...refs,
   ]);
   const config = await git(exec, repo, ['config', '--local', '--list']);
-  const common = await git(exec, repo, ['rev-parse', '--git-common-dir']);
-  if (listed === undefined || config === undefined || common === undefined) return undefined;
-  const commonDir = common.trim();
-  const hooksDir = join(isAbsolute(commonDir) ? commonDir : resolve(repo, commonDir), 'hooks');
+  const hooks = await git(exec, repo, ['rev-parse', '--git-path', 'hooks']);
+  if (listed === undefined || config === undefined || hooks === undefined) return undefined;
+  const hooksPath = hooks.trim();
+  const hooksDir = isAbsolute(hooksPath) ? hooksPath : resolve(repo, hooksPath);
   return { refs_hash: sha(listed), config_hash: sha(config), hooks_hash: hashHooks(hooksDir) };
 }
 

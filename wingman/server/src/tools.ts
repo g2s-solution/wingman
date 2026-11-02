@@ -177,7 +177,7 @@ const startInput = {
     .min(1)
     .optional()
     .describe(
-      'Tool preset: "readonly" (default), "edit-files" (changes files and commits, runs no commands) or "edit" (also runs node and npm: arbitrary code).',
+      'Tool preset: "readonly" (default), "edit-files" (changes files and commits; runs only git and date) or "edit" (also runs node and npm: arbitrary code).',
     ),
   allowed_tools: z
     .array(z.string().min(1).max(300).regex(TOOL_ITEM, 'invalid tool rule'))
@@ -204,7 +204,7 @@ const startInput = {
     .boolean()
     .optional()
     .describe(
-      'Create a run branch in the worktree. Default: yes for edit runs, no (detached worktree) for readonly runs. branch:false is refused for runs that may commit.',
+      'Create a run branch in the worktree. Default: yes for runs that may commit (edit presets or explicit allowed_tools), no (detached worktree) for readonly runs. branch:false is refused for runs that may commit.',
     ),
   lock_key: z
     .string()
@@ -392,7 +392,7 @@ export function buildServer(deps: ServerDeps = {}): McpServer {
   server.registerTool(
     'wingman_start',
     {
-      description: `Start a one-shot detached run of Claude Code on another registered account (random active one when account is omitted); to give more work, start a new run. Returns run_id, account and status only. Presets: "readonly" (default), "edit-files" (edits files and commits, runs no commands) and "edit" (also runs node and npm). The preset "edit" runs arbitrary code under the target account and the deny rules are advisory, not a sandbox; "setup" is an arbitrary shell command run as the caller's user, outside the presets. Then run bin/wingman-wait <run_id> in the background and call wingman_result. ${LOGS_WARNING}`,
+      description: `Start a one-shot detached run of Claude Code on another registered account (random active one when account is omitted); to give more work, start a new run. Returns run_id, account and status only. Presets: "readonly" (default), "edit-files" (edits files and commits; runs only git and date) and "edit" (also runs node and npm). The preset "edit" runs arbitrary code under the target account and the deny rules are advisory, not a sandbox; "setup" is an arbitrary shell command run as the caller's user, outside the presets. Then run bin/wingman-wait <run_id> in the background and call wingman_result. ${LOGS_WARNING}`,
       inputSchema: strictInput('wingman_start', startInput),
     },
     wrap(h.start),

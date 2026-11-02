@@ -76,6 +76,17 @@ describe('runs', () => {
     expect(() => readMeta('../etc')).toThrow(/invalid run id/);
   });
 
+  it('keeps unknown meta fields when rewriting', () => {
+    const meta = createRun(base);
+    const file = join(runDir(meta.id), 'meta.json');
+    const raw = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
+    raw.future_field = 'keep';
+    writeFileSync(file, JSON.stringify(raw));
+    updateStatus(meta.id, 'done');
+    const after = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
+    expect(after.future_field).toBe('keep');
+  });
+
   it('writes meta atomically, leaving no temp files', () => {
     const meta = createRun(base);
     for (let i = 0; i < 5; i++) updateStatus(meta.id, 'running', { pid: i });

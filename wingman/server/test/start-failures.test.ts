@@ -132,6 +132,14 @@ describe('timeouts and clean failed starts (M6, L3)', () => {
     expect(res.output).toMatch(/timed out/);
   });
 
+  it('refuses setup when the run has no worktree', async () => {
+    const repo = makeRepo('main');
+    git(repo, 'switch', '-q', '-c', 'feat/s');
+    await expect(
+      startRun(startOpts(launcher('ok').command, { cwd: repo, worktree: false, setup: 'true' })),
+    ).rejects.toThrow(/setup needs a worktree/);
+  });
+
   it('a setup timeout removes the run dir, worktree and lock', async () => {
     const repo = makeRepo('main');
     git(repo, 'switch', '-q', '-c', 'feat/t');

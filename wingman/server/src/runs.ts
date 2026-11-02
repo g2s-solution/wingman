@@ -37,45 +37,49 @@ const statusSchema = z.enum([
   'cancelled',
 ]);
 
-const metaSchema = z.object({
-  id: z.string(),
-  account: z.string(),
-  cwd: z.string(),
-  branch: z.string().optional(),
-  run_branch: z.string().optional(),
-  worktree: z.string().optional(),
-  ref_snapshot: z
-    .object({
-      refs: z.array(z.string()),
-      refs_hash: z.string(),
-      config_hash: z.string(),
-      hooks_hash: z.string().optional(),
-    })
-    .optional(),
-  repo: z.string().optional(),
-  run_cwd: z.string().optional(),
-  session_id: z.string(),
-  status: statusSchema,
-  created_at: z.string(),
-  started_at: z.string().optional(),
-  finished_at: z.string().optional(),
-  pid: z.number().optional(),
-  pid_start_time: z.string().optional(),
-  exit_code: z.number().nullable().optional(),
-  permission_denials: z.array(z.string()),
-  rate_limit: z
-    .object({
-      status: z.string().optional(),
-      resetsAt: z.number().optional(),
-      rateLimitType: z.string().optional(),
-      utilization: z.number().optional(),
-    })
-    .optional(),
-  depth: z.number(),
-  lock_key: z.string().optional(),
-  preset: z.string().optional(),
-  prompt_chars: z.number(),
-}) satisfies z.ZodType<RunMeta>;
+const metaSchema = z
+  .object({
+    id: z.string(),
+    account: z.string(),
+    cwd: z.string(),
+    branch: z.string().optional(),
+    run_branch: z.string().optional(),
+    worktree: z.string().optional(),
+    ref_snapshot: z
+      .object({
+        refs: z.array(z.string()),
+        refs_hash: z.string(),
+        config_hash: z.string(),
+        hooks_hash: z.string().optional(),
+      })
+      .passthrough()
+      .optional(),
+    repo: z.string().optional(),
+    run_cwd: z.string().optional(),
+    session_id: z.string(),
+    status: statusSchema,
+    created_at: z.string(),
+    started_at: z.string().optional(),
+    finished_at: z.string().optional(),
+    pid: z.number().optional(),
+    pid_start_time: z.string().optional(),
+    exit_code: z.number().nullable().optional(),
+    permission_denials: z.array(z.string()),
+    rate_limit: z
+      .object({
+        status: z.string().optional(),
+        resetsAt: z.number().optional(),
+        rateLimitType: z.string().optional(),
+        utilization: z.number().optional(),
+      })
+      .passthrough()
+      .optional(),
+    depth: z.number(),
+    lock_key: z.string().optional(),
+    preset: z.string().optional(),
+    prompt_chars: z.number(),
+  })
+  .passthrough() satisfies z.ZodType<RunMeta>;
 
 export type NewRunMeta = Omit<RunMeta, 'id' | 'status' | 'created_at' | 'permission_denials'>;
 

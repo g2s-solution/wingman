@@ -33,7 +33,7 @@ ${CLAUDE_PLUGIN_ROOT}/bin/wingman accounts list
 ${CLAUDE_PLUGIN_ROOT}/bin/wingman doctor
 ```
 
-(`accounts` may arrive in the same release as `doctor`; if it is missing, skip it and use `doctor` alone.) Explain every `[warn]` and `[fail]` line in plain words with its fix:
+Explain every `[warn]` and `[fail]` line in plain words with its fix:
 
 - `config_dir does not exist` (fail): the profile directory is gone; run `another-login.sh` again.
 - `command ... not found` or `not executable` (fail): the launcher is missing or lost its execute bit; `chmod +x` it or re-run `another-login.sh`.
@@ -55,4 +55,4 @@ This runs `auth status` for the caller and each account and prints only: signed 
 ## 4. Disable or remove
 
 - Pause an account: `${CLAUDE_PLUGIN_ROOT}/bin/wingman accounts disable ID` (`enable` brings it back).
-- Remove it from the registry: `${CLAUDE_PLUGIN_ROOT}/bin/wingman accounts remove ID`. Say what it does and does not delete as the command reports it; deleting the profile directory is the user's own decision.
+- Remove it from the registry: `${CLAUDE_PLUGIN_ROOT}/bin/wingman accounts remove ID` first prints what it would do and exits 2; run it again with `--yes` to remove the entry. Say what it does and does not delete as the command reports it; deleting the profile directory is the user's own decision.

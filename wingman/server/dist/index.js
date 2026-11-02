@@ -2985,7 +2985,7 @@ var require_compile = __commonJS({
       const schOrFunc = root.refs[ref];
       if (schOrFunc)
         return schOrFunc;
-      let _sch = resolve6.call(this, root, ref);
+      let _sch = resolve7.call(this, root, ref);
       if (_sch === void 0) {
         const schema = (_a3 = root.localRefs) === null || _a3 === void 0 ? void 0 : _a3[ref];
         const { schemaId } = this.opts;
@@ -3012,7 +3012,7 @@ var require_compile = __commonJS({
     function sameSchemaEnv(s1, s2) {
       return s1.schema === s2.schema && s1.root === s2.root && s1.baseId === s2.baseId;
     }
-    function resolve6(root, ref) {
+    function resolve7(root, ref) {
       let sch;
       while (typeof (sch = this.refs[ref]) == "string")
         ref = sch;
@@ -3876,7 +3876,7 @@ var require_fast_uri = __commonJS({
       }
       return uri;
     }
-    function resolve6(baseURI, relativeURI, options) {
+    function resolve7(baseURI, relativeURI, options) {
       const schemelessOptions = options ? Object.assign({ scheme: "null" }, options) : { scheme: "null" };
       const {
         parsed: baseParsed,
@@ -3912,50 +3912,50 @@ var require_fast_uri = __commonJS({
       schemelessOptions.skipEscape = true;
       return serialize(resolved, schemelessOptions);
     }
-    function resolveComponent(base, relative2, options, skipNormalization) {
+    function resolveComponent(base, relative3, options, skipNormalization) {
       const target = {};
       if (!skipNormalization) {
         base = parse4(serialize(base, options), options);
-        relative2 = parse4(serialize(relative2, options), options);
+        relative3 = parse4(serialize(relative3, options), options);
       }
       options = options || {};
-      if (!options.tolerant && relative2.scheme) {
-        target.scheme = relative2.scheme;
-        target.userinfo = relative2.userinfo;
-        target.host = relative2.host;
-        target.port = relative2.port;
-        target.path = removeDotSegments(relative2.path || "");
-        target.query = relative2.query;
+      if (!options.tolerant && relative3.scheme) {
+        target.scheme = relative3.scheme;
+        target.userinfo = relative3.userinfo;
+        target.host = relative3.host;
+        target.port = relative3.port;
+        target.path = removeDotSegments(relative3.path || "");
+        target.query = relative3.query;
       } else {
-        if (relative2.userinfo !== void 0 || relative2.host !== void 0 || relative2.port !== void 0) {
-          target.userinfo = relative2.userinfo;
-          target.host = relative2.host;
-          target.port = relative2.port;
-          target.path = removeDotSegments(relative2.path || "");
-          target.query = relative2.query;
+        if (relative3.userinfo !== void 0 || relative3.host !== void 0 || relative3.port !== void 0) {
+          target.userinfo = relative3.userinfo;
+          target.host = relative3.host;
+          target.port = relative3.port;
+          target.path = removeDotSegments(relative3.path || "");
+          target.query = relative3.query;
         } else {
-          if (!relative2.path) {
+          if (!relative3.path) {
             target.path = base.path;
-            if (relative2.query !== void 0) {
-              target.query = relative2.query;
+            if (relative3.query !== void 0) {
+              target.query = relative3.query;
             } else {
               target.query = base.query;
             }
           } else {
-            if (relative2.path[0] === "/") {
-              target.path = removeDotSegments(relative2.path);
+            if (relative3.path[0] === "/") {
+              target.path = removeDotSegments(relative3.path);
             } else {
               const baseHasAuthority = base.userinfo !== void 0 || base.host !== void 0 || base.port !== void 0;
               if (baseHasAuthority && !base.path) {
-                target.path = "/" + relative2.path;
+                target.path = "/" + relative3.path;
               } else if (!base.path) {
-                target.path = relative2.path;
+                target.path = relative3.path;
               } else {
-                target.path = base.path.slice(0, base.path.lastIndexOf("/") + 1) + relative2.path;
+                target.path = base.path.slice(0, base.path.lastIndexOf("/") + 1) + relative3.path;
               }
               target.path = base.scheme === void 0 && !baseHasAuthority && target.path[0] !== "/" ? removeDotSegmentsRelative(target.path) : removeDotSegments(target.path);
             }
-            target.query = relative2.query;
+            target.query = relative3.query;
           }
           target.userinfo = base.userinfo;
           target.host = base.host;
@@ -3963,7 +3963,7 @@ var require_fast_uri = __commonJS({
         }
         target.scheme = base.scheme;
       }
-      target.fragment = relative2.fragment;
+      target.fragment = relative3.fragment;
       return target;
     }
     function equal(uriA, uriB, options) {
@@ -4267,7 +4267,7 @@ var require_fast_uri = __commonJS({
     var fastUri = {
       SCHEMES,
       normalize,
-      resolve: resolve6,
+      resolve: resolve7,
       resolveComponent,
       equal,
       serialize,
@@ -12326,7 +12326,7 @@ var recursive = /* @__PURE__ */ new WeakMap();
 var NONE = 0;
 var ASSUMED = 1;
 var PROVEN = 2;
-function isRecursive(inst, stack, resolve6) {
+function isRecursive(inst, stack, resolve7) {
   const cached2 = recursive.get(inst);
   if (cached2 !== void 0)
     return cached2 ? PROVEN : NONE;
@@ -12336,7 +12336,7 @@ function isRecursive(inst, stack, resolve6) {
   let result = NONE;
   const check2 = (child) => {
     if (result !== PROVEN && child?._zod) {
-      const answer = isRecursive(child, stack, resolve6);
+      const answer = isRecursive(child, stack, resolve7);
       if (answer > result)
         result = answer;
     }
@@ -12347,7 +12347,7 @@ function isRecursive(inst, stack, resolve6) {
       const desc = Object.getOwnPropertyDescriptor(sh, key);
       if (spread && !desc.enumerable)
         continue;
-      const child = desc.get ? ASSUMED : desc.value?._zod ? isRecursive(desc.value, stack, resolve6) : NONE;
+      const child = desc.get ? ASSUMED : desc.value?._zod ? isRecursive(desc.value, stack, resolve7) : NONE;
       if (child > answer)
         answer = child;
     }
@@ -12411,7 +12411,7 @@ function isRecursive(inst, stack, resolve6) {
       break;
     // `$ZodLazy` caches its inner on the def, so a resolved edge is followed exactly
     case "lazy": {
-      const inner = def._cachedInner ?? (resolve6 ? inst._zod.innerType : void 0);
+      const inner = def._cachedInner ?? (resolve7 ? inst._zod.innerType : void 0);
       merge2(inner ? isRecursive(inner, stack, false) : ASSUMED);
       break;
     }
@@ -28600,12 +28600,12 @@ var StdioServerTransport = class {
     this.onclose?.();
   }
   send(message) {
-    return new Promise((resolve6) => {
+    return new Promise((resolve7) => {
       const json2 = serializeMessage(message);
       if (this._stdout.write(json2)) {
-        resolve6();
+        resolve7();
       } else {
-        this._stdout.once("drain", resolve6);
+        this._stdout.once("drain", resolve7);
       }
     });
   }
@@ -28617,18 +28617,18 @@ import { join as join9 } from "node:path";
 
 // src/accounts.ts
 import { homedir as homedir3 } from "node:os";
-import { isAbsolute, join as join4, resolve as resolve3 } from "node:path";
+import { isAbsolute, join as join4, resolve as resolve4 } from "node:path";
 
 // src/registry.ts
 import { randomBytes } from "node:crypto";
 import { chmod, mkdir, realpath, rename, writeFile, readFile, unlink } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { dirname, resolve as resolve2 } from "node:path";
 
 // src/paths.ts
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 function wingmanHome() {
-  return process.env.WINGMAN_HOME || join(homedir(), ".wingman");
+  return resolve(process.env.WINGMAN_HOME || join(homedir(), ".wingman"));
 }
 var accountsFile = () => join(wingmanHome(), "accounts.json");
 var runsDir = () => join(wingmanHome(), "runs");
@@ -28701,7 +28701,7 @@ async function canonical(dir) {
   try {
     return await realpath(dir);
   } catch {
-    return resolve(dir);
+    return resolve2(dir);
   }
 }
 async function targetsFor(callerProfileDir) {
@@ -28866,7 +28866,7 @@ var metaSchema = external_exports.object({
     refs_hash: external_exports.string(),
     config_hash: external_exports.string(),
     hooks_hash: external_exports.string().optional()
-  }).optional(),
+  }).passthrough().optional(),
   repo: external_exports.string().optional(),
   run_cwd: external_exports.string().optional(),
   session_id: external_exports.string(),
@@ -28883,12 +28883,12 @@ var metaSchema = external_exports.object({
     resetsAt: external_exports.number().optional(),
     rateLimitType: external_exports.string().optional(),
     utilization: external_exports.number().optional()
-  }).optional(),
+  }).passthrough().optional(),
   depth: external_exports.number(),
   lock_key: external_exports.string().optional(),
   preset: external_exports.string().optional(),
   prompt_chars: external_exports.number()
-});
+}).passthrough();
 var RESULT_PAGE_CHARS = 4e3;
 var RESULT_PAGE_MAX_CHARS = 8e3;
 var RUN_ID = /^[A-Za-z0-9_-]{1,64}$/;
@@ -29070,12 +29070,12 @@ function runSummary(id, page = {}) {
 // src/self.ts
 import { realpathSync } from "node:fs";
 import { homedir as homedir2 } from "node:os";
-import { join as join3, resolve as resolve2 } from "node:path";
+import { join as join3, resolve as resolve3 } from "node:path";
 function canonical2(dir) {
   try {
     return realpathSync(dir);
   } catch {
-    return resolve2(dir);
+    return resolve3(dir);
   }
 }
 function callerProfile(env = process.env) {
@@ -29167,7 +29167,7 @@ function normalizeConfigDir(raw) {
   if (!isAbsolute(expanded)) {
     throw new AccountsUsageError("--config-dir must be an absolute path (or start with ~/)");
   }
-  return resolve3(expanded);
+  return resolve4(expanded);
 }
 function parse3(args, valueFlags, boolFlags) {
   const out = { positional: [], values: {}, flags: /* @__PURE__ */ new Set() };
@@ -29383,12 +29383,12 @@ import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { accessSync, constants, lstatSync, readFileSync as readFileSync2, realpathSync as realpathSync2, statSync } from "node:fs";
 import { homedir as homedir4 } from "node:os";
-import { delimiter, isAbsolute as isAbsolute2, join as join5, resolve as resolve4 } from "node:path";
+import { delimiter, isAbsolute as isAbsolute2, join as join5, resolve as resolve5 } from "node:path";
 
 // package.json
 var package_default = {
   name: "wingman-server",
-  version: "0.4.1",
+  version: "0.4.2",
   private: true,
   type: "module",
   engines: {
@@ -29450,7 +29450,7 @@ function canonical3(path) {
   try {
     return realpathSync2(path);
   } catch {
-    return resolve4(path);
+    return resolve5(path);
   }
 }
 function isDir(path) {
@@ -29568,7 +29568,7 @@ function checkState(stateDir, results) {
   return accounts;
 }
 function resolveCommand(command, pathVar, cwd) {
-  const candidates = command.includes("/") ? [isAbsolute2(command) ? command : resolve4(cwd, command)] : pathVar.split(delimiter).filter((d) => d !== "").map((d) => join5(d, command));
+  const candidates = command.includes("/") ? [isAbsolute2(command) ? command : resolve5(cwd, command)] : pathVar.split(delimiter).filter((d) => d !== "").map((d) => join5(d, command));
   for (const c of candidates) {
     try {
       if (statSync(c).isFile()) return c;
@@ -30013,11 +30013,11 @@ import {
   rmSync as rmSync2,
   writeFileSync as writeFileSync2
 } from "node:fs";
-import { join as join7 } from "node:path";
+import { isAbsolute as isAbsolute3, join as join7, relative } from "node:path";
 var PROXY_VARS = ["HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"];
 var TIMED_OUT = 124;
 var MAX_OUTPUT = 16 * 1024 * 1024;
-var defaultExec2 = (file2, args, { cwd, env, timeoutMs }) => new Promise((resolve6) => {
+var defaultExec2 = (file2, args, { cwd, env, timeoutMs }) => new Promise((resolve7) => {
   let stdout = "";
   let stderr = "";
   let timedOut = false;
@@ -30037,7 +30037,7 @@ var defaultExec2 = (file2, args, { cwd, env, timeoutMs }) => new Promise((resolv
     if (hardStop) clearTimeout(hardStop);
     if (timedOut) stderr = `${stderr}
 timed out after ${timeoutMs}ms`.trim();
-    resolve6({ code: timedOut ? TIMED_OUT : code, stdout, stderr });
+    resolve7({ code: timedOut ? TIMED_OUT : code, stdout, stderr });
   };
   child.stdout?.on("data", (d) => {
     if (stdout.length < MAX_OUTPUT) stdout += d.toString("utf8");
@@ -30247,8 +30247,11 @@ async function removeWorktree(runId, exec = defaultExec2) {
       env,
       timeoutMs: DEFAULT_ADD_TIMEOUT_MS
     });
-    if (removed.code !== 0 && meta3.worktree.startsWith(worktreesDir())) {
-      rmSync2(meta3.worktree, { recursive: true, force: true });
+    if (removed.code !== 0) {
+      const inside = relative(worktreesDir(), meta3.worktree);
+      if (inside !== "" && !inside.startsWith("..") && !isAbsolute3(inside)) {
+        rmSync2(meta3.worktree, { recursive: true, force: true });
+      }
     }
     await exec("git", ["worktree", "prune"], {
       cwd: meta3.cwd,
@@ -30541,7 +30544,7 @@ import { randomUUID } from "node:crypto";
 import { closeSync as closeSync3, mkdirSync as mkdirSync3, openSync as openSync3, realpathSync as realpathSync4, rmSync as rmSync4 } from "node:fs";
 import { spawn as spawn2 } from "node:child_process";
 import { createInterface } from "node:readline";
-import { relative, join as join11, isAbsolute as isAbsolute4 } from "node:path";
+import { relative as relative2, join as join11, isAbsolute as isAbsolute5 } from "node:path";
 
 // src/guard.ts
 var DEFAULT_PRESET = "readonly";
@@ -30836,7 +30839,7 @@ function getAdapter(provider) {
 // src/snapshot.ts
 import { createHash as createHash3 } from "node:crypto";
 import { existsSync as existsSync6, readFileSync as readFileSync6, readdirSync as readdirSync5, statSync as statSync3 } from "node:fs";
-import { isAbsolute as isAbsolute3, join as join10, resolve as resolve5 } from "node:path";
+import { isAbsolute as isAbsolute4, join as join10, resolve as resolve6 } from "node:path";
 var SNAPSHOT_TIMEOUT_MS = 3e4;
 var sha = (text) => createHash3("sha256").update(text).digest("hex");
 async function git(exec, repo, args) {
@@ -30870,10 +30873,10 @@ async function observe(exec, repo, refs) {
     ...refs
   ]);
   const config2 = await git(exec, repo, ["config", "--local", "--list"]);
-  const common = await git(exec, repo, ["rev-parse", "--git-common-dir"]);
-  if (listed === void 0 || config2 === void 0 || common === void 0) return void 0;
-  const commonDir = common.trim();
-  const hooksDir = join10(isAbsolute3(commonDir) ? commonDir : resolve5(repo, commonDir), "hooks");
+  const hooks = await git(exec, repo, ["rev-parse", "--git-path", "hooks"]);
+  if (listed === void 0 || config2 === void 0 || hooks === void 0) return void 0;
+  const hooksPath = hooks.trim();
+  const hooksDir = isAbsolute4(hooksPath) ? hooksPath : resolve6(repo, hooksPath);
   return { refs_hash: sha(listed), config_hash: sha(config2), hooks_hash: hashHooks(hooksDir) };
 }
 async function takeSnapshot(exec, repo, callerBranch) {
@@ -31021,12 +31024,12 @@ async function runSupervisor(runId) {
   child.on("error", (err) => {
     spawnError = err.message;
   });
-  const end = await new Promise((resolve6) => {
+  const end = await new Promise((resolve7) => {
     let settled = false;
     const settle2 = (code, signal) => {
       if (settled) return;
       settled = true;
-      resolve6({ code, signal });
+      resolve7({ code, signal });
     };
     child.on("close", (code, signal) => settle2(code, signal));
     child.on("exit", (code, signal) => {
@@ -31179,6 +31182,9 @@ async function startRun(opts) {
   if (opts.lock_key !== void 0 && !repo) {
     throw new Error("lock_key needs a worktree run inside a git repository");
   }
+  if (opts.setup !== void 0 && !repo) {
+    throw new Error("setup needs a worktree run inside a git repository");
+  }
   const offset = repo ? offsetInRepo(repo, opts.cwd) : "";
   const sessionId = randomUUID();
   const meta3 = createRun({
@@ -31265,8 +31271,8 @@ async function startRun(opts) {
   }
 }
 function offsetInRepo(repo, cwd) {
-  const rel = relative(realpathSync4(repo), realpathSync4(cwd));
-  if (rel === ".." || rel.startsWith("../") || isAbsolute4(rel)) {
+  const rel = relative2(realpathSync4(repo), realpathSync4(cwd));
+  if (rel === ".." || rel.startsWith("../") || isAbsolute5(rel)) {
     throw new Error("cwd resolves outside its git repository");
   }
   return rel;
@@ -31369,7 +31375,7 @@ async function cancelRun(runId) {
 // src/tools.ts
 import { execFile as execFile2 } from "node:child_process";
 import { existsSync as existsSync7, statSync as statSync4 } from "node:fs";
-import { isAbsolute as isAbsolute5 } from "node:path";
+import { isAbsolute as isAbsolute6 } from "node:path";
 
 // node_modules/zod/v3/helpers/util.js
 var util;
@@ -37345,7 +37351,7 @@ var Protocol = class {
           return;
         }
         const pollInterval = task2.pollInterval ?? this._options?.defaultTaskPollInterval ?? 1e3;
-        await new Promise((resolve6) => setTimeout(resolve6, pollInterval));
+        await new Promise((resolve7) => setTimeout(resolve7, pollInterval));
         options?.signal?.throwIfAborted();
       }
     } catch (error62) {
@@ -37362,7 +37368,7 @@ var Protocol = class {
    */
   request(request, resultSchema, options) {
     const { relatedRequestId, resumptionToken, onresumptiontoken, task, relatedTask } = options ?? {};
-    return new Promise((resolve6, reject) => {
+    return new Promise((resolve7, reject) => {
       const earlyReject = (error62) => {
         reject(error62);
       };
@@ -37440,7 +37446,7 @@ var Protocol = class {
           if (!parseResult.success) {
             reject(parseResult.error);
           } else {
-            resolve6(parseResult.data);
+            resolve7(parseResult.data);
           }
         } catch (error62) {
           reject(error62);
@@ -37702,12 +37708,12 @@ var Protocol = class {
       }
     } catch {
     }
-    return new Promise((resolve6, reject) => {
+    return new Promise((resolve7, reject) => {
       if (signal.aborted) {
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
         return;
       }
-      const timeoutId = setTimeout(resolve6, interval);
+      const timeoutId = setTimeout(resolve7, interval);
       signal.addEventListener("abort", () => {
         clearTimeout(timeoutId);
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
@@ -38847,7 +38853,7 @@ var McpServer = class {
     let task = createTaskResult.task;
     const pollInterval = task.pollInterval ?? 5e3;
     while (task.status !== "completed" && task.status !== "failed" && task.status !== "cancelled") {
-      await new Promise((resolve6) => setTimeout(resolve6, pollInterval));
+      await new Promise((resolve7) => setTimeout(resolve7, pollInterval));
       const updatedTask = await extra.taskStore.getTask(taskId);
       if (!updatedTask) {
         throw new McpError(ErrorCode.InternalError, `Task ${taskId} not found during polling`);
@@ -39489,12 +39495,12 @@ function loadMeta(runId) {
   return reconcile(meta3);
 }
 function currentBranch(cwd) {
-  return new Promise((resolve6) => {
+  return new Promise((resolve7) => {
     execFile2(
       "git",
       ["rev-parse", "--abbrev-ref", "HEAD"],
       { cwd, timeout: GIT_TIMEOUT_MS },
-      (err, stdout) => resolve6(err ? void 0 : stdout.trim() || void 0)
+      (err, stdout) => resolve7(err ? void 0 : stdout.trim() || void 0)
     );
   });
 }
@@ -39563,7 +39569,7 @@ var startInput = {
   cwd: external_exports.string().min(1).describe("Absolute path of the project directory."),
   model: external_exports.string().min(1).optional(),
   preset: external_exports.string().min(1).optional().describe(
-    'Tool preset: "readonly" (default), "edit-files" (changes files and commits, runs no commands) or "edit" (also runs node and npm: arbitrary code).'
+    'Tool preset: "readonly" (default), "edit-files" (changes files and commits; runs only git and date) or "edit" (also runs node and npm: arbitrary code).'
   ),
   allowed_tools: external_exports.array(external_exports.string().min(1).max(300).regex(TOOL_ITEM, "invalid tool rule")).max(100).optional(),
   max_turns: external_exports.number().int().positive().max(1e3).optional().describe(
@@ -39573,7 +39579,7 @@ var startInput = {
     "Run in a fresh git worktree; default true in a repo, also when the caller is on the base branch."
   ),
   branch: external_exports.boolean().optional().describe(
-    "Create a run branch in the worktree. Default: yes for edit runs, no (detached worktree) for readonly runs. branch:false is refused for runs that may commit."
+    "Create a run branch in the worktree. Default: yes for runs that may commit (edit presets or explicit allowed_tools), no (detached worktree) for readonly runs. branch:false is refused for runs that may commit."
   ),
   lock_key: external_exports.string().min(1).max(200).optional().describe(
     "Stops two concurrent runs in the same repo with the same key. Needs a worktree run: refused with worktree:false or outside a git repo."
@@ -39606,7 +39612,7 @@ function createHandlers(deps = {}) {
   return {
     async start(input2) {
       const account = await chooseAccount(env, input2.account, random, now());
-      if (!isAbsolute5(input2.cwd) || !statSync4(input2.cwd, { throwIfNoEntry: false })?.isDirectory()) {
+      if (!isAbsolute6(input2.cwd) || !statSync4(input2.cwd, { throwIfNoEntry: false })?.isDirectory()) {
         throw new Error("cwd must be an absolute path of an existing directory");
       }
       const branch = await currentBranch(input2.cwd);
@@ -39726,7 +39732,7 @@ function buildServer(deps = {}) {
   server.registerTool(
     "wingman_start",
     {
-      description: `Start a one-shot detached run of Claude Code on another registered account (random active one when account is omitted); to give more work, start a new run. Returns run_id, account and status only. Presets: "readonly" (default), "edit-files" (edits files and commits, runs no commands) and "edit" (also runs node and npm). The preset "edit" runs arbitrary code under the target account and the deny rules are advisory, not a sandbox; "setup" is an arbitrary shell command run as the caller's user, outside the presets. Then run bin/wingman-wait <run_id> in the background and call wingman_result. ${LOGS_WARNING}`,
+      description: `Start a one-shot detached run of Claude Code on another registered account (random active one when account is omitted); to give more work, start a new run. Returns run_id, account and status only. Presets: "readonly" (default), "edit-files" (edits files and commits; runs only git and date) and "edit" (also runs node and npm). The preset "edit" runs arbitrary code under the target account and the deny rules are advisory, not a sandbox; "setup" is an arbitrary shell command run as the caller's user, outside the presets. Then run bin/wingman-wait <run_id> in the background and call wingman_result. ${LOGS_WARNING}`,
       inputSchema: strictInput("wingman_start", startInput)
     },
     wrap(h.start)

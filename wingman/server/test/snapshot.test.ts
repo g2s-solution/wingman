@@ -1,4 +1,4 @@
-import { writeFileSync, rmSync } from 'node:fs';
+import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { changedSince, takeSnapshot } from '../src/snapshot.js';
@@ -49,6 +49,17 @@ describe('ref snapshot', () => {
     expect(await changedSince(defaultExec, repo, withHook!)).toEqual(['hooks']);
     rmSync(join(hooks, 'pre-commit'));
     expect(await changedSince(defaultExec, repo, withHook!)).toEqual(['hooks']);
+  });
+
+  it('follows core.hooksPath instead of .git/hooks', async () => {
+    const repo = makeRepo('main');
+    const hooks = join(repo, 'custom-hooks');
+    mkdirSync(hooks);
+    writeFileSync(join(hooks, 'pre-commit'), '#!/bin/sh\nexit 0\n');
+    git(repo, 'config', 'core.hooksPath', 'custom-hooks');
+    const snap = await takeSnapshot(defaultExec, repo, 'main');
+    writeFileSync(join(hooks, 'pre-commit'), '#!/bin/sh\nexit 1\n');
+    expect(await changedSince(defaultExec, repo, snap!)).toEqual(['hooks']);
   });
 
   it('sees a hook added in the shared hooks directory from a linked worktree', async () => {
