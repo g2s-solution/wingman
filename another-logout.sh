@@ -46,12 +46,19 @@ done
 [ -n "$dir" ] || usage
 
 SRC="$(resolve_path "${SRC_RAW/#\~/$HOME}")"
+# resolve_path follows symlinks, so a symlinked profile would delete its target and leave the link behind.
+raw="${dir/#\~/$HOME}"
+case "$raw" in */*) ;; *) raw="$HOME/.${raw#.}" ;; esac
+if [ -L "${raw%/}" ]; then
+  echo "refusing: $raw is a symlink; pass the real directory it points to" >&2
+  exit 1
+fi
 dir="$(normalize_dir "$dir")"
 
 # The default profile is the source of the shared items; removing it, a parent or a child would destroy the user's main setup.
 is_within() { local parent="${2%/}"; [[ "${1%/}/" == "$parent/"* ]]; }
-if [ "$dir" = "$HOME" ] || [ "$dir" = / ] || is_within "$dir" "$SRC" || is_within "$SRC" "$dir"; then
-  echo "refusing: $dir is the default profile dir ($SRC), inside it, one of its parents, or \$HOME" >&2
+if [ "$dir" = / ] || is_within "$HOME" "$dir" || is_within "$dir" "$SRC" || is_within "$SRC" "$dir"; then
+  echo "refusing: $dir is the default profile dir ($SRC), inside it, one of its parents, or \$HOME or a parent of it" >&2
   exit 1
 fi
 [ -d "$dir" ] || { echo "no such profile directory: $dir" >&2; exit 1; }
