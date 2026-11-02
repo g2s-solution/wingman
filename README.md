@@ -146,7 +146,7 @@ It checks the state directory and `accounts.json` (modes 0700 and 0600, valid JS
 
 `--online` runs `auth status --json` for you and for each account (20 s timeout) and prints only whether it is signed in, the auth method, and whether the account differs from yours. A profile whose `CLAUDE_CONFIG_DIR` stopped taking effect shows up as `different account from the caller: no`. Emails and organisation ids are compared by hash and never printed.
 
-The `add-account` skill walks through adding a second account and reading this output; `new-agent` runs the tasks.
+The `add-account` skill walks through adding a second account and reading this output; `remove-account` pauses, unregisters or removes one; `new-agent` runs the tasks.
 
 ## Presets, worktrees and branches
 
