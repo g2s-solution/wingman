@@ -2,6 +2,10 @@
 
 Versions are the plugin version in `wingman/.claude-plugin/plugin.json`. Claude Code only updates an installed plugin when this number changes.
 
+## 0.5.2
+
+- A model name that fails validation (for example one starting with `-`) is now refused before a run, worktree or branch is created; it used to leave a run stuck in `running` with a detached worktree.
+
 ## 0.5.1
 
 - Codex provider: an account with `--provider codex` runs `codex exec --json` under its own `CODEX_HOME` (read-only or workspace-write sandbox by preset, user config and rules ignored, guardrail prepended to the prompt). Codex cannot commit in a worktree, so wingman commits the run's changes on the run branch after the run. `allowed_tools` and `max_turns` are refused for it. `accounts add --provider P` defaults `--command` to `P`.
