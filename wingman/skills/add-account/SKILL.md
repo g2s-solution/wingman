@@ -17,7 +17,7 @@ Guide the user through adding a second Claude account that wingman can hand work
 Signing in needs the user's own credentials, so the user runs this in their own terminal, from a checkout of the wingman repository (`another-login.sh` is not shipped in the plugin):
 
 ```sh
-./another-login.sh [--method claudeai|console|api_key] <name>
+./another-login.sh [--method claudeai|console|api_key|api_key_unverified] <name>
 ```
 
 Wait until they say it is done. Do not run it for them.

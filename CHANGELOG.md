@@ -2,6 +2,10 @@
 
 Versions are the plugin version in `wingman/.claude-plugin/plugin.json`. Claude Code only updates an installed plugin when this number changes.
 
+## 0.4.2
+
+- `another-login.sh` has a new method `api_key_unverified` (menu option 4): it stores the key and does every other setup step but skips the sign-in check, for a key that is activated later.
+
 ## 0.4.1
 
 - Denied commands are reported: `permission_denials` keeps the tool name and, for `Bash`, the first two masked words of the command (for example `Bash(cd /work)`). A `partial` run with denials gets a `hint` in `wingman_status` and `wingman_result` naming up to 5 denied heads.

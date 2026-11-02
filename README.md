@@ -45,12 +45,12 @@ Claude Code updates a plugin only when its version number changes (see `CHANGELO
 Clone this repository (the login script is not part of the plugin) and run:
 
 ```bash
-./another-login.sh [--method claudeai|console|api_key] [config-dir]
+./another-login.sh [--method claudeai|console|api_key|api_key_unverified] [config-dir]
 ```
 
 A bare name such as `claude-second` becomes `~/.claude-second`; a value containing `/` or `~` is used as given. What the script does:
 
-- Creates the profile directory (mode 0700) and signs in with `claude auth login`, or stores an API key or token in `<profile>/api-key.env` (mode 0600) for the `api_key` method.
+- Creates the profile directory (mode 0700) and signs in with `claude auth login`, or stores an API key or token in `<profile>/api-key.env` (mode 0600) for the `api_key` method. `api_key_unverified` does the same and every other step, but skips the sign-in check at the end so the key can be activated later; check it then with `<launcher> auth status --text`. Wingman registers the profile either way, so it may show as not signed in until the key works.
 - **Links these items from your default profile into the new one** (only those that exist): `CLAUDE.md`, `settings.json`, `skills`, `agents`, `commands`, `rules`, `plugins`. So the target runs with your instructions, settings, hooks and plugins, and editing one of them from the target edits your default profile. To share less, edit the `SHARED=(...)` line at the top of the script before running it. Credentials, `.claude.json`, history and sessions are not shared. If the new profile already has a real `plugins` directory the script skips it and prints the two commands to migrate it (see [Delegate in both directions](#delegate-in-both-directions-role-swap)).
 - Writes a launcher (for example `~/.local/bin/claude-second`) that sets `CLAUDE_CONFIG_DIR` and loads the profile's key file, if any.
 - Registers the profile in `~/.wingman/accounts.json` (id = the name without a leading `claude-`, so `claude-second` becomes `second`).
