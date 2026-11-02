@@ -104,6 +104,8 @@ export interface StartSpec {
   max_turns?: number;
   session_id: string;
   append_system_prompt: string;
+  /** Preset name the caller chose; adapters without tool-rule syntax map it to their own sandbox. */
+  preset: string;
 }
 
 export interface Adapter {
@@ -111,4 +113,6 @@ export interface Adapter {
   buildCommand(account: Account, spec: StartSpec): { command: string; args: string[] };
   buildEnv(parent: NodeJS.ProcessEnv, account: Account, depth: number): Record<string, string>;
   parseLine(line: string): AgentEvent[];
+  /** True when the rate-limit info from this provider means the run was refused. */
+  isRateLimitRejected(info: RateLimitInfo): boolean;
 }

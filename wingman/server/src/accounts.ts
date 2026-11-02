@@ -201,10 +201,11 @@ async function list(args: string[], now: Clock): Promise<number> {
   } else {
     write(
       table([
-        ['ID', 'LABEL', 'STATUS', 'LIMITED_UNTIL', 'RUNS', 'CONFIG_DIR', 'COMMAND', ''],
+        ['ID', 'LABEL', 'PROVIDER', 'STATUS', 'LIMITED_UNTIL', 'RUNS', 'CONFIG_DIR', 'COMMAND', ''],
         ...rows.map((r) => [
           r.id,
           r.label,
+          r.provider,
           r.status,
           r.limited_until ?? '-',
           runsCell(r.runs),

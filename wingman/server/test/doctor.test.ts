@@ -487,3 +487,18 @@ describe('doctor usage', () => {
     expect(out).toEqual([]);
   });
 });
+
+describe('doctor with another provider', () => {
+  it('skips claude-only checks and the online sign-in check', async () => {
+    const a = acct('cx', { provider: 'codex' });
+    writeRegistry([a]);
+    const { code, results } = await doctor(['--online'], deps());
+    expect(code).toBe(0);
+    expect(find(results, 'account.cx.config_dir')?.level).toBe('ok');
+    expect(find(results, 'account.cx.command')?.level).toBe('ok');
+    expect(find(results, 'account.cx.provider')?.message).toContain('provider codex');
+    expect(results.some((r) => r.id.startsWith('account.cx.shared'))).toBe(false);
+    expect(results.some((r) => r.id === 'account.cx.plugin')).toBe(false);
+    expect(find(results, 'online.cx')?.message).toContain('no online sign-in check');
+  });
+});
