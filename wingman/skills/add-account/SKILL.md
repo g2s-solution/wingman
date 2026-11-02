@@ -1,11 +1,11 @@
 ---
 name: add-account
-description: Set up, check or remove a second Claude account for wingman. Use when the user wants to add, register, check, disable or remove a second account, or asks why a target account does not work.
+description: Set up or check a second Claude account for wingman. Use when the user wants to add, register, check or disable a second account, or asks why a target account does not work.
 ---
 
 # add-account
 
-Guide the user through adding (and later removing) a second Claude account that wingman can hand work to. You guide; the user signs in. Never do the login yourself.
+Guide the user through adding a second Claude account that wingman can hand work to. You guide; the user signs in. Never do the login yourself.
 
 ## Rules
 
@@ -57,5 +57,4 @@ This runs `auth status` for the caller and each account and prints only: signed 
 ## 4. Disable or remove
 
 - Pause an account: `${CLAUDE_PLUGIN_ROOT}/bin/wingman accounts disable ID` (`enable` brings it back).
-- Remove it from the registry only: `${CLAUDE_PLUGIN_ROOT}/bin/wingman accounts remove ID`. Say what it does and does not delete as the command reports it.
-- Remove the whole profile (registration, launcher and profile directory with its credentials): the user runs `./another-logout.sh [--yes] [--keep-dir] <name>` from a checkout of the wingman repository (like `another-login.sh`, it is not shipped in the plugin). It shows what it will delete and asks first. Deleting credentials is the user's decision: never run it for them and never pass `--yes` yourself. Afterwards `wingman accounts list` should no longer show the account.
+- Remove an account or its whole profile: use the `remove-account` skill.
