@@ -202,37 +202,72 @@ async function readStdin(): Promise<string> {
   return Buffer.concat(chunks).toString('utf8');
 }
 
+const RISKY_STAGED_PATH =
+  /(^|\/)(\.env(\..*)?|.*\.pem|id_(rsa|ed25519|ecdsa).*|auth\.json|\.credentials\.json|api-key\.env|\.netrc)$/;
+
+/** Config that would make git run a program or sign with a key while wingman commits for the agent. */
+const SAFE_GIT = [
+  '-c',
+  'core.fsmonitor=false',
+  '-c',
+  'core.hooksPath=/dev/null',
+  '-c',
+  'commit.gpgsign=false',
+  '-c',
+  'core.sshCommand=false',
+];
+
 /** Commits what a provider that cannot commit left in the worktree; returns a note for the report. */
 async function commitForAgent(cwd: string, runId: string): Promise<string> {
   const exec = defaultExec;
-  const env = withoutProxy(process.env);
+  const env = {
+    ...withoutProxy(process.env),
+    GIT_CONFIG_NOSYSTEM: '1',
+    GIT_TERMINAL_PROMPT: '0',
+    GIT_OPTIONAL_LOCKS: '0',
+  };
   const opts = { cwd, env, timeoutMs: 60_000 };
-  const status = await exec('git', ['status', '--porcelain'], opts);
-  if (status.code !== 0 || status.stdout.trim() === '') return '';
-  const add = await exec('git', ['add', '-A'], opts);
-  const commit =
-    add.code === 0
-      ? await exec(
-          'git',
-          [
-            '-c',
-            'user.name=wingman',
-            '-c',
-            'user.email=wingman@localhost',
-            '-c',
-            'core.hooksPath=/dev/null',
-            'commit',
-            '--no-verify',
-            '-q',
-            '-m',
-            `wingman run ${runId}`,
-          ],
-          opts,
-        )
-      : add;
+  const git = (...args: string[]) => exec('git', [...SAFE_GIT, ...args], opts);
+  const failed =
+    '[wingman] the agent left changes in the worktree and wingman could not commit them';
+  const status = await git('status', '--porcelain');
+  if (status.code !== 0) return failed;
+  if (status.stdout.trim() === '') return '';
+  if ((await git('add', '-A')).code !== 0) return failed;
+  const staged = await git('diff', '--cached', '--raw', '--no-renames', '--no-ext-diff');
+  const risky = staged.stdout
+    .split('\n')
+    .filter((line) => line.trim() !== '')
+    .filter((line) => {
+      const [meta = '', path = ''] = line.split('\t');
+      const modes = meta.replace(/^:/, '').split(' ');
+      return (
+        modes[0] === '160000' ||
+        modes[1] === '160000' ||
+        modes[1] === '120000' ||
+        RISKY_STAGED_PATH.test(path)
+      );
+    });
+  if (staged.code !== 0 || risky.length > 0) {
+    await git('reset', '-q');
+    return risky.length > 0
+      ? `[wingman] the agent left changes in the worktree and wingman did not commit them: ${risky.length} staged entries are symlinks, nested repositories or look like credential files`
+      : failed;
+  }
+  const commit = await git(
+    '-c',
+    'user.name=wingman',
+    '-c',
+    'user.email=wingman@localhost',
+    'commit',
+    '--no-verify',
+    '-q',
+    '-m',
+    `wingman run ${runId}`,
+  );
   return commit.code === 0
     ? '[wingman] the agent cannot commit here; wingman committed its changes on the run branch'
-    : '[wingman] the agent left changes in the worktree and wingman could not commit them';
+    : failed;
 }
 
 export async function runSupervisor(runId: string): Promise<void> {
@@ -332,7 +367,11 @@ export async function runSupervisor(runId: string): Promise<void> {
   const current = readMeta(runId);
   if (TERMINAL_STATUSES.includes(current.status)) return;
   let commitNote = '';
-  if (payload.auto_commit && !timedOut) commitNote = await commitForAgent(payload.cwd, runId);
+  if (payload.auto_commit) {
+    commitNote = timedOut
+      ? '[wingman] the run timed out; any changes it made are left uncommitted in the worktree'
+      : await commitForAgent(payload.cwd, runId);
+  }
   const input: Parameters<typeof mapOutcome>[0] = {
     finished,
     exitCode: end.code,

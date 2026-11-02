@@ -136,6 +136,8 @@ describe('codex event parsing', () => {
     expect(codexAdapter.isRateLimitRejected({ status: 'rejected' })).toBe(true);
     expect(codexAdapter.isRateLimitRejected({})).toBe(false);
     expect(parse([{ type: 'turn.failed' }])[0]).toMatchObject({ is_error: true });
+    const disk = parse([{ type: 'turn.failed', error: { message: 'disk quota exceeded' } }]);
+    expect(disk.some((e) => e.kind === 'rate_limited')).toBe(false);
   });
 
   it('turn.completed without a message gives a null result; command items count as tools', () => {
@@ -235,6 +237,18 @@ describe('codex run through the supervisor', () => {
     await expect(startRun({ ...runOpts('ok').opts, allowed_tools: ['Read'] })).rejects.toThrow(
       'allowed_tools',
     );
+  });
+
+  it('does not commit credential-looking files or symlinks, and says so', async () => {
+    for (const mode of ['edit_env', 'edit_link']) {
+      const repo = makeRepo('main');
+      git(repo, 'switch', '-q', '-c', 'feat/c');
+      const { opts } = runOpts(mode, { cwd: repo, worktree: true, preset: 'edit-files' });
+      const meta = await settle((await startRun(opts)).id);
+      expect(runSummary(meta.id).result).toContain('did not commit them');
+      const branch = readMeta(meta.id).run_branch!;
+      expect(git(repo, 'log', '--format=%s', `feat/c..${branch}`).trim()).toBe('');
+    }
   });
 
   it('commits the changes of an edit run on the run branch', async () => {

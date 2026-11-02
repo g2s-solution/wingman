@@ -30918,7 +30918,7 @@ var claudeAdapter = {
 };
 
 // src/adapters/codex.ts
-var RATE_LIMIT = /rate.?limit|usage limit|quota|too many requests|\b429\b/i;
+var RATE_LIMIT = /rate.?limit|usage limit|insufficient_quota|too many requests|\bHTTP 429\b|\b429 Too Many/i;
 var COOLDOWN_SECONDS = 3600;
 function isObject3(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -31162,31 +31162,54 @@ async function readStdin() {
   for await (const chunk of process.stdin) chunks.push(chunk);
   return Buffer.concat(chunks).toString("utf8");
 }
+var RISKY_STAGED_PATH = /(^|\/)(\.env(\..*)?|.*\.pem|id_(rsa|ed25519|ecdsa).*|auth\.json|\.credentials\.json|api-key\.env|\.netrc)$/;
+var SAFE_GIT = [
+  "-c",
+  "core.fsmonitor=false",
+  "-c",
+  "core.hooksPath=/dev/null",
+  "-c",
+  "commit.gpgsign=false",
+  "-c",
+  "core.sshCommand=false"
+];
 async function commitForAgent(cwd, runId) {
   const exec = defaultExec2;
-  const env = withoutProxy(process.env);
+  const env = {
+    ...withoutProxy(process.env),
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_TERMINAL_PROMPT: "0",
+    GIT_OPTIONAL_LOCKS: "0"
+  };
   const opts = { cwd, env, timeoutMs: 6e4 };
-  const status = await exec("git", ["status", "--porcelain"], opts);
-  if (status.code !== 0 || status.stdout.trim() === "") return "";
-  const add2 = await exec("git", ["add", "-A"], opts);
-  const commit = add2.code === 0 ? await exec(
-    "git",
-    [
-      "-c",
-      "user.name=wingman",
-      "-c",
-      "user.email=wingman@localhost",
-      "-c",
-      "core.hooksPath=/dev/null",
-      "commit",
-      "--no-verify",
-      "-q",
-      "-m",
-      `wingman run ${runId}`
-    ],
-    opts
-  ) : add2;
-  return commit.code === 0 ? "[wingman] the agent cannot commit here; wingman committed its changes on the run branch" : "[wingman] the agent left changes in the worktree and wingman could not commit them";
+  const git2 = (...args) => exec("git", [...SAFE_GIT, ...args], opts);
+  const failed = "[wingman] the agent left changes in the worktree and wingman could not commit them";
+  const status = await git2("status", "--porcelain");
+  if (status.code !== 0) return failed;
+  if (status.stdout.trim() === "") return "";
+  if ((await git2("add", "-A")).code !== 0) return failed;
+  const staged = await git2("diff", "--cached", "--raw", "--no-renames", "--no-ext-diff");
+  const risky = staged.stdout.split("\n").filter((line) => line.trim() !== "").filter((line) => {
+    const [meta3 = "", path = ""] = line.split("	");
+    const modes = meta3.replace(/^:/, "").split(" ");
+    return modes[0] === "160000" || modes[1] === "160000" || modes[1] === "120000" || RISKY_STAGED_PATH.test(path);
+  });
+  if (staged.code !== 0 || risky.length > 0) {
+    await git2("reset", "-q");
+    return risky.length > 0 ? `[wingman] the agent left changes in the worktree and wingman did not commit them: ${risky.length} staged entries are symlinks, nested repositories or look like credential files` : failed;
+  }
+  const commit = await git2(
+    "-c",
+    "user.name=wingman",
+    "-c",
+    "user.email=wingman@localhost",
+    "commit",
+    "--no-verify",
+    "-q",
+    "-m",
+    `wingman run ${runId}`
+  );
+  return commit.code === 0 ? "[wingman] the agent cannot commit here; wingman committed its changes on the run branch" : failed;
 }
 async function runSupervisor(runId) {
   const payload = JSON.parse(await readStdin());
@@ -31267,7 +31290,9 @@ async function runSupervisor(runId) {
   const current2 = readMeta(runId);
   if (TERMINAL_STATUSES.includes(current2.status)) return;
   let commitNote = "";
-  if (payload.auto_commit && !timedOut) commitNote = await commitForAgent(payload.cwd, runId);
+  if (payload.auto_commit) {
+    commitNote = timedOut ? "[wingman] the run timed out; any changes it made are left uncommitted in the worktree" : await commitForAgent(payload.cwd, runId);
+  }
   const input2 = {
     finished,
     exitCode: end.code,

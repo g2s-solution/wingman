@@ -1,7 +1,8 @@
 import type { Account, Adapter, AgentEvent, StartSpec } from '../types.js';
 import { allowlistedEnv } from './env.js';
 
-const RATE_LIMIT = /rate.?limit|usage limit|quota|too many requests|\b429\b/i;
+const RATE_LIMIT =
+  /rate.?limit|usage limit|insufficient_quota|too many requests|\bHTTP 429\b|\b429 Too Many/i;
 /** Codex reports no reset time on a refusal, so assume a short cooldown. */
 const COOLDOWN_SECONDS = 3600;
 

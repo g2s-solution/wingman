@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Event shapes captured from `codex exec --json` (codex-cli 0.163), text replaced.
-import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 
@@ -32,6 +32,15 @@ process.stdout.write('not json, a stray log line\n');
 if (mode === 'edit') {
   const cwd = argv[argv.indexOf('-C') + 1];
   writeFileSync(join(cwd, 'edited.txt'), 'by codex\n');
+}
+if (mode === 'edit_env') {
+  const cwd = argv[argv.indexOf('-C') + 1];
+  writeFileSync(join(cwd, 'edited.txt'), 'ok\n');
+  writeFileSync(join(cwd, '.env'), 'PLACEHOLDER=1\n');
+}
+if (mode === 'edit_link') {
+  const cwd = argv[argv.indexOf('-C') + 1];
+  symlinkSync('/etc/hostname', join(cwd, 'link'));
 }
 if (mode === 'fail') {
   emit({ type: 'turn.failed', error: { message: 'model exploded' } });
