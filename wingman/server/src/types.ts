@@ -129,7 +129,13 @@ export interface Adapter {
   /** A parser with per-run state, for providers whose final result needs earlier lines. Default: `parseLine`. */
   createLineParser?(): (line: string) => AgentEvent[];
   buildCommand(account: Account, spec: StartSpec): { command: string; args: string[] };
-  buildEnv(parent: NodeJS.ProcessEnv, account: Account, depth: number): Record<string, string>;
+  buildEnv(
+    parent: NodeJS.ProcessEnv,
+    account: Account,
+    depth: number,
+    /** Absent when the environment is for a setup command rather than the agent. */
+    spec?: StartSpec,
+  ): Record<string, string>;
   parseLine(line: string): AgentEvent[];
   /** True when the rate-limit info from this provider means the run was refused. */
   isRateLimitRejected(info: RateLimitInfo): boolean;

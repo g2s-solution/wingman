@@ -724,7 +724,7 @@ function spawnRun(
     const { pid } = launchSupervisor(
       meta,
       payload,
-      adapter.buildEnv(parentEnv, opts.account, depth),
+      adapter.buildEnv(parentEnv, opts.account, depth, spec),
       entry,
     );
     if (lockPath) setLockOwner(lockPath, pid);

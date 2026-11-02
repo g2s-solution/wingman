@@ -111,7 +111,18 @@ wingman accounts add --id codex1 --config-dir ~/.codex --provider codex --sonnet
 - `wingman doctor` checks only that the directory and command exist; the shared-item, plugin and sign-in checks are for Claude profiles.
 - `events.jsonl` keeps Codex's raw output (command output, file contents) unmasked on disk like Claude's; tools never return it, and `wingman gc` prunes it.
 
-OpenCode is planned next.
+**Other providers (OpenCode).** An account with `--provider opencode` runs `opencode run --format json --standalone`:
+
+```sh
+wingman accounts add --id oc1 --config-dir ~/.wingman-opencode --provider opencode --sonnet <provider/model>
+```
+
+`--config-dir` is a directory that wingman maps to four XDG roots for the run (`config`, `data`, `state`, `cache` inside it), so the profile has its own login, settings and MCP servers and never touches your normal OpenCode setup. Log in once with `XDG_CONFIG_HOME=<dir>/config XDG_DATA_HOME=<dir>/data XDG_STATE_HOME=<dir>/state XDG_CACHE_HOME=<dir>/cache opencode auth login`. Model names are `provider/model` (see `opencode models`); name one with `--sonnet` and so on, or `model` in `wingman_start`; OpenCode's own default model may not work for your plan. Differences from a Claude account:
+
+- OpenCode has no sandbox; wingman gives each run a permission config (through `OPENCODE_CONFIG_CONTENT`, never on disk). It denies web fetches, nested agents (`task`) and any path outside the worktree (`external_directory`), and allows only the git commands of the preset in `bash`: `readonly` reads (`git status|log|diff|show`, `date`); `edit-files` also edits files and runs `git add|commit|mv|rm|restore|rev-parse|ls-files`; `edit` also runs `node` and `npm` (never `npm publish` or a global install). Chained commands are judged one by one, and the last matching rule wins, so the refusals come last. OpenCode commits for itself, so wingman does not.
+- The guardrail text is prepended to the prompt (no system-prompt flag). `allowed_tools` and `max_turns` are refused.
+- A run's report is its last text message; a run that ends without a finished step is `failed_no_report`; an error event (or HTTP 429) ends it as `failed` or `rate_limited`.
+- `wingman doctor` checks only the directory and the command. `events.jsonl` keeps the raw output on disk like the other providers.
 
 When a run ends `rate_limited`, wingman marks its account `rate_limited` until the reset time the run reported (`limited_until`). A limited account is skipped when Claude does not name one, and refused when it does; once the time has passed it counts as active again, with no job running. The `rate_limited` answer names the other active accounts, if any, and Claude (not wingman) decides whether to retry on one. `mark-limited` and `clear-limited` set or lift the state by hand. `wingman doctor` lists limited accounts as warnings and does not fail because of them.
 

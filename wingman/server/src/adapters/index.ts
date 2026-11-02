@@ -1,10 +1,12 @@
 import type { Adapter } from '../types.js';
 import { claudeAdapter } from './claude.js';
 import { codexAdapter } from './codex.js';
+import { opencodeAdapter } from './opencode.js';
 
 const ADAPTERS: Record<string, Adapter> = {
   claude: claudeAdapter,
   codex: codexAdapter,
+  opencode: opencodeAdapter,
 };
 
 export function getAdapter(provider: string): Adapter {
