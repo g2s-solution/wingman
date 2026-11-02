@@ -51,7 +51,8 @@ describe('codex adapter command and env', () => {
   });
 
   it('maps presets to sandboxes and omits -m without a model', () => {
-    const { model: _model, ...noModel } = spec;
+    const noModel: StartSpec = { ...spec };
+    delete noModel.model;
     for (const preset of ['edit-files', 'edit']) {
       const { args } = codexAdapter.buildCommand(account, { ...noModel, preset });
       expect(args[args.indexOf('-s') + 1]).toBe('workspace-write');
