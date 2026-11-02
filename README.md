@@ -96,6 +96,23 @@ wingman accounts remove ID --yes          # registry entry only; the profile dir
 
 **Model tiers.** `--haiku`, `--sonnet` and `--opus` set the model this account uses for each tier (for example a Codex or OpenCode model name; `-` clears a tier; an `--upsert` without these flags keeps them). When `wingman_start` is called with `model: "sonnet"` (or `haiku`, `opus`) the account's model for that tier is used; a tier that is not set, or any other value, is passed to the provider unchanged, and an omitted `model` leaves the provider default. `wingman_accounts` shows each account's `models`, so Claude can see what a tier means before it picks.
 
+**Other providers (Codex).** An account with `--provider codex` runs `codex exec` instead of Claude Code:
+
+```sh
+wingman accounts add --id codex1 --config-dir ~/.codex --provider codex --sonnet <codex model>
+```
+
+`--command` defaults to the provider name (`codex`); `--config-dir` becomes `CODEX_HOME`, so use a dedicated profile, not one you also use for something else. Log in with `codex login` under that `CODEX_HOME` first. Differences from a Claude account, all deliberate:
+
+- Presets map to Codex sandboxes: `readonly` is `read-only`; `edit-files` and `edit` are `workspace-write`. Codex cannot commit inside a git worktree, so wingman commits the changes on the run branch itself after the run (the report says so). `edit` adds nothing over `edit-files` for Codex.
+- The guardrail text is prepended to the prompt instead of being a system prompt, and there is no tool deny list: the sandbox is the real boundary. A `read-only` sandbox can still read files under `$HOME`, including that profile's own login file. Treat a Codex run as less contained than a Claude run.
+- `allowed_tools` and `max_turns` are refused (Codex has no such flags); the run is bounded by its time limit.
+- User config and rules are not loaded (`--ignore-user-config`, `--ignore-rules`), so MCP servers and hooks from that profile do not run.
+- `wingman doctor` checks only that the directory and command exist; the shared-item, plugin and sign-in checks are for Claude profiles.
+- `events.jsonl` keeps Codex's raw output (command output, file contents) unmasked on disk like Claude's; tools never return it, and `wingman gc` prunes it.
+
+OpenCode is planned next.
+
 When a run ends `rate_limited`, wingman marks its account `rate_limited` until the reset time the run reported (`limited_until`). A limited account is skipped when Claude does not name one, and refused when it does; once the time has passed it counts as active again, with no job running. The `rate_limited` answer names the other active accounts, if any, and Claude (not wingman) decides whether to retry on one. `mark-limited` and `clear-limited` set or lift the state by hand. `wingman doctor` lists limited accounts as warnings and does not fail because of them.
 
 Claude can list the accounts (with their limited state and run counts per outcome) through the read-only `wingman_accounts` tool, but no tool adds, changes or removes one: an entry's `command` is run by wingman, so only you, in a terminal, can change it.

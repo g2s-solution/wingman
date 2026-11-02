@@ -112,8 +112,22 @@ export interface StartSpec {
   preset: string;
 }
 
+export interface AdapterCapabilities {
+  /** Accepts Claude tool-rule strings in `allowed_tools`. */
+  allowedTools: boolean;
+  /** Has a turn limit flag, so `max_turns` is enforced. */
+  maxTurns: boolean;
+  /** Can run `git commit` itself inside the run worktree; if not, wingman commits its changes afterwards. */
+  agentCommits: boolean;
+}
+
 export interface Adapter {
   provider: string;
+  capabilities: AdapterCapabilities;
+  /** The text sent on stdin; default is `spec.prompt` (a provider without a system-prompt flag prepends the guardrail). */
+  buildPrompt?(spec: StartSpec): string;
+  /** A parser with per-run state, for providers whose final result needs earlier lines. Default: `parseLine`. */
+  createLineParser?(): (line: string) => AgentEvent[];
   buildCommand(account: Account, spec: StartSpec): { command: string; args: string[] };
   buildEnv(parent: NodeJS.ProcessEnv, account: Account, depth: number): Record<string, string>;
   parseLine(line: string): AgentEvent[];

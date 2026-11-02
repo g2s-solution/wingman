@@ -122,6 +122,8 @@ interface SupervisorPayload {
   cwd: string;
   timeout_ms: number;
   wingman_home: string;
+  /** The agent cannot commit in a worktree: the supervisor commits its changes after the run. */
+  auto_commit?: boolean;
 }
 
 export interface Outcome {
@@ -200,11 +202,45 @@ async function readStdin(): Promise<string> {
   return Buffer.concat(chunks).toString('utf8');
 }
 
+/** Commits what a provider that cannot commit left in the worktree; returns a note for the report. */
+async function commitForAgent(cwd: string, runId: string): Promise<string> {
+  const exec = defaultExec;
+  const env = withoutProxy(process.env);
+  const opts = { cwd, env, timeoutMs: 60_000 };
+  const status = await exec('git', ['status', '--porcelain'], opts);
+  if (status.code !== 0 || status.stdout.trim() === '') return '';
+  const add = await exec('git', ['add', '-A'], opts);
+  const commit =
+    add.code === 0
+      ? await exec(
+          'git',
+          [
+            '-c',
+            'user.name=wingman',
+            '-c',
+            'user.email=wingman@localhost',
+            '-c',
+            'core.hooksPath=/dev/null',
+            'commit',
+            '--no-verify',
+            '-q',
+            '-m',
+            `wingman run ${runId}`,
+          ],
+          opts,
+        )
+      : add;
+  return commit.code === 0
+    ? '[wingman] the agent cannot commit here; wingman committed its changes on the run branch'
+    : '[wingman] the agent left changes in the worktree and wingman could not commit them';
+}
+
 export async function runSupervisor(runId: string): Promise<void> {
   const payload = JSON.parse(await readStdin()) as SupervisorPayload;
   const childEnv = { ...process.env } as Record<string, string>;
   process.env.WINGMAN_HOME = payload.wingman_home;
   const adapter = getAdapter(payload.provider);
+  const parseLine = adapter.createLineParser?.() ?? ((line: string) => adapter.parseLine(line));
 
   let sessionRateLimit: RateLimitInfo | undefined;
   let rejectedRateLimit: RateLimitInfo | undefined;
@@ -253,7 +289,7 @@ export async function runSupervisor(runId: string): Promise<void> {
   if (child.stdout) {
     createInterface({ input: child.stdout }).on('line', (line) => {
       appendEvent(runId, line);
-      for (const event of adapter.parseLine(line)) {
+      for (const event of parseLine(line)) {
         if (event.kind === 'rate_limited') {
           sessionRateLimit = event.info;
           if (adapter.isRateLimitRejected(event.info)) {
@@ -295,6 +331,8 @@ export async function runSupervisor(runId: string): Promise<void> {
 
   const current = readMeta(runId);
   if (TERMINAL_STATUSES.includes(current.status)) return;
+  let commitNote = '';
+  if (payload.auto_commit && !timedOut) commitNote = await commitForAgent(payload.cwd, runId);
   const input: Parameters<typeof mapOutcome>[0] = {
     finished,
     exitCode: end.code,
@@ -309,6 +347,7 @@ export async function runSupervisor(runId: string): Promise<void> {
     const changed = await changedSince(defaultExec, payload.repo, payload.ref_snapshot);
     if (changed.length > 0) outcome = flagGuardrail(outcome, changed);
   }
+  if (commitNote) outcome = { ...outcome, text: `${outcome.text}\n\n${commitNote}` };
   writeResult(runId, outcome.text);
   const patch: Partial<Omit<RunMeta, 'id' | 'status'>> = {
     exit_code: end.code,
@@ -433,9 +472,14 @@ export async function startRun(opts: StartRunOptions): Promise<RunMeta> {
   const parentEnv = opts.parentEnv ?? process.env;
   assertCanStart(parentEnv);
   const adapter = opts.adapter ?? getAdapter(opts.account.provider);
-  if (adapter.provider !== 'claude' && opts.allowed_tools !== undefined) {
+  if (!adapter.capabilities.allowedTools && opts.allowed_tools !== undefined) {
     throw new Error(
       `allowed_tools are Claude tool rules and are not supported for provider "${adapter.provider}"; choose a preset instead`,
+    );
+  }
+  if (!adapter.capabilities.maxTurns && opts.max_turns !== undefined) {
+    throw new Error(
+      `max_turns is not supported for provider "${adapter.provider}"; the run is bounded by its time limit`,
     );
   }
   const exec = opts.exec ?? defaultExec;
@@ -543,7 +587,9 @@ export async function startRun(opts: StartRunOptions): Promise<RunMeta> {
 
   const model = resolveModel(opts.account, opts.model);
   if (model !== undefined) assertModelName(model);
-  const maxTurns = opts.max_turns ?? defaultMaxTurns(opts.preset);
+  const maxTurns = adapter.capabilities.maxTurns
+    ? (opts.max_turns ?? defaultMaxTurns(opts.preset))
+    : undefined;
   const spec: StartSpec = {
     prompt: opts.prompt,
     cwd: runCwd,
@@ -556,7 +602,12 @@ export async function startRun(opts: StartRunOptions): Promise<RunMeta> {
     ...(maxTurns !== undefined ? { max_turns: maxTurns } : {}),
   };
   try {
-    return spawnRun(meta, opts, adapter, spec, depth, parentEnv, lockPath);
+    const autoCommit =
+      !adapter.capabilities.agentCommits &&
+      mayCommit &&
+      opts.worktree === true &&
+      meta.run_branch !== undefined;
+    return spawnRun(meta, opts, adapter, spec, depth, parentEnv, lockPath, autoCommit);
   } catch (err) {
     await discardStart(meta, exec);
     throw err;
@@ -613,6 +664,7 @@ function spawnRun(
   depth: number,
   parentEnv: NodeJS.ProcessEnv,
   lockPath: string | undefined,
+  autoCommit: boolean,
 ): RunMeta {
   const { command, args } = adapter.buildCommand(opts.account, spec);
   const payload: SupervisorPayload = {
@@ -621,8 +673,9 @@ function spawnRun(
     provider: adapter.provider,
     command,
     args,
-    prompt: spec.prompt,
+    prompt: adapter.buildPrompt ? adapter.buildPrompt(spec) : spec.prompt,
     cwd: spec.cwd,
+    ...(autoCommit ? { auto_commit: true } : {}),
     timeout_ms: opts.timeout_ms ?? DEFAULT_TIMEOUT_MS,
     wingman_home: wingmanHome(),
   };

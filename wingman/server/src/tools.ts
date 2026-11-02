@@ -176,7 +176,7 @@ const startInput = {
     .min(1)
     .optional()
     .describe(
-      'Model for the run. "haiku", "sonnet" or "opus" map to the models set for that tier on the chosen account (see wingman_accounts `models`); any other value is passed to the provider as is and must be a model name that provider accepts. Omitted: the provider default.',
+      'Model for the run. "haiku", "sonnet" or "opus" map to the models set for that tier on the chosen account (see wingman_accounts `models`); any other value is passed to the provider as is and must be a model name that provider accepts. Omitted: the provider default. A Codex account ignores Claude-only options: `allowed_tools` and `max_turns` are refused for it.',
     ),
   preset: z
     .string()

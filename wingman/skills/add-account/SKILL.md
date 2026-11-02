@@ -28,6 +28,8 @@ To delegate in both directions (role swap), every profile involved must be regis
 
 To let callers ask for `haiku`, `sonnet` or `opus` on this account, the user sets the model for each tier: `${CLAUDE_PLUGIN_ROOT}/bin/wingman accounts add --upsert --id ID --config-dir DIR --haiku NAME --sonnet NAME --opus NAME` (names are provider model names; `-` clears one). Unset tiers pass the name through unchanged.
 
+For a Codex account the user runs `codex login` with `CODEX_HOME` set to a dedicated directory and registers it with `wingman accounts add --id ID --config-dir DIR --provider codex`. `wingman doctor` then checks only the directory and the command; `doctor --online` has no sign-in check for it. Say that Codex runs are less contained than Claude runs (README, "Other providers").
+
 ## 2. Check the registry and the profile
 
 The CLI is `${CLAUDE_PLUGIN_ROOT}/bin/wingman`. Run:

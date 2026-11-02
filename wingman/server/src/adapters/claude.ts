@@ -1,23 +1,7 @@
 import { assertToolItems } from '../guard.js';
 import { safeSummary } from '../mask.js';
+import { allowlistedEnv } from './env.js';
 import type { Account, Adapter, AgentEvent, RateLimitInfo, StartSpec } from '../types.js';
-
-const ALLOWED_ENV = new Set([
-  'PATH',
-  'HOME',
-  'USER',
-  'LOGNAME',
-  'LANG',
-  'TERM',
-  'SHELL',
-  'TMPDIR',
-  'HTTPS_PROXY',
-  'https_proxy',
-  'HTTP_PROXY',
-  'http_proxy',
-  'NO_PROXY',
-  'no_proxy',
-]);
 
 const NON_REJECTIONS = new Set(['allowed', 'allowed_warning']);
 
@@ -52,6 +36,7 @@ function denialText(denial: Record<string, unknown>): string {
 
 export const claudeAdapter: Adapter = {
   provider: 'claude',
+  capabilities: { allowedTools: true, maxTurns: true, agentCommits: true },
 
   isRateLimitRejected,
 
@@ -71,11 +56,7 @@ export const claudeAdapter: Adapter = {
   },
 
   buildEnv(parent, account, depth) {
-    const env: Record<string, string> = {};
-    for (const [name, value] of Object.entries(parent)) {
-      if (value === undefined) continue;
-      if (ALLOWED_ENV.has(name) || name.startsWith('LC_')) env[name] = value;
-    }
+    const env = allowlistedEnv(parent);
     env.CLAUDE_CONFIG_DIR = account.config_dir;
     env.WINGMAN_DEPTH = String(depth);
     return env;
