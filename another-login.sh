@@ -173,11 +173,14 @@ case "$method" in
   api_key)
     [ -t 0 ] || { echo "api_key needs a terminal to read the key" >&2; exit 1; }
     read -r -s -p "Credential (sk-ant-api... or sk-ant-oat..., input hidden): " key; echo
-    # Sourced later, so reject anything that is not a single token of the Anthropic alphabet.
-    [[ "$key" =~ ^sk-ant-[A-Za-z0-9_-]+$ ]] || { echo "that does not look like an Anthropic API key or OAuth token" >&2; exit 1; }
-    if [[ "$key" == sk-ant-ort* ]]; then
-      echo "that is a refresh token (sk-ant-ort); paste the access token from \`claude setup-token\` (sk-ant-oat) or a Console API key (sk-ant-api)" >&2
-      exit 1
+    [ -n "$key" ] || { echo "empty key" >&2; exit 1; }
+    if [ "$verify" -eq 1 ]; then
+      # Sourced later, so reject anything that is not a single token of the Anthropic alphabet.
+      [[ "$key" =~ ^sk-ant-[A-Za-z0-9_-]+$ ]] || { echo "that does not look like an Anthropic API key or OAuth token" >&2; exit 1; }
+      if [[ "$key" == sk-ant-ort* ]]; then
+        echo "that is a refresh token (sk-ant-ort); paste the access token from \`claude setup-token\` (sk-ant-oat) or a Console API key (sk-ant-api)" >&2
+        exit 1
+      fi
     fi
     if [[ "$key" == sk-ant-oat* ]]; then
       # Claude sends ANTHROPIC_API_KEY as x-api-key. An OAuth access token is a Bearer credential and comes back as "Invalid API key".
