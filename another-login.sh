@@ -204,7 +204,6 @@ esac
 echo
 if [ "$verify" -eq 0 ]; then
   echo "Key stored but NOT verified: $dir/$KEY_FILE has not been tried against Anthropic."
-  echo "Once the key is active, check it with: $(basename "$dir" | sed 's/^\.//') auth status --text"
 elif [ "$method" = api_key ]; then
   echo "Account now signed in under $dir:"
   # shellcheck source=/dev/null
@@ -243,6 +242,14 @@ LAUNCH
   echo "launcher: $launcher  (run \`$name\` to use this profile)"
   case ":$PATH:" in *":$bin_dir:"*) ;; *) echo "note: $bin_dir is not on PATH" ;; esac
   launcher_ok=1
+fi
+
+if [ "$verify" -eq 0 ]; then
+  if [ "${launcher_ok:-}" = 1 ]; then
+    echo "Once the key is active, check it with: $name auth status --text"
+  else
+    echo "Once the key is active, check it with: set -a; . $dir/$KEY_FILE; set +a; CLAUDE_CONFIG_DIR=$dir claude auth status --text"
+  fi
 fi
 
 # Register the profile for wingman. The registry holds paths only, never credentials.
