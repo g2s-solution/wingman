@@ -48,20 +48,40 @@ describe('opencode permissions', () => {
     const b = bash('readonly');
     expect(keys(b)[0]).toBe('*');
     expect(b['*']).toBe('deny');
-    expect(b['git status*']).toBe('allow');
-    expect(b['git commit*']).toBeUndefined();
-    expect(b['node*']).toBeUndefined();
-    expect(keys(b).indexOf('*--output*')).toBeGreaterThan(keys(b).indexOf('git diff*'));
+    expect(b['git status']).toBe('allow');
+    expect(b['git status *']).toBe('allow');
+    expect(b['git commit *']).toBeUndefined();
+    expect(b['node *']).toBeUndefined();
+    expect(b['date']).toBe('allow');
+    expect(b['date +*']).toBe('allow');
+    expect(keys(b).indexOf('*--output*')).toBeGreaterThan(keys(b).indexOf('git diff *'));
     expect(b['*--output*']).toBe('deny');
   });
 
   it('edit-files adds editing and git commits; edit adds node and npm but never publish', () => {
     expect(permissionFor('edit-files').edit).toBe('allow');
-    expect(bash('edit-files')['git commit*']).toBe('allow');
-    expect(bash('edit-files')['npm*']).toBeUndefined();
-    expect(bash('edit')['npm*']).toBe('allow');
-    expect(bash('edit')['npm publish*']).toBe('deny');
-    expect(bash('edit')['git push*']).toBeUndefined();
+    expect(bash('edit-files')['git commit *']).toBe('allow');
+    expect(bash('edit-files')['npm run *']).toBeUndefined();
+    expect(bash('edit')['npm run *']).toBe('allow');
+    expect(bash('edit')['npm install *']).toBe('allow');
+    expect(bash('edit')['git push *']).toBeUndefined();
+  });
+
+  it('allows commands by name only: no unanchored prefix, no publish, config or exec', () => {
+    for (const preset of ['readonly', 'edit-files', 'edit']) {
+      const allowed = Object.entries(bash(preset))
+        .filter(([, v]) => v === 'allow')
+        .map(([k]) => k);
+      expect(allowed.filter((k) => /[a-z]\*$/.test(k))).toEqual([]);
+      expect(
+        allowed.some((k) => /difftool|publish|config|exec|commit-tree|show-branch/.test(k)),
+      ).toBe(false);
+    }
+    const never = bash('edit');
+    for (const p of ['*--output*', '*--no-index*', '*--ext-diff*', '*--global*', '* -g *']) {
+      expect(never[p]).toBe('deny');
+    }
+    expect(Object.keys(never).slice(-8)).toContain('*--global*');
   });
 });
 
@@ -91,6 +111,7 @@ describe('opencode adapter command and env', () => {
       spec,
     );
     expect(env.XDG_DATA_HOME).toBe('/cfg/oc/data');
+    expect(env.npm_config_userconfig).toBe('/cfg/oc/npmrc');
     expect(env.XDG_CONFIG_HOME).toBe('/cfg/oc/config');
     expect(env.OPENAI_API_KEY).toBeUndefined();
     expect(JSON.parse(env.OPENCODE_CONFIG_CONTENT!).permission.edit).toBe('deny');
@@ -171,6 +192,20 @@ describe('opencode event parsing', () => {
     expect(disk.some((e) => e.kind === 'rate_limited')).toBe(false);
     expect(parse([ev('error')]).at(-1)).toMatchObject({ is_error: true });
     expect(opencodeAdapter.isRateLimitRejected({ status: 'rejected' })).toBe(true);
+  });
+
+  it('reads nested error text and emits only one finished', () => {
+    const nested = parse([ev('error', { error: { data: { message: 'usage limit reached' } } })]);
+    expect(nested.some((e) => e.kind === 'rate_limited')).toBe(true);
+    expect(nested.at(-1)).toMatchObject({ result: 'usage limit reached' });
+    const named = parse([ev('error', { error: { name: 'APIError' } })]);
+    expect(named.at(-1)).toMatchObject({ result: 'APIError' });
+    const twice = parse([
+      ev('error', { error: { message: 'boom' } }),
+      ev('step_finish', { part: { reason: 'stop' } }),
+      ev('error', { error: { message: 'again' } }),
+    ]);
+    expect(twice.filter((e) => e.kind === 'finished')).toHaveLength(1);
   });
 
   it('ignores garbage, non-final steps and unknown events', () => {

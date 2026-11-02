@@ -31026,18 +31026,41 @@ ${spec.prompt}`;
 // src/adapters/opencode.ts
 var RATE_LIMIT2 = /rate.?limit|usage limit|insufficient_quota|too many requests|\bHTTP 429\b/i;
 var COOLDOWN_SECONDS2 = 3600;
-var READ_COMMANDS = ["git status*", "git log*", "git diff*", "git show*", "date*"];
-var FILE_COMMANDS = [
-  "git add*",
-  "git commit*",
-  "git mv*",
-  "git rm*",
-  "git restore*",
-  "git rev-parse*",
-  "git ls-files*"
+var cmd = (name) => [name, `${name} *`];
+var READ_COMMANDS = [
+  ...cmd("git status"),
+  ...cmd("git log"),
+  ...cmd("git diff"),
+  ...cmd("git show"),
+  "date",
+  "date +*"
 ];
-var RUN_COMMANDS = ["node*", "npm*"];
-var NEVER2 = ["*--output*", "npm install -g*", "npm i -g*", "npm publish*"];
+var FILE_COMMANDS = [
+  ...cmd("git add"),
+  ...cmd("git commit"),
+  ...cmd("git mv"),
+  ...cmd("git rm"),
+  ...cmd("git restore"),
+  ...cmd("git rev-parse"),
+  ...cmd("git ls-files")
+];
+var RUN_COMMANDS = [
+  ...cmd("node"),
+  ...cmd("npm run"),
+  ...cmd("npm test"),
+  ...cmd("npm ci"),
+  ...cmd("npm install")
+];
+var NEVER2 = [
+  "*--output*",
+  "*--no-index*",
+  "*--ext-diff*",
+  "*--textconv*",
+  "* -g *",
+  "* -g",
+  "*--global*",
+  "*--location=global*"
+];
 function permissionFor(preset) {
   const allowed = preset === "readonly" ? READ_COMMANDS : preset === "edit-files" ? [...READ_COMMANDS, ...FILE_COMMANDS] : [...READ_COMMANDS, ...FILE_COMMANDS, ...RUN_COMMANDS];
   const bash = { "*": "deny" };
@@ -31060,6 +31083,7 @@ function str3(value) {
 function createParser2() {
   let last = null;
   let sessionSeen = false;
+  let done = false;
   const denials = [];
   return (line) => {
     let data;
@@ -31094,7 +31118,8 @@ function createParser2() {
         break;
       }
       case "step_finish": {
-        if (part && part.reason === "stop") {
+        if (part && part.reason === "stop" && !done) {
+          done = true;
           events.push({
             kind: "finished",
             result: last,
@@ -31106,7 +31131,8 @@ function createParser2() {
       }
       case "error": {
         const error62 = isObject4(data.error) ? data.error : {};
-        const message = str3(error62.message) ?? "the OpenCode run failed";
+        const nested = isObject4(error62.data) ? str3(error62.data.message) : void 0;
+        const message = str3(error62.message) ?? nested ?? str3(error62.name) ?? "the OpenCode run failed";
         if (error62.status === 429 || RATE_LIMIT2.test(message)) {
           events.push({
             kind: "rate_limited",
@@ -31116,6 +31142,8 @@ function createParser2() {
             }
           });
         }
+        if (done) break;
+        done = true;
         events.push({
           kind: "finished",
           result: last ?? message,
@@ -31152,6 +31180,7 @@ ${spec.prompt}`;
     env.XDG_DATA_HOME = `${dir}/data`;
     env.XDG_STATE_HOME = `${dir}/state`;
     env.XDG_CACHE_HOME = `${dir}/cache`;
+    env.npm_config_userconfig = `${dir}/npmrc`;
     env.WINGMAN_DEPTH = String(depth);
     if (spec)
       env.OPENCODE_CONFIG_CONTENT = JSON.stringify({ permission: permissionFor(spec.preset) });

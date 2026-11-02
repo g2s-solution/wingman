@@ -5,18 +5,44 @@ const RATE_LIMIT = /rate.?limit|usage limit|insufficient_quota|too many requests
 /** OpenCode reports no reset time on a refusal, so assume a short cooldown. */
 const COOLDOWN_SECONDS = 3600;
 
-const READ_COMMANDS = ['git status*', 'git log*', 'git diff*', 'git show*', 'date*'];
-const FILE_COMMANDS = [
-  'git add*',
-  'git commit*',
-  'git mv*',
-  'git rm*',
-  'git restore*',
-  'git rev-parse*',
-  'git ls-files*',
+/** A command allowed by name: the bare command and the command followed by arguments, never a longer name (`git difftool`). */
+const cmd = (name: string): string[] => [name, `${name} *`];
+
+const READ_COMMANDS = [
+  ...cmd('git status'),
+  ...cmd('git log'),
+  ...cmd('git diff'),
+  ...cmd('git show'),
+  'date',
+  'date +*',
 ];
-const RUN_COMMANDS = ['node*', 'npm*'];
-const NEVER = ['*--output*', 'npm install -g*', 'npm i -g*', 'npm publish*'];
+const FILE_COMMANDS = [
+  ...cmd('git add'),
+  ...cmd('git commit'),
+  ...cmd('git mv'),
+  ...cmd('git rm'),
+  ...cmd('git restore'),
+  ...cmd('git rev-parse'),
+  ...cmd('git ls-files'),
+];
+const RUN_COMMANDS = [
+  ...cmd('node'),
+  ...cmd('npm run'),
+  ...cmd('npm test'),
+  ...cmd('npm ci'),
+  ...cmd('npm install'),
+];
+/** Refusals placed last so they win over any allow above. */
+const NEVER = [
+  '*--output*',
+  '*--no-index*',
+  '*--ext-diff*',
+  '*--textconv*',
+  '* -g *',
+  '* -g',
+  '*--global*',
+  '*--location=global*',
+];
 
 /**
  * The permission rules for one run. Rules are matched in order and the last match wins, so the
@@ -53,6 +79,7 @@ function str(value: unknown): string | undefined {
 function createParser(): (line: string) => AgentEvent[] {
   let last: string | null = null;
   let sessionSeen = false;
+  let done = false;
   const denials: string[] = [];
   return (line) => {
     let data: unknown;
@@ -87,7 +114,8 @@ function createParser(): (line: string) => AgentEvent[] {
         break;
       }
       case 'step_finish': {
-        if (part && part.reason === 'stop') {
+        if (part && part.reason === 'stop' && !done) {
+          done = true;
           events.push({
             kind: 'finished',
             result: last,
@@ -99,7 +127,9 @@ function createParser(): (line: string) => AgentEvent[] {
       }
       case 'error': {
         const error = isObject(data.error) ? data.error : {};
-        const message = str(error.message) ?? 'the OpenCode run failed';
+        const nested = isObject(error.data) ? str(error.data.message) : undefined;
+        const message =
+          str(error.message) ?? nested ?? str(error.name) ?? 'the OpenCode run failed';
         if (error.status === 429 || RATE_LIMIT.test(message)) {
           events.push({
             kind: 'rate_limited',
@@ -109,6 +139,8 @@ function createParser(): (line: string) => AgentEvent[] {
             },
           });
         }
+        if (done) break;
+        done = true;
         events.push({
           kind: 'finished',
           result: last ?? message,
@@ -145,6 +177,7 @@ export const opencodeAdapter: Adapter = {
     env.XDG_DATA_HOME = `${dir}/data`;
     env.XDG_STATE_HOME = `${dir}/state`;
     env.XDG_CACHE_HOME = `${dir}/cache`;
+    env.npm_config_userconfig = `${dir}/npmrc`;
     env.WINGMAN_DEPTH = String(depth);
     if (spec)
       env.OPENCODE_CONFIG_CONTENT = JSON.stringify({ permission: permissionFor(spec.preset) });
