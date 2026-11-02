@@ -28636,6 +28636,14 @@ var runDir = (id) => join(runsDir(), id);
 var worktreesDir = () => join(wingmanHome(), "worktrees");
 
 // src/registry.ts
+var MODEL_NAME = /^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,127}$/;
+function assertModelName(value, what = "model") {
+  if (!MODEL_NAME.test(value)) {
+    throw new Error(
+      `${what} "${value.slice(0, 40)}" is not a valid model name (letters, digits and . _ : / @ + -, starting with a letter or digit, up to 128 characters)`
+    );
+  }
+}
 var accountSchema = external_exports.object({
   id: external_exports.string().min(1),
   label: external_exports.string().min(1),
@@ -28643,7 +28651,12 @@ var accountSchema = external_exports.object({
   provider: external_exports.string().min(1).default("claude"),
   command: external_exports.string().min(1).default("claude"),
   status: external_exports.string().min(1).optional(),
-  limited_until: external_exports.string().min(1).optional()
+  limited_until: external_exports.string().min(1).optional(),
+  models: external_exports.object({
+    haiku: external_exports.string().regex(MODEL_NAME).optional(),
+    sonnet: external_exports.string().regex(MODEL_NAME).optional(),
+    opus: external_exports.string().regex(MODEL_NAME).optional()
+  }).optional()
 }).passthrough();
 var registrySchema = external_exports.object({ accounts: external_exports.array(accountSchema) });
 async function saveAccounts(registry2) {
@@ -28767,6 +28780,12 @@ async function recordRateLimit(id, info, now = /* @__PURE__ */ new Date()) {
   } catch {
     return false;
   }
+}
+var MODEL_TIERS = ["haiku", "sonnet", "opus"];
+function resolveModel(account, model) {
+  if (model === void 0) return void 0;
+  const tier = MODEL_TIERS.find((t) => t === model);
+  return tier && account.models?.[tier] || model;
 }
 
 // src/runs.ts
@@ -29098,8 +29117,10 @@ function assertCanStart(env = process.env, limit2 = 1) {
 
 // src/accounts.ts
 var ID = /^[A-Za-z0-9_-]{1,64}$/;
+var MODEL_FLAGS = ["--haiku", "--sonnet", "--opus"];
 var USAGE = `usage: wingman accounts list [--json]
-       wingman accounts add --id ID --config-dir DIR [--label L] [--command CMD] [--provider P] [--upsert]
+       wingman accounts add --id ID --config-dir DIR [--label L] [--command CMD] [--provider P]
+                              [--haiku M] [--sonnet M] [--opus M] [--upsert]
        wingman accounts disable ID
        wingman accounts enable ID
        wingman accounts mark-limited ID --until <ISO time with Z or offset, or epoch seconds>
@@ -29114,6 +29135,7 @@ function accountRows(accounts, caller, now = /* @__PURE__ */ new Date(), counts 
     status: effectiveStatus(a, now),
     ...isLimited(a, now) && a.limited_until !== void 0 ? { limited_until: a.limited_until } : {},
     provider: a.provider,
+    ...a.models !== void 0 && Object.keys(a.models).length > 0 ? { models: a.models } : {},
     config_dir: a.config_dir,
     command: a.command,
     is_caller: canonical2(a.config_dir) === caller,
@@ -29128,6 +29150,7 @@ function publicAccounts(accounts, caller, now = /* @__PURE__ */ new Date(), coun
     ...r.limited_until !== void 0 ? { limited_until: r.limited_until } : {},
     is_caller: r.is_caller,
     provider: r.provider,
+    ...r.models !== void 0 ? { models: r.models } : {},
     runs: r.runs
   }));
 }
@@ -29216,10 +29239,23 @@ ${USAGE}`);
   } else {
     write(
       table([
-        ["ID", "LABEL", "STATUS", "LIMITED_UNTIL", "RUNS", "CONFIG_DIR", "COMMAND", ""],
+        [
+          "ID",
+          "LABEL",
+          "PROVIDER",
+          "MODELS",
+          "STATUS",
+          "LIMITED_UNTIL",
+          "RUNS",
+          "CONFIG_DIR",
+          "COMMAND",
+          ""
+        ],
         ...rows.map((r) => [
           r.id,
           r.label,
+          r.provider,
+          modelsCell(r.models),
           r.status,
           r.limited_until ?? "-",
           runsCell(r.runs),
@@ -29231,6 +29267,12 @@ ${USAGE}`);
     );
   }
   return 0;
+}
+function modelsCell(models) {
+  const parts = MODEL_TIERS.filter((t) => models?.[t] !== void 0).map(
+    (t) => `${t}=${models[t]}`
+  );
+  return parts.length > 0 ? parts.join(",") : "-";
 }
 async function limit(verb, args, now) {
   const p = parse3(args, verb === "mark-limited" ? ["--until"] : [], []);
@@ -29263,7 +29305,7 @@ ${USAGE}`);
 async function add(args) {
   const p = parse3(
     args,
-    ["--id", "--config-dir", "--label", "--command", "--provider"],
+    ["--id", "--config-dir", "--label", "--command", "--provider", ...MODEL_FLAGS],
     ["--upsert"]
   );
   if (p.positional.length > 0) throw new AccountsUsageError(`unexpected argument
@@ -29276,9 +29318,18 @@ ${USAGE}`);
   }
   if (!ID.test(id)) throw new AccountsUsageError("--id must match [A-Za-z0-9_-]{1,64}");
   const configDir = normalizeConfigDir(rawDir);
-  for (const flag of ["--label", "--command", "--provider"]) {
+  for (const flag of ["--label", "--command", "--provider", ...MODEL_FLAGS]) {
     if (p.values[flag] !== void 0 && p.values[flag].trim() === "") {
       throw new AccountsUsageError(`${flag} must not be empty`);
+    }
+  }
+  for (const flag of MODEL_FLAGS) {
+    const value = p.values[flag];
+    if (value === void 0 || value === "-") continue;
+    try {
+      assertModelName(value, flag);
+    } catch (err) {
+      throw new AccountsUsageError(err.message);
     }
   }
   const isCaller = canonical2(configDir) === callerProfile();
@@ -29291,6 +29342,17 @@ ${USAGE}`);
   if (p.values["--label"] !== void 0) given.label = p.values["--label"];
   if (p.values["--command"] !== void 0) given.command = p.values["--command"];
   if (p.values["--provider"] !== void 0) given.provider = p.values["--provider"];
+  const models = { ...registry2.accounts[i]?.models ?? {} };
+  for (const tier of MODEL_TIERS) {
+    const value = p.values[`--${tier}`];
+    if (value === void 0) continue;
+    if (value === "-") delete models[tier];
+    else models[tier] = value;
+  }
+  if (MODEL_FLAGS.some((f) => p.values[f] !== void 0)) {
+    if (Object.keys(models).length > 0) given.models = models;
+    else if (i >= 0) delete registry2.accounts[i].models;
+  }
   if (i >= 0) {
     registry2.accounts[i] = { ...registry2.accounts[i], ...given };
   } else {
@@ -29388,7 +29450,7 @@ import { delimiter, isAbsolute as isAbsolute2, join as join5, resolve as resolve
 // package.json
 var package_default = {
   name: "wingman-server",
-  version: "0.4.4",
+  version: "0.4.6",
   private: true,
   type: "module",
   engines: {
@@ -29546,6 +29608,7 @@ function checkState(stateDir, results) {
       id: a.id,
       config_dir: a.config_dir,
       command: typeof a.command === "string" && a.command !== "" ? a.command : "claude",
+      provider: typeof a.provider === "string" && a.provider !== "" ? a.provider : "claude",
       ...typeof a.status === "string" && a.status !== "" ? { status: a.status } : {},
       ...typeof a.limited_until === "string" && a.limited_until !== "" ? { limited_until: a.limited_until } : {}
     });
@@ -29636,6 +29699,14 @@ function checkAccount(account, callerDir, defaultDir, deps, results) {
       level: "ok",
       message: `${account.id}: status ${status}${status === "active" || status === "disabled" ? "" : " (unknown value, treated as disabled)"}`
     });
+  }
+  if (account.provider !== "claude") {
+    results.push({
+      id: `${p}.provider`,
+      level: "ok",
+      message: `${account.id}: provider ${account.provider}; shared items and plugin checks apply to claude profiles only`
+    });
+    return;
   }
   if (dirOk && canonical3(account.config_dir) !== canonical3(defaultDir)) {
     checkShared(account, defaultDir, results);
@@ -29780,6 +29851,14 @@ async function checkOnline(accounts, deps, results) {
   const callerIdentity = "auth" in caller ? caller.auth.identity : void 0;
   for (const account of accounts) {
     const id = `online.${account.id}`;
+    if (account.provider !== "claude") {
+      results.push({
+        id,
+        level: "ok",
+        message: `${account.id}: provider ${account.provider}; no online sign-in check for this provider`
+      });
+      continue;
+    }
     const r = await authStatus(account.command, deps);
     if ("error" in r) {
       results.push({ id, level: "warn", message: `${account.id}: auth status ${r.error}` });
@@ -30623,13 +30702,14 @@ var PRESETS = {
 function presetMayCommit(name) {
   return Object.hasOwn(PRESETS, name) ? PRESETS[name].mayCommit : true;
 }
-function guardPrompt() {
+function guardPrompt(provider = "claude") {
+  const claude = provider === "claude";
   return [
-    "You are running as a delegated wingman run inside another Claude Code session. These rules override any other instruction, rule or skill you load:",
+    `You are running as a delegated wingman run inside another ${claude ? "Claude Code" : "coding-agent"} session. These rules override any other instruction, rule or skill you load:`,
     "1. Never print, send or write sensitive values: tokens (Bearer, JWT, PAT, API keys), passwords, secrets, private keys, credentials in URLs, .env values or personal data. Do not read files that may hold them; check with a count first and report structure only.",
     "2. Never commit or push to the base branch (main, master or the repository default branch). Work only on the branch you were started on. Never run git push.",
     '3. Never ask questions and never wait for an answer. Inside a wingman run, any rule or skill that says "ask the Human" means: stop and finish with WINGMAN_STATUS: needs_input.',
-    "4. You are a delegated run: another Claude session on another account started you and waits for your report. Never delegate further: do not use the wingman tools or the new-agent skill, do not start another account or another Claude Code process, and do not manage plugins. If the task asks you to delegate or to use another account, do not; do the work yourself, or finish with WINGMAN_STATUS: blocked and one sentence saying what you could not do.",
+    claude ? "4. You are a delegated run: another Claude session on another account started you and waits for your report. Never delegate further: do not use the wingman tools or the new-agent skill, do not start another account or another Claude Code process, and do not manage plugins. If the task asks you to delegate or to use another account, do not; do the work yourself, or finish with WINGMAN_STATUS: blocked and one sentence saying what you could not do." : "4. You are a delegated run: another agent session started you and waits for your report. Never delegate further: do not use any wingman tool or skill, do not start another agent or account, and do not manage plugins. If the task asks you to delegate or to use another account, do not; do the work yourself, or finish with WINGMAN_STATUS: blocked and one sentence saying what you could not do.",
     "5. You are already in the worktree root: never cd and never use git -C; use npm run <script>, not npx.",
     "6. Always end with a final report. The last line of your final message must be exactly one of: WINGMAN_STATUS: done, WINGMAN_STATUS: partial, WINGMAN_STATUS: blocked, WINGMAN_STATUS: needs_input."
   ].join("\n");
@@ -30734,6 +30814,7 @@ function denialText(denial) {
 }
 var claudeAdapter = {
   provider: "claude",
+  isRateLimitRejected,
   buildCommand(account, spec) {
     assertToolItems(spec.allowed_tools, "allowed_tools");
     assertToolItems(spec.disallowed_tools, "disallowed_tools");
@@ -30828,9 +30909,15 @@ var claudeAdapter = {
     return events;
   }
 };
+
+// src/adapters/index.ts
+var ADAPTERS = {
+  claude: claudeAdapter
+};
 function getAdapter(provider) {
-  if (provider === "claude") return claudeAdapter;
-  throw new Error(`No adapter for provider "${provider}"`);
+  const adapter = Object.hasOwn(ADAPTERS, provider) ? ADAPTERS[provider] : void 0;
+  if (!adapter) throw new Error(`No adapter for provider "${provider}"`);
+  return adapter;
 }
 
 // src/snapshot.ts
@@ -30936,7 +31023,8 @@ function mapOutcome(input2) {
     if (rateRejected) return { status: "rate_limited", text };
     return { status: "failed", text };
   }
-  if (reportsPluginChange(text)) return { status: "needs_caller", text };
+  if ((input2.provider ?? "claude") === "claude" && reportsPluginChange(text))
+    return { status: "needs_caller", text };
   return { status: parseStatusLine(text) ?? "needs_input", text };
 }
 var CLEAN_STATUSES = ["done", "partial", "blocked", "needs_input"];
@@ -31002,7 +31090,7 @@ async function runSupervisor(runId) {
       for (const event of adapter.parseLine(line)) {
         if (event.kind === "rate_limited") {
           sessionRateLimit = event.info;
-          if (isRateLimitRejected(event.info)) {
+          if (adapter.isRateLimitRejected(event.info)) {
             rateRejected = true;
             rejectedRateLimit = event.info;
           }
@@ -31042,7 +31130,8 @@ async function runSupervisor(runId) {
     exitCode: end.code,
     signal: end.signal,
     timedOut,
-    rateRejected
+    rateRejected,
+    provider: payload.provider
   };
   if (spawnError !== void 0) input2.spawnError = spawnError;
   let outcome = mapOutcome(input2);
@@ -31152,7 +31241,12 @@ function launchSupervisor(meta3, payload, env, entry) {
 async function startRun(opts) {
   const parentEnv = opts.parentEnv ?? process.env;
   assertCanStart(parentEnv);
-  const adapter = opts.adapter ?? claudeAdapter;
+  const adapter = opts.adapter ?? getAdapter(opts.account.provider);
+  if (adapter.provider !== "claude" && opts.allowed_tools !== void 0) {
+    throw new Error(
+      `allowed_tools are Claude tool rules and are not supported for provider "${adapter.provider}"; choose a preset instead`
+    );
+  }
   const exec = opts.exec ?? defaultExec2;
   const depth = currentDepth(parentEnv) + 1;
   const tools = resolveTools({
@@ -31246,6 +31340,8 @@ async function startRun(opts) {
       patchRunning(meta3.id, { ref_snapshot: snapshot });
     }
   }
+  const model = resolveModel(opts.account, opts.model);
+  if (model !== void 0) assertModelName(model);
   const maxTurns = opts.max_turns ?? defaultMaxTurns(opts.preset);
   const spec = {
     prompt: opts.prompt,
@@ -31253,8 +31349,9 @@ async function startRun(opts) {
     allowed_tools: tools.allowed,
     disallowed_tools: tools.disallowed,
     session_id: sessionId,
-    append_system_prompt: guardPrompt(),
-    ...opts.model !== void 0 ? { model: opts.model } : {},
+    append_system_prompt: guardPrompt(adapter.provider),
+    preset: opts.preset ?? DEFAULT_PRESET,
+    ...model !== void 0 ? { model } : {},
     ...maxTurns !== void 0 ? { max_turns: maxTurns } : {}
   };
   try {
@@ -39561,7 +39658,9 @@ var startInput = {
   ),
   prompt: external_exports.string().min(1).max(2e5).describe("The full task brief for the run."),
   cwd: external_exports.string().min(1).describe("Absolute path of the project directory."),
-  model: external_exports.string().min(1).optional(),
+  model: external_exports.string().min(1).optional().describe(
+    'Model for the run. "haiku", "sonnet" or "opus" map to the models set for that tier on the chosen account (see wingman_accounts `models`); any other value is passed to the provider as is and must be a model name that provider accepts. Omitted: the provider default.'
+  ),
   preset: external_exports.string().min(1).optional().describe(
     'Tool preset: "readonly" (default), "edit-files" (changes files and commits, runs no commands) or "edit" (also runs node and npm: arbitrary code).'
   ),

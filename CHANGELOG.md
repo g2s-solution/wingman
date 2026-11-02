@@ -2,6 +2,14 @@
 
 Versions are the plugin version in `wingman/.claude-plugin/plugin.json`. Claude Code only updates an installed plugin when this number changes.
 
+## 0.4.6
+
+- Model tiers per account (values are validated as model names: no leading dash, spaces or control characters, also for `model` in `wingman_start`): `wingman accounts add --haiku M --sonnet M --opus M` (`-` clears a tier). `wingman_start` with `model: "haiku" | "sonnet" | "opus"` uses the account's model for that tier; unset tiers and other values pass through unchanged. `accounts list` shows a MODELS column and `wingman_accounts` returns `models`.
+
+## 0.4.5
+
+- Provider plumbing for v0.5 (no behaviour change for Claude accounts): adapters are looked up by the account's `provider` (`src/adapters/index.ts`), the adapter decides what a rate-limit rejection is, the guardrail prompt has neutral wording for non-Claude providers, plugin-change detection and the doctor checks that only make sense for Claude profiles are skipped for other providers, `wingman_start` rejects `allowed_tools` for them, and `wingman accounts list` shows a PROVIDER column.
+
 ## 0.4.4
 
 - New skill `remove-account`: pause an account, unregister it while keeping the profile, or remove the whole profile with `another-logout.sh`. `add-account` points to it.

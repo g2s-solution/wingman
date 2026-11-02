@@ -103,6 +103,20 @@ describe('status mapping', () => {
     expect(meta.rate_limit?.status).toBe('allowed');
   });
 
+  it('maps a model tier through the account and passes other names as given', async () => {
+    const tier = ctx('ok', { model: 'sonnet' });
+    tier.opts.account = { ...tier.opts.account, models: { sonnet: 'mid-model-1' } };
+    await finish(await startRun(tier.opts));
+    const argv = readLog(tier.log)[0]!.argv;
+    expect(argv[argv.indexOf('--model') + 1]).toBe('mid-model-1');
+
+    const other = ctx('ok', { model: 'opus' });
+    other.opts.account = { ...other.opts.account, models: { sonnet: 'mid-model-1' } };
+    await finish(await startRun(other.opts));
+    const argv2 = readLog(other.log)[0]!.argv;
+    expect(argv2[argv2.indexOf('--model') + 1]).toBe('opus');
+  });
+
   it('nonzero exit with a result maps to failed', async () => {
     const meta = await finish(await startRun(ctx('nonzero').opts));
     expect(meta.status).toBe('failed');

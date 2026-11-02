@@ -53,6 +53,8 @@ function denialText(denial: Record<string, unknown>): string {
 export const claudeAdapter: Adapter = {
   provider: 'claude',
 
+  isRateLimitRejected,
+
   buildCommand(account: Account, spec: StartSpec) {
     assertToolItems(spec.allowed_tools, 'allowed_tools');
     assertToolItems(spec.disallowed_tools, 'disallowed_tools');
@@ -150,8 +152,3 @@ export const claudeAdapter: Adapter = {
     return events;
   },
 };
-
-export function getAdapter(provider: string): Adapter {
-  if (provider === 'claude') return claudeAdapter;
-  throw new Error(`No adapter for provider "${provider}"`);
-}

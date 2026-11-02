@@ -16,7 +16,7 @@ import { closeSync, mkdirSync, openSync, realpathSync, rmSync } from 'node:fs';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { relative, join, isAbsolute } from 'node:path';
-import { claudeAdapter, getAdapter, isRateLimitRejected } from './adapters/claude.js';
+import { getAdapter } from './adapters/index.js';
 import { maskSecrets } from './mask.js';
 import {
   DEFAULT_PRESET,
@@ -27,7 +27,7 @@ import {
   resolveTools,
 } from './guard.js';
 import { runDir, wingmanHome } from './paths.js';
-import { recordRateLimit } from './registry.js';
+import { assertModelName, recordRateLimit, resolveModel } from './registry.js';
 import {
   appendEvent,
   createRun,
@@ -136,6 +136,7 @@ export function mapOutcome(input: {
   timedOut: boolean;
   rateRejected: boolean;
   spawnError?: string;
+  provider?: string;
 }): Outcome {
   const { finished, exitCode, timedOut, rateRejected } = input;
   const exit = `exit code ${exitCode ?? 'none'}${input.signal ? `, signal ${input.signal}` : ''}`;
@@ -170,7 +171,8 @@ export function mapOutcome(input: {
     if (rateRejected) return { status: 'rate_limited', text };
     return { status: 'failed', text };
   }
-  if (reportsPluginChange(text)) return { status: 'needs_caller', text };
+  if ((input.provider ?? 'claude') === 'claude' && reportsPluginChange(text))
+    return { status: 'needs_caller', text };
   return { status: parseStatusLine(text) ?? 'needs_input', text };
 }
 
@@ -254,7 +256,7 @@ export async function runSupervisor(runId: string): Promise<void> {
       for (const event of adapter.parseLine(line)) {
         if (event.kind === 'rate_limited') {
           sessionRateLimit = event.info;
-          if (isRateLimitRejected(event.info)) {
+          if (adapter.isRateLimitRejected(event.info)) {
             rateRejected = true;
             rejectedRateLimit = event.info;
           }
@@ -299,6 +301,7 @@ export async function runSupervisor(runId: string): Promise<void> {
     signal: end.signal,
     timedOut,
     rateRejected,
+    provider: payload.provider,
   };
   if (spawnError !== undefined) input.spawnError = spawnError;
   let outcome = mapOutcome(input);
@@ -429,7 +432,12 @@ function launchSupervisor(
 export async function startRun(opts: StartRunOptions): Promise<RunMeta> {
   const parentEnv = opts.parentEnv ?? process.env;
   assertCanStart(parentEnv);
-  const adapter = opts.adapter ?? claudeAdapter;
+  const adapter = opts.adapter ?? getAdapter(opts.account.provider);
+  if (adapter.provider !== 'claude' && opts.allowed_tools !== undefined) {
+    throw new Error(
+      `allowed_tools are Claude tool rules and are not supported for provider "${adapter.provider}"; choose a preset instead`,
+    );
+  }
   const exec = opts.exec ?? defaultExec;
   const depth = currentDepth(parentEnv) + 1;
   const tools = resolveTools({
@@ -533,6 +541,8 @@ export async function startRun(opts: StartRunOptions): Promise<RunMeta> {
     }
   }
 
+  const model = resolveModel(opts.account, opts.model);
+  if (model !== undefined) assertModelName(model);
   const maxTurns = opts.max_turns ?? defaultMaxTurns(opts.preset);
   const spec: StartSpec = {
     prompt: opts.prompt,
@@ -540,8 +550,9 @@ export async function startRun(opts: StartRunOptions): Promise<RunMeta> {
     allowed_tools: tools.allowed,
     disallowed_tools: tools.disallowed,
     session_id: sessionId,
-    append_system_prompt: guardPrompt(),
-    ...(opts.model !== undefined ? { model: opts.model } : {}),
+    append_system_prompt: guardPrompt(adapter.provider),
+    preset: opts.preset ?? DEFAULT_PRESET,
+    ...(model !== undefined ? { model } : {}),
     ...(maxTurns !== undefined ? { max_turns: maxTurns } : {}),
   };
   try {
