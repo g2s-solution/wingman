@@ -2,6 +2,10 @@
 
 Versions are the plugin version in `wingman/.claude-plugin/plugin.json`. Claude Code only updates an installed plugin when this number changes.
 
+## 0.5.0
+
+- Starts v0.5 "Other providers": the provider plumbing (0.4.5) and per-account model tiers (0.4.6) are in. The Codex and OpenCode adapters themselves are not in this release; accounts with a provider other than `claude` are rejected at start with "No adapter for provider".
+
 ## 0.4.6
 
 - Model tiers per account (values are validated as model names: no leading dash, spaces or control characters, also for `model` in `wingman_start`): `wingman accounts add --haiku M --sonnet M --opus M` (`-` clears a tier). `wingman_start` with `model: "haiku" | "sonnet" | "opus"` uses the account's model for that tier; unset tiers and other values pass through unchanged. `accounts list` shows a MODELS column and `wingman_accounts` returns `models`.
