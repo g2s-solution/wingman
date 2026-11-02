@@ -104,7 +104,7 @@ A Claude Code plugin named `wingman`: MCP server declared in the plugin's `.mcp.
 
 ## Backends
 
-v0.1 supports Claude Code only, but the runner is written against a small adapter interface: build the command, set the account selector env, inject the guardrail prompt, parse events into a common shape (`started`, `message`, `tool`, `rate_limited`, `finished`), and report the session id. Registry entries have a `provider` field (default `claude`). Other providers (OpenAI Codex, OpenCode, and similar CLIs) are added as further adapters in v0.5 (Codex first; OpenCode next); the guardrails and the capped-report rule stay in the server so they apply to every provider.
+v0.1 supports Claude Code only, but the runner is written against a small adapter interface: build the command, set the account selector env, inject the guardrail prompt, parse events into a common shape (`started`, `message`, `tool`, `rate_limited`, `finished`), and report the session id. Registry entries have a `provider` field (default `claude`). Other providers (OpenAI Codex, OpenCode, and similar CLIs) are added as further adapters in v0.5 (Codex and OpenCode are in); the guardrails and the capped-report rule stay in the server so they apply to every provider.
 
 ## Engine
 

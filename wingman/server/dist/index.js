@@ -102,7 +102,7 @@ var require_code = __commonJS({
     }
     exports._ = _;
     var plus = new _Code("+");
-    function str3(strs, ...args) {
+    function str4(strs, ...args) {
       const expr = [safeStringify(strs[0])];
       let i = 0;
       while (i < args.length) {
@@ -113,7 +113,7 @@ var require_code = __commonJS({
       optimize(expr);
       return new _Code(expr);
     }
-    exports.str = str3;
+    exports.str = str4;
     function addCodeArg(code, arg) {
       if (arg instanceof _Code)
         code.push(...arg._items);
@@ -156,7 +156,7 @@ var require_code = __commonJS({
       return;
     }
     function strConcat(c1, c2) {
-      return c2.emptyStr() ? c1 : c1.emptyStr() ? c2 : str3`${c1}${c2}`;
+      return c2.emptyStr() ? c1 : c1.emptyStr() ? c2 : str4`${c1}${c2}`;
     }
     exports.strConcat = strConcat;
     function interpolate(x) {
@@ -1118,22 +1118,22 @@ var require_util = __commonJS({
       return (0, codegen_1._)`${topSchemaRef}${schemaPath}${(0, codegen_1.getProperty)(keyword)}`;
     }
     exports.schemaRefOrVal = schemaRefOrVal;
-    function unescapeFragment(str3) {
-      return unescapeJsonPointer(decodeURIComponent(str3));
+    function unescapeFragment(str4) {
+      return unescapeJsonPointer(decodeURIComponent(str4));
     }
     exports.unescapeFragment = unescapeFragment;
-    function escapeFragment(str3) {
-      return encodeURIComponent(escapeJsonPointer(str3));
+    function escapeFragment(str4) {
+      return encodeURIComponent(escapeJsonPointer(str4));
     }
     exports.escapeFragment = escapeFragment;
-    function escapeJsonPointer(str3) {
-      if (typeof str3 == "number")
-        return `${str3}`;
-      return str3.replace(/~/g, "~0").replace(/\//g, "~1");
+    function escapeJsonPointer(str4) {
+      if (typeof str4 == "number")
+        return `${str4}`;
+      return str4.replace(/~/g, "~0").replace(/\//g, "~1");
     }
     exports.escapeJsonPointer = escapeJsonPointer;
-    function unescapeJsonPointer(str3) {
-      return str3.replace(/~1/g, "/").replace(/~0/g, "~");
+    function unescapeJsonPointer(str4) {
+      return str4.replace(/~1/g, "/").replace(/~0/g, "~");
     }
     exports.unescapeJsonPointer = unescapeJsonPointer;
     function eachItem(xs, f) {
@@ -2158,8 +2158,8 @@ var require_json_schema_traverse = __commonJS({
         post(schema, jsonPtr, rootSchema, parentJsonPtr, parentKeyword, parentSchema, keyIndex);
       }
     }
-    function escapeJsonPtr(str3) {
-      return str3.replace(/~/g, "~0").replace(/\//g, "~1");
+    function escapeJsonPtr(str4) {
+      return str4.replace(/~/g, "~0").replace(/\//g, "~1");
     }
   }
 });
@@ -3256,10 +3256,10 @@ var require_utils = __commonJS({
         isIPV6: true
       };
     }
-    function findToken(str3, token) {
+    function findToken(str4, token) {
       let ind = 0;
-      for (let i = 0; i < str3.length; i++) {
-        if (str3[i] === token) ind++;
+      for (let i = 0; i < str4.length; i++) {
+        if (str4[i] === token) ind++;
       }
       return ind;
     }
@@ -4329,7 +4329,7 @@ var require_core = __commonJS({
     var util_1 = require_util();
     var $dataRefSchema = require_data();
     var uri_1 = require_uri();
-    var defaultRegExp = (str3, flags) => new RegExp(str3, flags);
+    var defaultRegExp = (str4, flags) => new RegExp(str4, flags);
     defaultRegExp.code = "new RegExp";
     var META_IGNORE_OPTIONS = ["removeAdditional", "useDefaults", "coerceTypes"];
     var EXT_SCOPE_NAMES = /* @__PURE__ */ new Set([
@@ -5124,16 +5124,16 @@ var require_ucs2length = __commonJS({
   "node_modules/ajv/dist/runtime/ucs2length.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
-    function ucs2length(str3) {
-      const len = str3.length;
+    function ucs2length(str4) {
+      const len = str4.length;
       let length = 0;
       let pos = 0;
       let value;
       while (pos < len) {
         length++;
-        value = str3.charCodeAt(pos++);
+        value = str4.charCodeAt(pos++);
         if (value >= 55296 && value <= 56319 && pos < len) {
-          value = str3.charCodeAt(pos);
+          value = str4.charCodeAt(pos);
           if ((value & 64512) === 56320)
             pos++;
         }
@@ -7016,8 +7016,8 @@ var require_formats = __commonJS({
     }
     var DATE = /^(\d\d\d\d)-(\d\d)-(\d\d)$/;
     var DAYS = [0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-    function date5(str3) {
-      const matches = DATE.exec(str3);
+    function date5(str4) {
+      const matches = DATE.exec(str4);
       if (!matches)
         return false;
       const year = +matches[1];
@@ -7036,8 +7036,8 @@ var require_formats = __commonJS({
     }
     var TIME = /^(\d\d):(\d\d):(\d\d(?:\.\d+)?)(z|([+-])(\d\d)(?::?(\d\d))?)?$/i;
     function getTime(strictTimeZone) {
-      return function time3(str3) {
-        const matches = TIME.exec(str3);
+      return function time3(str4) {
+        const matches = TIME.exec(str4);
         if (!matches)
           return false;
         const hr = +matches[1];
@@ -7083,8 +7083,8 @@ var require_formats = __commonJS({
     var DATE_TIME_SEPARATOR = /t|\s/i;
     function getDateTime(strictTimeZone) {
       const time3 = getTime(strictTimeZone);
-      return function date_time(str3) {
-        const dateTime = str3.split(DATE_TIME_SEPARATOR);
+      return function date_time(str4) {
+        const dateTime = str4.split(DATE_TIME_SEPARATOR);
         return dateTime.length === 2 && date5(dateTime[0]) && time3(dateTime[1]);
       };
     }
@@ -7109,13 +7109,13 @@ var require_formats = __commonJS({
     }
     var NOT_URI_FRAGMENT = /\/|:/;
     var URI = /^(?:[a-z][a-z0-9+\-.]*:)(?:\/?\/(?:(?:[a-z0-9\-._~!$&'()*+,;=:]|%[0-9a-f]{2})*@)?(?:\[(?:(?:(?:(?:[0-9a-f]{1,4}:){6}|::(?:[0-9a-f]{1,4}:){5}|(?:[0-9a-f]{1,4})?::(?:[0-9a-f]{1,4}:){4}|(?:(?:[0-9a-f]{1,4}:){0,1}[0-9a-f]{1,4})?::(?:[0-9a-f]{1,4}:){3}|(?:(?:[0-9a-f]{1,4}:){0,2}[0-9a-f]{1,4})?::(?:[0-9a-f]{1,4}:){2}|(?:(?:[0-9a-f]{1,4}:){0,3}[0-9a-f]{1,4})?::[0-9a-f]{1,4}:|(?:(?:[0-9a-f]{1,4}:){0,4}[0-9a-f]{1,4})?::)(?:[0-9a-f]{1,4}:[0-9a-f]{1,4}|(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?))|(?:(?:[0-9a-f]{1,4}:){0,5}[0-9a-f]{1,4})?::[0-9a-f]{1,4}|(?:(?:[0-9a-f]{1,4}:){0,6}[0-9a-f]{1,4})?::)|[Vv][0-9a-f]+\.[a-z0-9\-._~!$&'()*+,;=:]+)\]|(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)|(?:[a-z0-9\-._~!$&'()*+,;=]|%[0-9a-f]{2})*)(?::\d*)?(?:\/(?:[a-z0-9\-._~!$&'()*+,;=:@]|%[0-9a-f]{2})*)*|\/(?:(?:[a-z0-9\-._~!$&'()*+,;=:@]|%[0-9a-f]{2})+(?:\/(?:[a-z0-9\-._~!$&'()*+,;=:@]|%[0-9a-f]{2})*)*)?|(?:[a-z0-9\-._~!$&'()*+,;=:@]|%[0-9a-f]{2})+(?:\/(?:[a-z0-9\-._~!$&'()*+,;=:@]|%[0-9a-f]{2})*)*)(?:\?(?:[a-z0-9\-._~!$&'()*+,;=:@/?]|%[0-9a-f]{2})*)?(?:#(?:[a-z0-9\-._~!$&'()*+,;=:@/?]|%[0-9a-f]{2})*)?$/i;
-    function uri(str3) {
-      return NOT_URI_FRAGMENT.test(str3) && URI.test(str3);
+    function uri(str4) {
+      return NOT_URI_FRAGMENT.test(str4) && URI.test(str4);
     }
     var BYTE = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/gm;
-    function byte(str3) {
+    function byte(str4) {
       BYTE.lastIndex = 0;
-      return BYTE.test(str3);
+      return BYTE.test(str4);
     }
     var MIN_INT32 = -(2 ** 31);
     var MAX_INT32 = 2 ** 31 - 1;
@@ -7129,11 +7129,11 @@ var require_formats = __commonJS({
       return true;
     }
     var Z_ANCHOR = /[^\\]\\Z/;
-    function regex(str3) {
-      if (Z_ANCHOR.test(str3))
+    function regex(str4) {
+      if (Z_ANCHOR.test(str4))
         return false;
       try {
-        new RegExp(str3);
+        new RegExp(str4);
         return true;
       } catch (e) {
         return false;
@@ -8094,14 +8094,14 @@ function promiseAllObject(promisesObj) {
 }
 function randomString(length = 10) {
   const chars = "abcdefghijklmnopqrstuvwxyz";
-  let str3 = "";
+  let str4 = "";
   for (let i = 0; i < length; i++) {
-    str3 += chars[Math.floor(Math.random() * chars.length)];
+    str4 += chars[Math.floor(Math.random() * chars.length)];
   }
-  return str3;
+  return str4;
 }
-function esc(str3) {
-  return JSON.stringify(str3);
+function esc(str4) {
+  return JSON.stringify(str4);
 }
 function slugify(input2) {
   return input2.toLowerCase().trim().replace(/[^\w\s-]/g, "").replace(/[\s_-]+/g, "-").replace(/^-+|-+$/g, "");
@@ -8215,8 +8215,8 @@ var primitiveTypes = /* @__PURE__ */ new Set([
   "symbol",
   "undefined"
 ]);
-function escapeRegex(str3) {
-  return str3.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+function escapeRegex(str4) {
+  return str4.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 function clone(inst, def, params) {
   const cl = new inst._zod.constr(def ?? inst._zod.def);
@@ -8482,13 +8482,13 @@ function getSizableOrigin(input2) {
   return "unknown";
 }
 var highSurrogate = /[\uD800-\uDBFF]/;
-function codePointLength(str3) {
-  const units = str3.length;
-  if (!highSurrogate.test(str3))
+function codePointLength(str4) {
+  const units = str4.length;
+  if (!highSurrogate.test(str4))
     return units;
   let count = units;
   for (let i = 0; i < units - 1; i++) {
-    if ((str3.charCodeAt(i) & 64512) === 55296 && (str3.charCodeAt(i + 1) & 64512) === 56320) {
+    if ((str4.charCodeAt(i) & 64512) === 55296 && (str4.charCodeAt(i + 1) & 64512) === 56320) {
       count--;
       i++;
     }
@@ -10821,7 +10821,7 @@ var $ZodObject = /* @__PURE__ */ $constructor("$ZodObject", (inst, def) => {
     }
     return propValues;
   });
-  const isObject4 = isObject;
+  const isObject5 = isObject;
   const catchall = def.catchall;
   let value;
   const memo2 = globalConfig.memoizer;
@@ -10829,7 +10829,7 @@ var $ZodObject = /* @__PURE__ */ $constructor("$ZodObject", (inst, def) => {
   inst._zod.parse = (payload, ctx) => {
     value ?? (value = _normalized.value);
     const input2 = payload.value;
-    if (!isObject4(input2)) {
+    if (!isObject5(input2)) {
       payload.issues.push({
         expected: "object",
         code: "invalid_type",
@@ -10965,7 +10965,7 @@ var $ZodObjectJIT = /* @__PURE__ */ $constructor("$ZodObjectJIT", (inst, def) =>
     return doc.compile();
   };
   let fastpass;
-  const isObject4 = isObject;
+  const isObject5 = isObject;
   const jit = !globalConfig.jitless;
   const allowsEval2 = allowsEval;
   const fastEnabled = jit && allowsEval2.value;
@@ -10974,7 +10974,7 @@ var $ZodObjectJIT = /* @__PURE__ */ $constructor("$ZodObjectJIT", (inst, def) =>
   inst._zod.parse = (payload, ctx) => {
     value ?? (value = _normalized.value);
     const input2 = payload.value;
-    if (!isObject4(input2)) {
+    if (!isObject5(input2)) {
       payload.issues.push({
         expected: "object",
         code: "invalid_type",
@@ -29450,7 +29450,7 @@ import { delimiter, isAbsolute as isAbsolute2, join as join5, resolve as resolve
 // package.json
 var package_default = {
   name: "wingman-server",
-  version: "0.5.2",
+  version: "0.5.3",
   private: true,
   type: "module",
   engines: {
@@ -31023,10 +31023,186 @@ ${spec.prompt}`;
   isRateLimitRejected: (info) => info.status === "rejected"
 };
 
+// src/adapters/opencode.ts
+var RATE_LIMIT2 = /rate.?limit|usage limit|insufficient_quota|too many requests|\bHTTP 429\b/i;
+var COOLDOWN_SECONDS2 = 3600;
+var cmd = (name) => [name, `${name} *`];
+var READ_COMMANDS = [
+  ...cmd("git status"),
+  ...cmd("git log"),
+  ...cmd("git diff"),
+  ...cmd("git show"),
+  ...cmd("git rev-parse"),
+  "git branch",
+  "git branch --show-current",
+  "git branch --list",
+  "date",
+  "date +*"
+];
+var FILE_COMMANDS = [
+  ...cmd("git add"),
+  ...cmd("git commit"),
+  ...cmd("git mv"),
+  ...cmd("git rm"),
+  ...cmd("git restore"),
+  ...cmd("git ls-files")
+];
+var RUN_COMMANDS = [
+  ...cmd("node"),
+  ...cmd("npm run"),
+  ...cmd("npm test"),
+  ...cmd("npm ci"),
+  ...cmd("npm install")
+];
+var NEVER2 = [
+  "*--output*",
+  "*--no-index*",
+  "*--ext-diff*",
+  "*--textconv*",
+  "* -g *",
+  "* -g",
+  "*--global*",
+  "*--location=global*"
+];
+function permissionFor(preset) {
+  const allowed = preset === "readonly" ? READ_COMMANDS : preset === "edit-files" ? [...READ_COMMANDS, ...FILE_COMMANDS] : [...READ_COMMANDS, ...FILE_COMMANDS, ...RUN_COMMANDS];
+  const bash = { "*": "deny" };
+  for (const pattern of allowed) bash[pattern] = "allow";
+  for (const pattern of NEVER2) bash[pattern] = "deny";
+  return {
+    edit: preset === "readonly" ? "deny" : "allow",
+    webfetch: "deny",
+    task: "deny",
+    external_directory: "deny",
+    bash
+  };
+}
+function isObject4(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function str3(value) {
+  return typeof value === "string" ? value : void 0;
+}
+function createParser2() {
+  let last = null;
+  let sessionSeen = false;
+  let done = false;
+  const denials = [];
+  return (line) => {
+    let data;
+    try {
+      data = JSON.parse(line);
+    } catch {
+      return [];
+    }
+    if (!isObject4(data)) return [];
+    const events = [];
+    const session = str3(data.sessionID);
+    if (session && !sessionSeen) {
+      sessionSeen = true;
+      events.push({ kind: "started", session_id: session });
+    }
+    const part = isObject4(data.part) ? data.part : void 0;
+    switch (data.type) {
+      case "text": {
+        const text = part ? str3(part.text) : void 0;
+        if (text !== void 0) {
+          last = text;
+          events.push({ kind: "message", text });
+        }
+        break;
+      }
+      case "tool_use": {
+        const tool = part ? str3(part.tool) : void 0;
+        if (tool) events.push({ kind: "tool", name: tool });
+        const state = part && isObject4(part.state) ? part.state : void 0;
+        const error62 = state ? str3(state.error) : void 0;
+        if (tool && error62?.startsWith("Permission denied")) denials.push(tool);
+        break;
+      }
+      case "step_finish": {
+        if (part && part.reason === "stop" && !done) {
+          done = true;
+          events.push({
+            kind: "finished",
+            result: last,
+            is_error: false,
+            permission_denials: [...denials]
+          });
+        }
+        break;
+      }
+      case "error": {
+        const error62 = isObject4(data.error) ? data.error : {};
+        const nested = isObject4(error62.data) ? str3(error62.data.message) : void 0;
+        const message = str3(error62.message) ?? nested ?? str3(error62.name) ?? "the OpenCode run failed";
+        if (error62.status === 429 || RATE_LIMIT2.test(message)) {
+          events.push({
+            kind: "rate_limited",
+            info: {
+              status: "rejected",
+              resetsAt: Math.floor(Date.now() / 1e3) + COOLDOWN_SECONDS2
+            }
+          });
+        }
+        if (done) break;
+        done = true;
+        events.push({
+          kind: "finished",
+          result: last ?? message,
+          is_error: true,
+          permission_denials: [...denials]
+        });
+        break;
+      }
+      default:
+        break;
+    }
+    return events;
+  };
+}
+var opencodeAdapter = {
+  provider: "opencode",
+  capabilities: { allowedTools: false, maxTurns: false, agentCommits: true },
+  buildPrompt(spec) {
+    return `${spec.append_system_prompt}
+
+A shell command that is not on the allowed list is refused. If one is refused, use another allowed way (git status, git log, git diff, git show, git rev-parse --abbrev-ref HEAD) or carry on without it; do not stop. You are already on your own branch.
+
+---
+
+${spec.prompt}`;
+  },
+  buildCommand(account, spec) {
+    const args = ["run", "--format", "json", "--standalone"];
+    if (spec.model) args.push("-m", spec.model);
+    return { command: account.command, args };
+  },
+  buildEnv(parent, account, depth, spec) {
+    const env = allowlistedEnv(parent);
+    const dir = account.config_dir;
+    env.XDG_CONFIG_HOME = `${dir}/config`;
+    env.XDG_DATA_HOME = `${dir}/data`;
+    env.XDG_STATE_HOME = `${dir}/state`;
+    env.XDG_CACHE_HOME = `${dir}/cache`;
+    env.npm_config_userconfig = `${dir}/npmrc`;
+    env.WINGMAN_DEPTH = String(depth);
+    if (spec)
+      env.OPENCODE_CONFIG_CONTENT = JSON.stringify({ permission: permissionFor(spec.preset) });
+    return env;
+  },
+  createLineParser: createParser2,
+  parseLine(line) {
+    return createParser2()(line);
+  },
+  isRateLimitRejected: (info) => info.status === "rejected"
+};
+
 // src/adapters/index.ts
 var ADAPTERS = {
   claude: claudeAdapter,
-  codex: codexAdapter
+  codex: codexAdapter,
+  opencode: opencodeAdapter
 };
 function getAdapter(provider) {
   const adapter = Object.hasOwn(ADAPTERS, provider) ? ADAPTERS[provider] : void 0;
@@ -31591,7 +31767,7 @@ function spawnRun(meta3, opts, adapter, spec, depth, parentEnv, lockPath, autoCo
     const { pid } = launchSupervisor(
       meta3,
       payload,
-      adapter.buildEnv(parentEnv, opts.account, depth),
+      adapter.buildEnv(parentEnv, opts.account, depth, spec),
       entry
     );
     if (lockPath) setLockOwner(lockPath, pid);

@@ -30,6 +30,8 @@ To let callers ask for `haiku`, `sonnet` or `opus` on this account, the user set
 
 For a Codex account the user runs `codex login` with `CODEX_HOME` set to a dedicated directory and registers it with `wingman accounts add --id ID --config-dir DIR --provider codex`. `wingman doctor` then checks only the directory and the command; `doctor --online` has no sign-in check for it. Say that Codex runs are less contained than Claude runs (README, "Other providers").
 
+For an OpenCode account the user gives a dedicated directory as `--config-dir` (wingman maps it to the XDG config, data, state and cache roots) and logs in once with those variables set (README, "Other providers"); model names are `provider/model`. Runs are confined by a permission config, not a sandbox.
+
 ## 2. Check the registry and the profile
 
 The CLI is `${CLAUDE_PLUGIN_ROOT}/bin/wingman`. Run:

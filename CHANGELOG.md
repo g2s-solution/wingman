@@ -2,6 +2,10 @@
 
 Versions are the plugin version in `wingman/.claude-plugin/plugin.json`. Claude Code only updates an installed plugin when this number changes.
 
+## 0.5.3
+
+- OpenCode provider: an account with `--provider opencode` runs `opencode run --format json --standalone` with the prompt on stdin, its `config_dir` mapped to the four XDG roots, and a per-run permission config (`OPENCODE_CONFIG_CONTENT`) that denies web fetches, nested agents and paths outside the worktree and allows only the preset's git/node/npm commands. OpenCode commits for itself. `allowed_tools` and `max_turns` are refused. `Adapter.buildEnv` receives the run's spec.
+
 ## 0.5.2
 
 - A model name that fails validation (for example one starting with `-`) is now refused before a run, worktree or branch is created; it used to leave a run stuck in `running` with a detached worktree.
