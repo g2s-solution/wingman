@@ -334,7 +334,7 @@ async function add(args: string[]): Promise<number> {
       id,
       label: id,
       provider: 'claude',
-      command: 'claude',
+      command: given.provider ?? 'claude',
       ...given,
       config_dir: configDir,
     });

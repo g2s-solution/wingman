@@ -102,7 +102,7 @@ var require_code = __commonJS({
     }
     exports._ = _;
     var plus = new _Code("+");
-    function str2(strs, ...args) {
+    function str3(strs, ...args) {
       const expr = [safeStringify(strs[0])];
       let i = 0;
       while (i < args.length) {
@@ -113,7 +113,7 @@ var require_code = __commonJS({
       optimize(expr);
       return new _Code(expr);
     }
-    exports.str = str2;
+    exports.str = str3;
     function addCodeArg(code, arg) {
       if (arg instanceof _Code)
         code.push(...arg._items);
@@ -156,7 +156,7 @@ var require_code = __commonJS({
       return;
     }
     function strConcat(c1, c2) {
-      return c2.emptyStr() ? c1 : c1.emptyStr() ? c2 : str2`${c1}${c2}`;
+      return c2.emptyStr() ? c1 : c1.emptyStr() ? c2 : str3`${c1}${c2}`;
     }
     exports.strConcat = strConcat;
     function interpolate(x) {
@@ -1118,22 +1118,22 @@ var require_util = __commonJS({
       return (0, codegen_1._)`${topSchemaRef}${schemaPath}${(0, codegen_1.getProperty)(keyword)}`;
     }
     exports.schemaRefOrVal = schemaRefOrVal;
-    function unescapeFragment(str2) {
-      return unescapeJsonPointer(decodeURIComponent(str2));
+    function unescapeFragment(str3) {
+      return unescapeJsonPointer(decodeURIComponent(str3));
     }
     exports.unescapeFragment = unescapeFragment;
-    function escapeFragment(str2) {
-      return encodeURIComponent(escapeJsonPointer(str2));
+    function escapeFragment(str3) {
+      return encodeURIComponent(escapeJsonPointer(str3));
     }
     exports.escapeFragment = escapeFragment;
-    function escapeJsonPointer(str2) {
-      if (typeof str2 == "number")
-        return `${str2}`;
-      return str2.replace(/~/g, "~0").replace(/\//g, "~1");
+    function escapeJsonPointer(str3) {
+      if (typeof str3 == "number")
+        return `${str3}`;
+      return str3.replace(/~/g, "~0").replace(/\//g, "~1");
     }
     exports.escapeJsonPointer = escapeJsonPointer;
-    function unescapeJsonPointer(str2) {
-      return str2.replace(/~1/g, "/").replace(/~0/g, "~");
+    function unescapeJsonPointer(str3) {
+      return str3.replace(/~1/g, "/").replace(/~0/g, "~");
     }
     exports.unescapeJsonPointer = unescapeJsonPointer;
     function eachItem(xs, f) {
@@ -2158,8 +2158,8 @@ var require_json_schema_traverse = __commonJS({
         post(schema, jsonPtr, rootSchema, parentJsonPtr, parentKeyword, parentSchema, keyIndex);
       }
     }
-    function escapeJsonPtr(str2) {
-      return str2.replace(/~/g, "~0").replace(/\//g, "~1");
+    function escapeJsonPtr(str3) {
+      return str3.replace(/~/g, "~0").replace(/\//g, "~1");
     }
   }
 });
@@ -3256,10 +3256,10 @@ var require_utils = __commonJS({
         isIPV6: true
       };
     }
-    function findToken(str2, token) {
+    function findToken(str3, token) {
       let ind = 0;
-      for (let i = 0; i < str2.length; i++) {
-        if (str2[i] === token) ind++;
+      for (let i = 0; i < str3.length; i++) {
+        if (str3[i] === token) ind++;
       }
       return ind;
     }
@@ -4329,7 +4329,7 @@ var require_core = __commonJS({
     var util_1 = require_util();
     var $dataRefSchema = require_data();
     var uri_1 = require_uri();
-    var defaultRegExp = (str2, flags) => new RegExp(str2, flags);
+    var defaultRegExp = (str3, flags) => new RegExp(str3, flags);
     defaultRegExp.code = "new RegExp";
     var META_IGNORE_OPTIONS = ["removeAdditional", "useDefaults", "coerceTypes"];
     var EXT_SCOPE_NAMES = /* @__PURE__ */ new Set([
@@ -5124,16 +5124,16 @@ var require_ucs2length = __commonJS({
   "node_modules/ajv/dist/runtime/ucs2length.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
-    function ucs2length(str2) {
-      const len = str2.length;
+    function ucs2length(str3) {
+      const len = str3.length;
       let length = 0;
       let pos = 0;
       let value;
       while (pos < len) {
         length++;
-        value = str2.charCodeAt(pos++);
+        value = str3.charCodeAt(pos++);
         if (value >= 55296 && value <= 56319 && pos < len) {
-          value = str2.charCodeAt(pos);
+          value = str3.charCodeAt(pos);
           if ((value & 64512) === 56320)
             pos++;
         }
@@ -7016,8 +7016,8 @@ var require_formats = __commonJS({
     }
     var DATE = /^(\d\d\d\d)-(\d\d)-(\d\d)$/;
     var DAYS = [0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-    function date5(str2) {
-      const matches = DATE.exec(str2);
+    function date5(str3) {
+      const matches = DATE.exec(str3);
       if (!matches)
         return false;
       const year = +matches[1];
@@ -7036,8 +7036,8 @@ var require_formats = __commonJS({
     }
     var TIME = /^(\d\d):(\d\d):(\d\d(?:\.\d+)?)(z|([+-])(\d\d)(?::?(\d\d))?)?$/i;
     function getTime(strictTimeZone) {
-      return function time3(str2) {
-        const matches = TIME.exec(str2);
+      return function time3(str3) {
+        const matches = TIME.exec(str3);
         if (!matches)
           return false;
         const hr = +matches[1];
@@ -7083,8 +7083,8 @@ var require_formats = __commonJS({
     var DATE_TIME_SEPARATOR = /t|\s/i;
     function getDateTime(strictTimeZone) {
       const time3 = getTime(strictTimeZone);
-      return function date_time(str2) {
-        const dateTime = str2.split(DATE_TIME_SEPARATOR);
+      return function date_time(str3) {
+        const dateTime = str3.split(DATE_TIME_SEPARATOR);
         return dateTime.length === 2 && date5(dateTime[0]) && time3(dateTime[1]);
       };
     }
@@ -7109,13 +7109,13 @@ var require_formats = __commonJS({
     }
     var NOT_URI_FRAGMENT = /\/|:/;
     var URI = /^(?:[a-z][a-z0-9+\-.]*:)(?:\/?\/(?:(?:[a-z0-9\-._~!$&'()*+,;=:]|%[0-9a-f]{2})*@)?(?:\[(?:(?:(?:(?:[0-9a-f]{1,4}:){6}|::(?:[0-9a-f]{1,4}:){5}|(?:[0-9a-f]{1,4})?::(?:[0-9a-f]{1,4}:){4}|(?:(?:[0-9a-f]{1,4}:){0,1}[0-9a-f]{1,4})?::(?:[0-9a-f]{1,4}:){3}|(?:(?:[0-9a-f]{1,4}:){0,2}[0-9a-f]{1,4})?::(?:[0-9a-f]{1,4}:){2}|(?:(?:[0-9a-f]{1,4}:){0,3}[0-9a-f]{1,4})?::[0-9a-f]{1,4}:|(?:(?:[0-9a-f]{1,4}:){0,4}[0-9a-f]{1,4})?::)(?:[0-9a-f]{1,4}:[0-9a-f]{1,4}|(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?))|(?:(?:[0-9a-f]{1,4}:){0,5}[0-9a-f]{1,4})?::[0-9a-f]{1,4}|(?:(?:[0-9a-f]{1,4}:){0,6}[0-9a-f]{1,4})?::)|[Vv][0-9a-f]+\.[a-z0-9\-._~!$&'()*+,;=:]+)\]|(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)|(?:[a-z0-9\-._~!$&'()*+,;=]|%[0-9a-f]{2})*)(?::\d*)?(?:\/(?:[a-z0-9\-._~!$&'()*+,;=:@]|%[0-9a-f]{2})*)*|\/(?:(?:[a-z0-9\-._~!$&'()*+,;=:@]|%[0-9a-f]{2})+(?:\/(?:[a-z0-9\-._~!$&'()*+,;=:@]|%[0-9a-f]{2})*)*)?|(?:[a-z0-9\-._~!$&'()*+,;=:@]|%[0-9a-f]{2})+(?:\/(?:[a-z0-9\-._~!$&'()*+,;=:@]|%[0-9a-f]{2})*)*)(?:\?(?:[a-z0-9\-._~!$&'()*+,;=:@/?]|%[0-9a-f]{2})*)?(?:#(?:[a-z0-9\-._~!$&'()*+,;=:@/?]|%[0-9a-f]{2})*)?$/i;
-    function uri(str2) {
-      return NOT_URI_FRAGMENT.test(str2) && URI.test(str2);
+    function uri(str3) {
+      return NOT_URI_FRAGMENT.test(str3) && URI.test(str3);
     }
     var BYTE = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/gm;
-    function byte(str2) {
+    function byte(str3) {
       BYTE.lastIndex = 0;
-      return BYTE.test(str2);
+      return BYTE.test(str3);
     }
     var MIN_INT32 = -(2 ** 31);
     var MAX_INT32 = 2 ** 31 - 1;
@@ -7129,11 +7129,11 @@ var require_formats = __commonJS({
       return true;
     }
     var Z_ANCHOR = /[^\\]\\Z/;
-    function regex(str2) {
-      if (Z_ANCHOR.test(str2))
+    function regex(str3) {
+      if (Z_ANCHOR.test(str3))
         return false;
       try {
-        new RegExp(str2);
+        new RegExp(str3);
         return true;
       } catch (e) {
         return false;
@@ -8094,14 +8094,14 @@ function promiseAllObject(promisesObj) {
 }
 function randomString(length = 10) {
   const chars = "abcdefghijklmnopqrstuvwxyz";
-  let str2 = "";
+  let str3 = "";
   for (let i = 0; i < length; i++) {
-    str2 += chars[Math.floor(Math.random() * chars.length)];
+    str3 += chars[Math.floor(Math.random() * chars.length)];
   }
-  return str2;
+  return str3;
 }
-function esc(str2) {
-  return JSON.stringify(str2);
+function esc(str3) {
+  return JSON.stringify(str3);
 }
 function slugify(input2) {
   return input2.toLowerCase().trim().replace(/[^\w\s-]/g, "").replace(/[\s_-]+/g, "-").replace(/^-+|-+$/g, "");
@@ -8215,8 +8215,8 @@ var primitiveTypes = /* @__PURE__ */ new Set([
   "symbol",
   "undefined"
 ]);
-function escapeRegex(str2) {
-  return str2.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+function escapeRegex(str3) {
+  return str3.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 function clone(inst, def, params) {
   const cl = new inst._zod.constr(def ?? inst._zod.def);
@@ -8482,13 +8482,13 @@ function getSizableOrigin(input2) {
   return "unknown";
 }
 var highSurrogate = /[\uD800-\uDBFF]/;
-function codePointLength(str2) {
-  const units = str2.length;
-  if (!highSurrogate.test(str2))
+function codePointLength(str3) {
+  const units = str3.length;
+  if (!highSurrogate.test(str3))
     return units;
   let count = units;
   for (let i = 0; i < units - 1; i++) {
-    if ((str2.charCodeAt(i) & 64512) === 55296 && (str2.charCodeAt(i + 1) & 64512) === 56320) {
+    if ((str3.charCodeAt(i) & 64512) === 55296 && (str3.charCodeAt(i + 1) & 64512) === 56320) {
       count--;
       i++;
     }
@@ -10821,7 +10821,7 @@ var $ZodObject = /* @__PURE__ */ $constructor("$ZodObject", (inst, def) => {
     }
     return propValues;
   });
-  const isObject3 = isObject;
+  const isObject4 = isObject;
   const catchall = def.catchall;
   let value;
   const memo2 = globalConfig.memoizer;
@@ -10829,7 +10829,7 @@ var $ZodObject = /* @__PURE__ */ $constructor("$ZodObject", (inst, def) => {
   inst._zod.parse = (payload, ctx) => {
     value ?? (value = _normalized.value);
     const input2 = payload.value;
-    if (!isObject3(input2)) {
+    if (!isObject4(input2)) {
       payload.issues.push({
         expected: "object",
         code: "invalid_type",
@@ -10965,7 +10965,7 @@ var $ZodObjectJIT = /* @__PURE__ */ $constructor("$ZodObjectJIT", (inst, def) =>
     return doc.compile();
   };
   let fastpass;
-  const isObject3 = isObject;
+  const isObject4 = isObject;
   const jit = !globalConfig.jitless;
   const allowsEval2 = allowsEval;
   const fastEnabled = jit && allowsEval2.value;
@@ -10974,7 +10974,7 @@ var $ZodObjectJIT = /* @__PURE__ */ $constructor("$ZodObjectJIT", (inst, def) =>
   inst._zod.parse = (payload, ctx) => {
     value ?? (value = _normalized.value);
     const input2 = payload.value;
-    if (!isObject3(input2)) {
+    if (!isObject4(input2)) {
       payload.issues.push({
         expected: "object",
         code: "invalid_type",
@@ -29360,7 +29360,7 @@ ${USAGE}`);
       id,
       label: id,
       provider: "claude",
-      command: "claude",
+      command: given.provider ?? "claude",
       ...given,
       config_dir: configDir
     });
@@ -29450,7 +29450,7 @@ import { delimiter, isAbsolute as isAbsolute2, join as join5, resolve as resolve
 // package.json
 var package_default = {
   name: "wingman-server",
-  version: "0.5.0",
+  version: "0.5.1",
   private: true,
   type: "module",
   engines: {
@@ -30772,7 +30772,7 @@ function parseStatusLine(text) {
   return found;
 }
 
-// src/adapters/claude.ts
+// src/adapters/env.ts
 var ALLOWED_ENV = /* @__PURE__ */ new Set([
   "PATH",
   "HOME",
@@ -30789,6 +30789,16 @@ var ALLOWED_ENV = /* @__PURE__ */ new Set([
   "NO_PROXY",
   "no_proxy"
 ]);
+function allowlistedEnv(parent) {
+  const env = {};
+  for (const [name, value] of Object.entries(parent)) {
+    if (value === void 0) continue;
+    if (ALLOWED_ENV.has(name) || name.startsWith("LC_")) env[name] = value;
+  }
+  return env;
+}
+
+// src/adapters/claude.ts
 var NON_REJECTIONS = /* @__PURE__ */ new Set(["allowed", "allowed_warning"]);
 function isRateLimitRejected(info) {
   return info.status !== void 0 && !NON_REJECTIONS.has(info.status);
@@ -30814,6 +30824,7 @@ function denialText(denial) {
 }
 var claudeAdapter = {
   provider: "claude",
+  capabilities: { allowedTools: true, maxTurns: true, agentCommits: true },
   isRateLimitRejected,
   buildCommand(account, spec) {
     assertToolItems(spec.allowed_tools, "allowed_tools");
@@ -30830,11 +30841,7 @@ var claudeAdapter = {
     return { command: account.command, args };
   },
   buildEnv(parent, account, depth) {
-    const env = {};
-    for (const [name, value] of Object.entries(parent)) {
-      if (value === void 0) continue;
-      if (ALLOWED_ENV.has(name) || name.startsWith("LC_")) env[name] = value;
-    }
+    const env = allowlistedEnv(parent);
     env.CLAUDE_CONFIG_DIR = account.config_dir;
     env.WINGMAN_DEPTH = String(depth);
     return env;
@@ -30910,9 +30917,116 @@ var claudeAdapter = {
   }
 };
 
+// src/adapters/codex.ts
+var RATE_LIMIT = /rate.?limit|usage limit|insufficient_quota|too many requests|\bHTTP 429\b|\b429 Too Many/i;
+var COOLDOWN_SECONDS = 3600;
+function isObject3(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function str2(value) {
+  return typeof value === "string" ? value : void 0;
+}
+function sandboxFor(preset) {
+  return preset === "readonly" ? "read-only" : "workspace-write";
+}
+function createParser() {
+  let last = null;
+  return (line) => {
+    let data;
+    try {
+      data = JSON.parse(line);
+    } catch {
+      return [];
+    }
+    if (!isObject3(data)) return [];
+    switch (data.type) {
+      case "thread.started": {
+        const id = str2(data.thread_id);
+        return id ? [{ kind: "started", session_id: id }] : [];
+      }
+      case "item.completed": {
+        const item = data.item;
+        if (!isObject3(item)) return [];
+        if (item.type === "agent_message" && typeof item.text === "string") {
+          last = item.text;
+          return [{ kind: "message", text: item.text }];
+        }
+        if (item.type === "command_execution" && typeof item.command === "string") {
+          return [{ kind: "tool", name: "command" }];
+        }
+        return [];
+      }
+      case "turn.completed":
+        return [{ kind: "finished", result: last, is_error: false, permission_denials: [] }];
+      case "turn.failed": {
+        const error62 = isObject3(data.error) ? str2(data.error.message) : void 0;
+        const message = error62 ?? "the Codex turn failed";
+        const events = [];
+        if (RATE_LIMIT.test(message)) {
+          events.push({
+            kind: "rate_limited",
+            info: {
+              status: "rejected",
+              resetsAt: Math.floor(Date.now() / 1e3) + COOLDOWN_SECONDS
+            }
+          });
+        }
+        events.push({
+          kind: "finished",
+          result: last ?? message,
+          is_error: true,
+          permission_denials: []
+        });
+        return events;
+      }
+      default:
+        return [];
+    }
+  };
+}
+var codexAdapter = {
+  provider: "codex",
+  capabilities: { allowedTools: false, maxTurns: false, agentCommits: false },
+  buildPrompt(spec) {
+    return `${spec.append_system_prompt}
+
+---
+
+${spec.prompt}`;
+  },
+  buildCommand(account, spec) {
+    const args = [
+      "exec",
+      "--json",
+      "--ignore-user-config",
+      "--ignore-rules",
+      "--skip-git-repo-check",
+      "-C",
+      spec.cwd,
+      "-s",
+      sandboxFor(spec.preset)
+    ];
+    if (spec.model) args.push("-m", spec.model);
+    args.push("-");
+    return { command: account.command, args };
+  },
+  buildEnv(parent, account, depth) {
+    const env = allowlistedEnv(parent);
+    env.CODEX_HOME = account.config_dir;
+    env.WINGMAN_DEPTH = String(depth);
+    return env;
+  },
+  createLineParser: createParser,
+  parseLine(line) {
+    return createParser()(line);
+  },
+  isRateLimitRejected: (info) => info.status === "rejected"
+};
+
 // src/adapters/index.ts
 var ADAPTERS = {
-  claude: claudeAdapter
+  claude: claudeAdapter,
+  codex: codexAdapter
 };
 function getAdapter(provider) {
   const adapter = Object.hasOwn(ADAPTERS, provider) ? ADAPTERS[provider] : void 0;
@@ -31048,11 +31162,61 @@ async function readStdin() {
   for await (const chunk of process.stdin) chunks.push(chunk);
   return Buffer.concat(chunks).toString("utf8");
 }
+var RISKY_STAGED_PATH = /(^|\/)(\.env(\..*)?|.*\.pem|id_(rsa|ed25519|ecdsa).*|auth\.json|\.credentials\.json|api-key\.env|\.netrc)$/;
+var SAFE_GIT = [
+  "-c",
+  "core.fsmonitor=false",
+  "-c",
+  "core.hooksPath=/dev/null",
+  "-c",
+  "commit.gpgsign=false",
+  "-c",
+  "core.sshCommand=false"
+];
+async function commitForAgent(cwd, runId) {
+  const exec = defaultExec2;
+  const env = {
+    ...withoutProxy(process.env),
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_TERMINAL_PROMPT: "0",
+    GIT_OPTIONAL_LOCKS: "0"
+  };
+  const opts = { cwd, env, timeoutMs: 6e4 };
+  const git2 = (...args) => exec("git", [...SAFE_GIT, ...args], opts);
+  const failed = "[wingman] the agent left changes in the worktree and wingman could not commit them";
+  const status = await git2("status", "--porcelain");
+  if (status.code !== 0) return failed;
+  if (status.stdout.trim() === "") return "";
+  if ((await git2("add", "-A")).code !== 0) return failed;
+  const staged = await git2("diff", "--cached", "--raw", "--no-renames", "--no-ext-diff");
+  const risky = staged.stdout.split("\n").filter((line) => line.trim() !== "").filter((line) => {
+    const [meta3 = "", path = ""] = line.split("	");
+    const modes = meta3.replace(/^:/, "").split(" ");
+    return modes[0] === "160000" || modes[1] === "160000" || modes[1] === "120000" || RISKY_STAGED_PATH.test(path);
+  });
+  if (staged.code !== 0 || risky.length > 0) {
+    await git2("reset", "-q");
+    return risky.length > 0 ? `[wingman] the agent left changes in the worktree and wingman did not commit them: ${risky.length} staged entries are symlinks, nested repositories or look like credential files` : failed;
+  }
+  const commit = await git2(
+    "-c",
+    "user.name=wingman",
+    "-c",
+    "user.email=wingman@localhost",
+    "commit",
+    "--no-verify",
+    "-q",
+    "-m",
+    `wingman run ${runId}`
+  );
+  return commit.code === 0 ? "[wingman] the agent cannot commit here; wingman committed its changes on the run branch" : failed;
+}
 async function runSupervisor(runId) {
   const payload = JSON.parse(await readStdin());
   const childEnv = { ...process.env };
   process.env.WINGMAN_HOME = payload.wingman_home;
   const adapter = getAdapter(payload.provider);
+  const parseLine = adapter.createLineParser?.() ?? ((line) => adapter.parseLine(line));
   let sessionRateLimit;
   let rejectedRateLimit;
   let rateRejected = false;
@@ -31087,7 +31251,7 @@ async function runSupervisor(runId) {
   if (child.stdout) {
     createInterface({ input: child.stdout }).on("line", (line) => {
       appendEvent(runId, line);
-      for (const event of adapter.parseLine(line)) {
+      for (const event of parseLine(line)) {
         if (event.kind === "rate_limited") {
           sessionRateLimit = event.info;
           if (adapter.isRateLimitRejected(event.info)) {
@@ -31125,6 +31289,10 @@ async function runSupervisor(runId) {
   if (timer) clearTimeout(timer);
   const current2 = readMeta(runId);
   if (TERMINAL_STATUSES.includes(current2.status)) return;
+  let commitNote = "";
+  if (payload.auto_commit) {
+    commitNote = timedOut ? "[wingman] the run timed out; any changes it made are left uncommitted in the worktree" : await commitForAgent(payload.cwd, runId);
+  }
   const input2 = {
     finished,
     exitCode: end.code,
@@ -31139,6 +31307,9 @@ async function runSupervisor(runId) {
     const changed = await changedSince(defaultExec2, payload.repo, payload.ref_snapshot);
     if (changed.length > 0) outcome = flagGuardrail(outcome, changed);
   }
+  if (commitNote) outcome = { ...outcome, text: `${outcome.text}
+
+${commitNote}` };
   writeResult(runId, outcome.text);
   const patch = {
     exit_code: end.code,
@@ -31242,9 +31413,14 @@ async function startRun(opts) {
   const parentEnv = opts.parentEnv ?? process.env;
   assertCanStart(parentEnv);
   const adapter = opts.adapter ?? getAdapter(opts.account.provider);
-  if (adapter.provider !== "claude" && opts.allowed_tools !== void 0) {
+  if (!adapter.capabilities.allowedTools && opts.allowed_tools !== void 0) {
     throw new Error(
       `allowed_tools are Claude tool rules and are not supported for provider "${adapter.provider}"; choose a preset instead`
+    );
+  }
+  if (!adapter.capabilities.maxTurns && opts.max_turns !== void 0) {
+    throw new Error(
+      `max_turns is not supported for provider "${adapter.provider}"; the run is bounded by its time limit`
     );
   }
   const exec = opts.exec ?? defaultExec2;
@@ -31342,7 +31518,7 @@ async function startRun(opts) {
   }
   const model = resolveModel(opts.account, opts.model);
   if (model !== void 0) assertModelName(model);
-  const maxTurns = opts.max_turns ?? defaultMaxTurns(opts.preset);
+  const maxTurns = adapter.capabilities.maxTurns ? opts.max_turns ?? defaultMaxTurns(opts.preset) : void 0;
   const spec = {
     prompt: opts.prompt,
     cwd: runCwd,
@@ -31355,7 +31531,8 @@ async function startRun(opts) {
     ...maxTurns !== void 0 ? { max_turns: maxTurns } : {}
   };
   try {
-    return spawnRun(meta3, opts, adapter, spec, depth, parentEnv, lockPath);
+    const autoCommit = !adapter.capabilities.agentCommits && mayCommit && opts.worktree === true && meta3.run_branch !== void 0;
+    return spawnRun(meta3, opts, adapter, spec, depth, parentEnv, lockPath, autoCommit);
   } catch (err) {
     await discardStart(meta3, exec);
     throw err;
@@ -31394,7 +31571,7 @@ async function deleteRunBranch(meta3, exec) {
     timeoutMs: DEFAULT_ADD_TIMEOUT_MS
   }).catch(() => void 0);
 }
-function spawnRun(meta3, opts, adapter, spec, depth, parentEnv, lockPath) {
+function spawnRun(meta3, opts, adapter, spec, depth, parentEnv, lockPath, autoCommit) {
   const { command, args } = adapter.buildCommand(opts.account, spec);
   const payload = {
     ...meta3.repo !== void 0 ? { repo: meta3.repo } : {},
@@ -31402,8 +31579,9 @@ function spawnRun(meta3, opts, adapter, spec, depth, parentEnv, lockPath) {
     provider: adapter.provider,
     command,
     args,
-    prompt: spec.prompt,
+    prompt: adapter.buildPrompt ? adapter.buildPrompt(spec) : spec.prompt,
     cwd: spec.cwd,
+    ...autoCommit ? { auto_commit: true } : {},
     timeout_ms: opts.timeout_ms ?? DEFAULT_TIMEOUT_MS,
     wingman_home: wingmanHome()
   };
@@ -39659,7 +39837,7 @@ var startInput = {
   prompt: external_exports.string().min(1).max(2e5).describe("The full task brief for the run."),
   cwd: external_exports.string().min(1).describe("Absolute path of the project directory."),
   model: external_exports.string().min(1).optional().describe(
-    'Model for the run. "haiku", "sonnet" or "opus" map to the models set for that tier on the chosen account (see wingman_accounts `models`); any other value is passed to the provider as is and must be a model name that provider accepts. Omitted: the provider default.'
+    'Model for the run. "haiku", "sonnet" or "opus" map to the models set for that tier on the chosen account (see wingman_accounts `models`); any other value is passed to the provider as is and must be a model name that provider accepts. Omitted: the provider default. A Codex account ignores Claude-only options: `allowed_tools` and `max_turns` are refused for it.'
   ),
   preset: external_exports.string().min(1).optional().describe(
     'Tool preset: "readonly" (default), "edit-files" (changes files and commits, runs no commands) or "edit" (also runs node and npm: arbitrary code).'

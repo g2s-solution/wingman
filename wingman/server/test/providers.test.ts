@@ -65,7 +65,11 @@ describe('startRun with another provider', () => {
         cwd: '/tmp',
         worktree: false,
         allowed_tools: ['Read'],
-        adapter: { ...claudeAdapter, provider: 'codex' },
+        adapter: {
+          ...claudeAdapter,
+          provider: 'codex',
+          capabilities: { allowedTools: false, maxTurns: false, agentCommits: false },
+        },
       }),
     ).rejects.toThrow('allowed_tools are Claude tool rules');
   });
