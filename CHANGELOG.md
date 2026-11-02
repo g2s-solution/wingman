@@ -2,6 +2,14 @@
 
 Versions are the plugin version in `wingman/.claude-plugin/plugin.json`. Claude Code only updates an installed plugin when this number changes.
 
+## 0.4.4
+
+- New skill `remove-account`: pause an account, unregister it while keeping the profile, or remove the whole profile with `another-logout.sh`. `add-account` points to it.
+
+## 0.4.3
+
+- The `add-account` skill explains that an `api_key_unverified` profile shows `signed in no` until its key is active.
+
 ## 0.4.2
 
 - `another-login.sh` has a new method `api_key_unverified` (menu option 4): it stores the key and does every other setup step but skips the sign-in check, for a key that is activated later.

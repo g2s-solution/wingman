@@ -1,6 +1,6 @@
 ---
 name: add-account
-description: Set up a second Claude account for wingman. Use when the user wants to add, register or check a second account, or asks why a target account does not work.
+description: Set up or check a second Claude account for wingman. Use when the user wants to add, register, check or disable a second account, or asks why a target account does not work.
 ---
 
 # add-account
@@ -21,6 +21,8 @@ Signing in needs the user's own credentials, so the user runs this in their own 
 ```
 
 Wait until they say it is done. Do not run it for them.
+
+With `api_key_unverified` the key is only stored: nothing is checked and the key may not be active yet. Skip step 3 for that profile until the user says the key is active; `signed in no` from `doctor --online` is then expected, not a fault.
 
 To delegate in both directions (role swap), every profile involved must be registered, including the default one. The user registers it from any profile: `${CLAUDE_PLUGIN_ROOT}/bin/wingman accounts add --id main --label default --config-dir ~/.claude --command claude`. Each profile skips itself when choosing a target, so registering your own profile is safe.
 
@@ -55,4 +57,4 @@ This runs `auth status` for the caller and each account and prints only: signed 
 ## 4. Disable or remove
 
 - Pause an account: `${CLAUDE_PLUGIN_ROOT}/bin/wingman accounts disable ID` (`enable` brings it back).
-- Remove it from the registry: `${CLAUDE_PLUGIN_ROOT}/bin/wingman accounts remove ID`. Say what it does and does not delete as the command reports it; deleting the profile directory is the user's own decision.
+- Remove an account or its whole profile: use the `remove-account` skill.
