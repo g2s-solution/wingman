@@ -3,7 +3,7 @@ import { chmod, mkdir, realpath, rename, writeFile, readFile, unlink } from 'nod
 import { dirname, resolve } from 'node:path';
 import { z } from 'zod';
 import { accountsFile } from './paths.js';
-import type { Account } from './types.js';
+import type { Account, ModelTier } from './types.js';
 
 // passthrough: a write-back must not drop keys a newer version or a hand edit added
 const accountSchema = z
@@ -15,6 +15,14 @@ const accountSchema = z
     command: z.string().min(1).default('claude'),
     status: z.string().min(1).optional(),
     limited_until: z.string().min(1).optional(),
+    models: z
+      .object({
+        haiku: z.string().min(1).optional(),
+        sonnet: z.string().min(1).optional(),
+        opus: z.string().min(1).optional(),
+      })
+      .passthrough()
+      .optional(),
   })
   .passthrough();
 
@@ -179,4 +187,13 @@ export async function recordRateLimit(
   } catch {
     return false;
   }
+}
+
+export const MODEL_TIERS: readonly ModelTier[] = ['haiku', 'sonnet', 'opus'];
+
+/** A tier name becomes the account's model for it; anything else, or an unset tier, passes through unchanged. */
+export function resolveModel(account: Account, model: string | undefined): string | undefined {
+  if (model === undefined) return undefined;
+  const tier = MODEL_TIERS.find((t) => t === model);
+  return (tier && account.models?.[tier]) || model;
 }

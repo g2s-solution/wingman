@@ -171,7 +171,13 @@ const startInput = {
     ),
   prompt: z.string().min(1).max(200_000).describe('The full task brief for the run.'),
   cwd: z.string().min(1).describe('Absolute path of the project directory.'),
-  model: z.string().min(1).optional(),
+  model: z
+    .string()
+    .min(1)
+    .optional()
+    .describe(
+      'Model for the run. "haiku", "sonnet" or "opus" map to the models set for that tier on the chosen account (see wingman_accounts `models`); any other value is passed to the provider as is and must be a model name that provider accepts. Omitted: the provider default.',
+    ),
   preset: z
     .string()
     .min(1)

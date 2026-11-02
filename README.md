@@ -82,8 +82,9 @@ The registry is a plain file (directory mode 0700, file mode 0600). `another-log
 Run these in a terminal: `node <plugin dir>/wingman/bin/wingman accounts <command>`.
 
 ```sh
-wingman accounts list [--json]            # id, label, status, limited_until, runs by status, config_dir, command; marks your own profile
-wingman accounts add --id ID --config-dir DIR [--label L] [--command CMD] [--provider P] [--upsert]
+wingman accounts list [--json]            # id, label, provider, models, status, limited_until, runs by status, config_dir, command; marks your own profile
+wingman accounts add --id ID --config-dir DIR [--label L] [--command CMD] [--provider P]
+                     [--haiku M] [--sonnet M] [--opus M] [--upsert]
 wingman accounts disable ID               # status disabled: never picked, and refused when named
 wingman accounts enable ID                # back to active
 wingman accounts mark-limited ID --until T   # T: ISO time with Z or an offset, a date (UTC) or epoch seconds
@@ -92,6 +93,8 @@ wingman accounts remove ID --yes          # registry entry only; the profile dir
 ```
 
 `add` needs an absolute `--config-dir` (a leading `~` is expanded), refuses a duplicate id unless `--upsert` (which keeps fields you set by hand, such as `status`). Registering your own profile is allowed and prints a note: it is skipped when you delegate from it and used when you delegate from another profile. `remove` without `--yes` only prints what it would do and exits 2. Exit codes: 0 ok, 2 usage or validation error, 1 unexpected error. The commands never read or write credentials.
+
+**Model tiers.** `--haiku`, `--sonnet` and `--opus` set the model this account uses for each tier (for example a Codex or OpenCode model name; `-` clears a tier; an `--upsert` without these flags keeps them). When `wingman_start` is called with `model: "sonnet"` (or `haiku`, `opus`) the account's model for that tier is used; a tier that is not set, or any other value, is passed to the provider unchanged, and an omitted `model` leaves the provider default. `wingman_accounts` shows each account's `models`, so Claude can see what a tier means before it picks.
 
 When a run ends `rate_limited`, wingman marks its account `rate_limited` until the reset time the run reported (`limited_until`). A limited account is skipped when Claude does not name one, and refused when it does; once the time has passed it counts as active again, with no job running. The `rate_limited` answer names the other active accounts, if any, and Claude (not wingman) decides whether to retry on one. `mark-limited` and `clear-limited` set or lift the state by hand. `wingman doctor` lists limited accounts as warnings and does not fail because of them.
 

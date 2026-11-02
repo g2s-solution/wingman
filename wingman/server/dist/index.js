@@ -28643,7 +28643,12 @@ var accountSchema = external_exports.object({
   provider: external_exports.string().min(1).default("claude"),
   command: external_exports.string().min(1).default("claude"),
   status: external_exports.string().min(1).optional(),
-  limited_until: external_exports.string().min(1).optional()
+  limited_until: external_exports.string().min(1).optional(),
+  models: external_exports.object({
+    haiku: external_exports.string().min(1).optional(),
+    sonnet: external_exports.string().min(1).optional(),
+    opus: external_exports.string().min(1).optional()
+  }).passthrough().optional()
 }).passthrough();
 var registrySchema = external_exports.object({ accounts: external_exports.array(accountSchema) });
 async function saveAccounts(registry2) {
@@ -28767,6 +28772,12 @@ async function recordRateLimit(id, info, now = /* @__PURE__ */ new Date()) {
   } catch {
     return false;
   }
+}
+var MODEL_TIERS = ["haiku", "sonnet", "opus"];
+function resolveModel(account, model) {
+  if (model === void 0) return void 0;
+  const tier = MODEL_TIERS.find((t) => t === model);
+  return tier && account.models?.[tier] || model;
 }
 
 // src/runs.ts
@@ -29098,8 +29109,10 @@ function assertCanStart(env = process.env, limit2 = 1) {
 
 // src/accounts.ts
 var ID = /^[A-Za-z0-9_-]{1,64}$/;
+var MODEL_FLAGS = ["--haiku", "--sonnet", "--opus"];
 var USAGE = `usage: wingman accounts list [--json]
-       wingman accounts add --id ID --config-dir DIR [--label L] [--command CMD] [--provider P] [--upsert]
+       wingman accounts add --id ID --config-dir DIR [--label L] [--command CMD] [--provider P]
+                              [--haiku M] [--sonnet M] [--opus M] [--upsert]
        wingman accounts disable ID
        wingman accounts enable ID
        wingman accounts mark-limited ID --until <ISO time with Z or offset, or epoch seconds>
@@ -29114,6 +29127,7 @@ function accountRows(accounts, caller, now = /* @__PURE__ */ new Date(), counts 
     status: effectiveStatus(a, now),
     ...isLimited(a, now) && a.limited_until !== void 0 ? { limited_until: a.limited_until } : {},
     provider: a.provider,
+    ...a.models !== void 0 && Object.keys(a.models).length > 0 ? { models: a.models } : {},
     config_dir: a.config_dir,
     command: a.command,
     is_caller: canonical2(a.config_dir) === caller,
@@ -29128,6 +29142,7 @@ function publicAccounts(accounts, caller, now = /* @__PURE__ */ new Date(), coun
     ...r.limited_until !== void 0 ? { limited_until: r.limited_until } : {},
     is_caller: r.is_caller,
     provider: r.provider,
+    ...r.models !== void 0 ? { models: r.models } : {},
     runs: r.runs
   }));
 }
@@ -29216,11 +29231,23 @@ ${USAGE}`);
   } else {
     write(
       table([
-        ["ID", "LABEL", "PROVIDER", "STATUS", "LIMITED_UNTIL", "RUNS", "CONFIG_DIR", "COMMAND", ""],
+        [
+          "ID",
+          "LABEL",
+          "PROVIDER",
+          "MODELS",
+          "STATUS",
+          "LIMITED_UNTIL",
+          "RUNS",
+          "CONFIG_DIR",
+          "COMMAND",
+          ""
+        ],
         ...rows.map((r) => [
           r.id,
           r.label,
           r.provider,
+          modelsCell(r.models),
           r.status,
           r.limited_until ?? "-",
           runsCell(r.runs),
@@ -29232,6 +29259,12 @@ ${USAGE}`);
     );
   }
   return 0;
+}
+function modelsCell(models) {
+  const parts = MODEL_TIERS.filter((t) => models?.[t] !== void 0).map(
+    (t) => `${t}=${models[t]}`
+  );
+  return parts.length > 0 ? parts.join(",") : "-";
 }
 async function limit(verb, args, now) {
   const p = parse3(args, verb === "mark-limited" ? ["--until"] : [], []);
@@ -29264,7 +29297,7 @@ ${USAGE}`);
 async function add(args) {
   const p = parse3(
     args,
-    ["--id", "--config-dir", "--label", "--command", "--provider"],
+    ["--id", "--config-dir", "--label", "--command", "--provider", ...MODEL_FLAGS],
     ["--upsert"]
   );
   if (p.positional.length > 0) throw new AccountsUsageError(`unexpected argument
@@ -29277,7 +29310,7 @@ ${USAGE}`);
   }
   if (!ID.test(id)) throw new AccountsUsageError("--id must match [A-Za-z0-9_-]{1,64}");
   const configDir = normalizeConfigDir(rawDir);
-  for (const flag of ["--label", "--command", "--provider"]) {
+  for (const flag of ["--label", "--command", "--provider", ...MODEL_FLAGS]) {
     if (p.values[flag] !== void 0 && p.values[flag].trim() === "") {
       throw new AccountsUsageError(`${flag} must not be empty`);
     }
@@ -29292,6 +29325,17 @@ ${USAGE}`);
   if (p.values["--label"] !== void 0) given.label = p.values["--label"];
   if (p.values["--command"] !== void 0) given.command = p.values["--command"];
   if (p.values["--provider"] !== void 0) given.provider = p.values["--provider"];
+  const models = { ...registry2.accounts[i]?.models ?? {} };
+  for (const tier of MODEL_TIERS) {
+    const value = p.values[`--${tier}`];
+    if (value === void 0) continue;
+    if (value === "-") delete models[tier];
+    else models[tier] = value;
+  }
+  if (MODEL_FLAGS.some((f) => p.values[f] !== void 0)) {
+    if (Object.keys(models).length > 0) given.models = models;
+    else if (i >= 0) delete registry2.accounts[i].models;
+  }
   if (i >= 0) {
     registry2.accounts[i] = { ...registry2.accounts[i], ...given };
   } else {
@@ -29389,7 +29433,7 @@ import { delimiter, isAbsolute as isAbsolute2, join as join5, resolve as resolve
 // package.json
 var package_default = {
   name: "wingman-server",
-  version: "0.4.5",
+  version: "0.4.6",
   private: true,
   type: "module",
   engines: {
@@ -31279,6 +31323,7 @@ async function startRun(opts) {
       patchRunning(meta3.id, { ref_snapshot: snapshot });
     }
   }
+  const model = resolveModel(opts.account, opts.model);
   const maxTurns = opts.max_turns ?? defaultMaxTurns(opts.preset);
   const spec = {
     prompt: opts.prompt,
@@ -31288,7 +31333,7 @@ async function startRun(opts) {
     session_id: sessionId,
     append_system_prompt: guardPrompt(adapter.provider),
     preset: opts.preset ?? DEFAULT_PRESET,
-    ...opts.model !== void 0 ? { model: opts.model } : {},
+    ...model !== void 0 ? { model } : {},
     ...maxTurns !== void 0 ? { max_turns: maxTurns } : {}
   };
   try {
@@ -39595,7 +39640,9 @@ var startInput = {
   ),
   prompt: external_exports.string().min(1).max(2e5).describe("The full task brief for the run."),
   cwd: external_exports.string().min(1).describe("Absolute path of the project directory."),
-  model: external_exports.string().min(1).optional(),
+  model: external_exports.string().min(1).optional().describe(
+    'Model for the run. "haiku", "sonnet" or "opus" map to the models set for that tier on the chosen account (see wingman_accounts `models`); any other value is passed to the provider as is and must be a model name that provider accepts. Omitted: the provider default.'
+  ),
   preset: external_exports.string().min(1).optional().describe(
     'Tool preset: "readonly" (default), "edit-files" (changes files and commits, runs no commands) or "edit" (also runs node and npm: arbitrary code).'
   ),

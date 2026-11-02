@@ -27,7 +27,7 @@ import {
   resolveTools,
 } from './guard.js';
 import { runDir, wingmanHome } from './paths.js';
-import { recordRateLimit } from './registry.js';
+import { recordRateLimit, resolveModel } from './registry.js';
 import {
   appendEvent,
   createRun,
@@ -541,6 +541,7 @@ export async function startRun(opts: StartRunOptions): Promise<RunMeta> {
     }
   }
 
+  const model = resolveModel(opts.account, opts.model);
   const maxTurns = opts.max_turns ?? defaultMaxTurns(opts.preset);
   const spec: StartSpec = {
     prompt: opts.prompt,
@@ -550,7 +551,7 @@ export async function startRun(opts: StartRunOptions): Promise<RunMeta> {
     session_id: sessionId,
     append_system_prompt: guardPrompt(adapter.provider),
     preset: opts.preset ?? DEFAULT_PRESET,
-    ...(opts.model !== undefined ? { model: opts.model } : {}),
+    ...(model !== undefined ? { model } : {}),
     ...(maxTurns !== undefined ? { max_turns: maxTurns } : {}),
   };
   try {

@@ -172,10 +172,14 @@ describe('wingman accounts list', () => {
     expect(await cli('list')).toBe(0);
     const lines = stdout().trimEnd().split('\n');
     expect(lines[0]).toMatch(
-      /^ID\s+LABEL\s+PROVIDER\s+STATUS\s+LIMITED_UNTIL\s+RUNS\s+CONFIG_DIR\s+COMMAND/,
+      /^ID\s+LABEL\s+PROVIDER\s+MODELS\s+STATUS\s+LIMITED_UNTIL\s+RUNS\s+CONFIG_DIR\s+COMMAND/,
     );
-    expect(lines[1]).toMatch(/^other\s+claude-other\s+claude\s+active\s+-\s+-\s+\S+\s+\/bin\/o$/);
-    expect(lines[2]).toMatch(/^me\s+me\s+claude\s+disabled\s+-\s+-\s+\S+\s+claude\s+this profile$/);
+    expect(lines[1]).toMatch(
+      /^other\s+claude-other\s+claude\s+-\s+active\s+-\s+-\s+\S+\s+\/bin\/o$/,
+    );
+    expect(lines[2]).toMatch(
+      /^me\s+me\s+claude\s+-\s+disabled\s+-\s+-\s+\S+\s+claude\s+this profile$/,
+    );
   });
 
   it('--json prints the same fields plus is_caller', async () => {
@@ -307,5 +311,49 @@ describe('wingman_accounts tool', () => {
     expect(text).not.toMatch(/launcher|command|config_dir|\/o"/);
     await client.close();
     await server.close();
+  });
+});
+
+describe('account model tiers', () => {
+  it('sets, updates and clears tiers, and shows them in list', async () => {
+    await addAccount('o', join(home, 'o'), '--haiku', 'small-1', '--opus', 'big-1');
+    expect(registry().accounts[0]!.models).toEqual({ haiku: 'small-1', opus: 'big-1' });
+
+    await addAccount('o', join(home, 'o'), '--upsert', '--sonnet', 'mid-1', '--haiku', '-');
+    expect(registry().accounts[0]!.models).toEqual({ opus: 'big-1', sonnet: 'mid-1' });
+
+    out.length = 0;
+    expect(await cli('list')).toBe(0);
+    expect(stdout()).toContain('sonnet=mid-1,opus=big-1');
+    out.length = 0;
+    expect(await cli('list', '--json')).toBe(0);
+    expect(JSON.parse(stdout())[0].models).toEqual({ opus: 'big-1', sonnet: 'mid-1' });
+
+    await addAccount('o', join(home, 'o'), '--upsert', '--sonnet', '-', '--opus', '-');
+    expect(registry().accounts[0]!.models).toBeUndefined();
+    await addAccount('o', join(home, 'o'), '--upsert', '--label', 'again');
+    expect(registry().accounts[0]!.models).toBeUndefined();
+  });
+
+  it('keeps tiers when an upsert names no tier flag, and rejects an empty value', async () => {
+    await addAccount('k', join(home, 'k'), '--sonnet', 'mid-1');
+    await addAccount('k', join(home, 'k'), '--upsert', '--label', 'renamed');
+    expect(registry().accounts[0]!.models).toEqual({ sonnet: 'mid-1' });
+    expect(
+      await cli('add', '--id', 'k', '--config-dir', join(home, 'k'), '--upsert', '--opus', ' '),
+    ).toBe(2);
+    expect(stderr()).toContain('--opus must not be empty');
+  });
+});
+
+describe('resolveModel', () => {
+  const account = { models: { sonnet: 'gpt-mid' } } as never;
+  it('maps a set tier and passes everything else through', async () => {
+    const { resolveModel } = await import('../src/registry.js');
+    expect(resolveModel(account, 'sonnet')).toBe('gpt-mid');
+    expect(resolveModel(account, 'opus')).toBe('opus');
+    expect(resolveModel(account, 'custom/model')).toBe('custom/model');
+    expect(resolveModel({} as never, 'haiku')).toBe('haiku');
+    expect(resolveModel(account, undefined)).toBeUndefined();
   });
 });

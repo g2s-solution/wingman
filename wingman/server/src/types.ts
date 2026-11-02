@@ -10,7 +10,11 @@ export interface Account {
   status?: string;
   /** ISO time; with status 'rate_limited', the account is skipped until then. */
   limited_until?: string;
+  /** Provider model name for each tier, so a caller can ask for haiku, sonnet or opus on any provider. */
+  models?: Partial<Record<ModelTier, string>>;
 }
+
+export type ModelTier = 'haiku' | 'sonnet' | 'opus';
 
 export type RunStatus =
   | 'running'
