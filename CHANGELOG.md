@@ -4,7 +4,7 @@ Versions are the plugin version in `wingman/.claude-plugin/plugin.json`. Claude 
 
 ## 0.4.6
 
-- Model tiers per account: `wingman accounts add --haiku M --sonnet M --opus M` (`-` clears a tier). `wingman_start` with `model: "haiku" | "sonnet" | "opus"` uses the account's model for that tier; unset tiers and other values pass through unchanged. `accounts list` shows a MODELS column and `wingman_accounts` returns `models`.
+- Model tiers per account (values are validated as model names: no leading dash, spaces or control characters, also for `model` in `wingman_start`): `wingman accounts add --haiku M --sonnet M --opus M` (`-` clears a tier). `wingman_start` with `model: "haiku" | "sonnet" | "opus"` uses the account's model for that tier; unset tiers and other values pass through unchanged. `accounts list` shows a MODELS column and `wingman_accounts` returns `models`.
 
 ## 0.4.5
 

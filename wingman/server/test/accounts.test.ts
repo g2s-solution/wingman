@@ -357,3 +357,16 @@ describe('resolveModel', () => {
     expect(resolveModel(account, undefined)).toBeUndefined();
   });
 });
+
+describe('model name validation', () => {
+  it('rejects flag-like and malformed tier values, and a swallowed next flag', async () => {
+    const dir = join(home, 'v');
+    for (const bad of ['--dangerously-skip-permissions', '--opus', 'a b', 'x\ny']) {
+      out.length = 0;
+      err.length = 0;
+      expect(await cli('add', '--id', 'v', '--config-dir', dir, '--haiku', bad)).toBe(2);
+      expect(stderr()).toContain('--haiku');
+    }
+    expect(await cli('add', '--id', 'v', '--config-dir', dir, '--haiku', 'ok/model:1.5@x')).toBe(0);
+  });
+});

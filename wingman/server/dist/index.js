@@ -28636,6 +28636,14 @@ var runDir = (id) => join(runsDir(), id);
 var worktreesDir = () => join(wingmanHome(), "worktrees");
 
 // src/registry.ts
+var MODEL_NAME = /^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,127}$/;
+function assertModelName(value, what = "model") {
+  if (!MODEL_NAME.test(value)) {
+    throw new Error(
+      `${what} "${value.slice(0, 40)}" is not a valid model name (letters, digits and . _ : / @ + -, starting with a letter or digit, up to 128 characters)`
+    );
+  }
+}
 var accountSchema = external_exports.object({
   id: external_exports.string().min(1),
   label: external_exports.string().min(1),
@@ -28645,10 +28653,10 @@ var accountSchema = external_exports.object({
   status: external_exports.string().min(1).optional(),
   limited_until: external_exports.string().min(1).optional(),
   models: external_exports.object({
-    haiku: external_exports.string().min(1).optional(),
-    sonnet: external_exports.string().min(1).optional(),
-    opus: external_exports.string().min(1).optional()
-  }).passthrough().optional()
+    haiku: external_exports.string().regex(MODEL_NAME).optional(),
+    sonnet: external_exports.string().regex(MODEL_NAME).optional(),
+    opus: external_exports.string().regex(MODEL_NAME).optional()
+  }).optional()
 }).passthrough();
 var registrySchema = external_exports.object({ accounts: external_exports.array(accountSchema) });
 async function saveAccounts(registry2) {
@@ -29313,6 +29321,15 @@ ${USAGE}`);
   for (const flag of ["--label", "--command", "--provider", ...MODEL_FLAGS]) {
     if (p.values[flag] !== void 0 && p.values[flag].trim() === "") {
       throw new AccountsUsageError(`${flag} must not be empty`);
+    }
+  }
+  for (const flag of MODEL_FLAGS) {
+    const value = p.values[flag];
+    if (value === void 0 || value === "-") continue;
+    try {
+      assertModelName(value, flag);
+    } catch (err) {
+      throw new AccountsUsageError(err.message);
     }
   }
   const isCaller = canonical2(configDir) === callerProfile();
@@ -31324,6 +31341,7 @@ async function startRun(opts) {
     }
   }
   const model = resolveModel(opts.account, opts.model);
+  if (model !== void 0) assertModelName(model);
   const maxTurns = opts.max_turns ?? defaultMaxTurns(opts.preset);
   const spec = {
     prompt: opts.prompt,

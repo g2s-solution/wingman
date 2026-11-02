@@ -1,6 +1,7 @@
 import { homedir } from 'node:os';
 import { isAbsolute, join, resolve } from 'node:path';
 import {
+  assertModelName,
   clearLimited,
   MODEL_TIERS,
   effectiveStatus,
@@ -293,6 +294,15 @@ async function add(args: string[]): Promise<number> {
   for (const flag of ['--label', '--command', '--provider', ...MODEL_FLAGS]) {
     if (p.values[flag] !== undefined && p.values[flag]!.trim() === '') {
       throw new AccountsUsageError(`${flag} must not be empty`);
+    }
+  }
+  for (const flag of MODEL_FLAGS) {
+    const value = p.values[flag];
+    if (value === undefined || value === '-') continue;
+    try {
+      assertModelName(value, flag);
+    } catch (err) {
+      throw new AccountsUsageError((err as Error).message);
     }
   }
   const isCaller = canonical(configDir) === callerProfile();

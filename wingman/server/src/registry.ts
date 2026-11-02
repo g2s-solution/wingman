@@ -5,6 +5,17 @@ import { z } from 'zod';
 import { accountsFile } from './paths.js';
 import type { Account, ModelTier } from './types.js';
 
+/** A model name is one argv element after --model: no leading dash, no spaces or control characters. */
+export const MODEL_NAME = /^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,127}$/;
+
+export function assertModelName(value: string, what = 'model'): void {
+  if (!MODEL_NAME.test(value)) {
+    throw new Error(
+      `${what} "${value.slice(0, 40)}" is not a valid model name (letters, digits and . _ : / @ + -, starting with a letter or digit, up to 128 characters)`,
+    );
+  }
+}
+
 // passthrough: a write-back must not drop keys a newer version or a hand edit added
 const accountSchema = z
   .object({
@@ -17,11 +28,10 @@ const accountSchema = z
     limited_until: z.string().min(1).optional(),
     models: z
       .object({
-        haiku: z.string().min(1).optional(),
-        sonnet: z.string().min(1).optional(),
-        opus: z.string().min(1).optional(),
+        haiku: z.string().regex(MODEL_NAME).optional(),
+        sonnet: z.string().regex(MODEL_NAME).optional(),
+        opus: z.string().regex(MODEL_NAME).optional(),
       })
-      .passthrough()
       .optional(),
   })
   .passthrough();

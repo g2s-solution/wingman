@@ -77,3 +77,12 @@ describe('startRun with another provider', () => {
     );
   });
 });
+
+describe('model names in startRun', () => {
+  it('rejects a flag-like model before anything starts', async () => {
+    const account = { id: 'x', config_dir: '/tmp/x', provider: 'claude', command: 'x' } as Account;
+    await expect(
+      startRun({ account, prompt: 'p', cwd: '/tmp', worktree: false, model: '--evil' }),
+    ).rejects.toThrow('not a valid model name');
+  });
+});

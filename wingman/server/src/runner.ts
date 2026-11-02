@@ -27,7 +27,7 @@ import {
   resolveTools,
 } from './guard.js';
 import { runDir, wingmanHome } from './paths.js';
-import { recordRateLimit, resolveModel } from './registry.js';
+import { assertModelName, recordRateLimit, resolveModel } from './registry.js';
 import {
   appendEvent,
   createRun,
@@ -542,6 +542,7 @@ export async function startRun(opts: StartRunOptions): Promise<RunMeta> {
   }
 
   const model = resolveModel(opts.account, opts.model);
+  if (model !== undefined) assertModelName(model);
   const maxTurns = opts.max_turns ?? defaultMaxTurns(opts.preset);
   const spec: StartSpec = {
     prompt: opts.prompt,
