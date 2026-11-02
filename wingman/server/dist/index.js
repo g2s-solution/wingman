@@ -29388,7 +29388,7 @@ import { delimiter, isAbsolute as isAbsolute2, join as join5, resolve as resolve
 // package.json
 var package_default = {
   name: "wingman-server",
-  version: "0.4.2",
+  version: "0.4.3",
   private: true,
   type: "module",
   engines: {
