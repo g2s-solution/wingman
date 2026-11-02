@@ -31032,6 +31032,10 @@ var READ_COMMANDS = [
   ...cmd("git log"),
   ...cmd("git diff"),
   ...cmd("git show"),
+  ...cmd("git rev-parse"),
+  "git branch",
+  "git branch --show-current",
+  "git branch --list",
   "date",
   "date +*"
 ];
@@ -31041,7 +31045,6 @@ var FILE_COMMANDS = [
   ...cmd("git mv"),
   ...cmd("git rm"),
   ...cmd("git restore"),
-  ...cmd("git rev-parse"),
   ...cmd("git ls-files")
 ];
 var RUN_COMMANDS = [
@@ -31163,6 +31166,8 @@ var opencodeAdapter = {
   capabilities: { allowedTools: false, maxTurns: false, agentCommits: true },
   buildPrompt(spec) {
     return `${spec.append_system_prompt}
+
+A shell command that is not on the allowed list is refused. If one is refused, use another allowed way (git status, git log, git diff, git show, git rev-parse --abbrev-ref HEAD) or carry on without it; do not stop. You are already on your own branch.
 
 ---
 

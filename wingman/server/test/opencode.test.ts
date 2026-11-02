@@ -52,6 +52,10 @@ describe('opencode permissions', () => {
     expect(b['git status *']).toBe('allow');
     expect(b['git commit *']).toBeUndefined();
     expect(b['node *']).toBeUndefined();
+    expect(b['git branch']).toBe('allow');
+    expect(b['git branch --show-current']).toBe('allow');
+    expect(b['git branch *']).toBeUndefined();
+    expect(b['git rev-parse *']).toBe('allow');
     expect(b['date']).toBe('allow');
     expect(b['date +*']).toBe('allow');
     expect(keys(b).indexOf('*--output*')).toBeGreaterThan(keys(b).indexOf('git diff *'));
@@ -101,6 +105,7 @@ describe('opencode adapter command and env', () => {
     const text = opencodeAdapter.buildPrompt!(spec);
     expect(text.startsWith(guardPrompt('opencode'))).toBe(true);
     expect(text.endsWith('do it')).toBe(true);
+    expect(text).toContain('do not stop');
   });
 
   it('isolates XDG dirs, injects the permission config and drops other env', () => {
