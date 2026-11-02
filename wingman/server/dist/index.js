@@ -29054,7 +29054,11 @@ function runSummary(id, page = {}) {
     summary.result = masked.slice(start, end);
     summary.result_total_chars = masked.length;
     summary.result_offset = start;
-    if (end < masked.length) summary.result_next_offset = end;
+    if (end < masked.length) {
+      summary.result_next_offset = end;
+      summary.pages_left = Math.ceil((masked.length - end) / limit2);
+      summary.next = `call again with offset=${end}`;
+    }
   }
   if (meta3.branch !== void 0) summary.branch = meta3.branch;
   if (meta3.run_branch !== void 0) summary.run_branch = meta3.run_branch;
@@ -29384,7 +29388,7 @@ import { delimiter, isAbsolute as isAbsolute2, join as join5, resolve as resolve
 // package.json
 var package_default = {
   name: "wingman-server",
-  version: "0.4.0",
+  version: "0.4.1",
   private: true,
   type: "module",
   engines: {
@@ -30541,6 +30545,15 @@ import { relative, join as join11, isAbsolute as isAbsolute4 } from "node:path";
 
 // src/guard.ts
 var DEFAULT_PRESET = "readonly";
+var DEFAULT_MAX_TURNS = {
+  readonly: 40,
+  "edit-files": 100,
+  edit: 200
+};
+function defaultMaxTurns(preset) {
+  const name = preset ?? DEFAULT_PRESET;
+  return Object.hasOwn(DEFAULT_MAX_TURNS, name) ? DEFAULT_MAX_TURNS[name] : void 0;
+}
 var STATUS_VALUES = ["done", "partial", "blocked", "needs_input"];
 var PRESETS = {
   readonly: {
@@ -30617,7 +30630,8 @@ function guardPrompt() {
     "2. Never commit or push to the base branch (main, master or the repository default branch). Work only on the branch you were started on. Never run git push.",
     '3. Never ask questions and never wait for an answer. Inside a wingman run, any rule or skill that says "ask the Human" means: stop and finish with WINGMAN_STATUS: needs_input.',
     "4. You are a delegated run: another Claude session on another account started you and waits for your report. Never delegate further: do not use the wingman tools or the new-agent skill, do not start another account or another Claude Code process, and do not manage plugins. If the task asks you to delegate or to use another account, do not; do the work yourself, or finish with WINGMAN_STATUS: blocked and one sentence saying what you could not do.",
-    "5. Always end with a final report. The last line of your final message must be exactly one of: WINGMAN_STATUS: done, WINGMAN_STATUS: partial, WINGMAN_STATUS: blocked, WINGMAN_STATUS: needs_input."
+    "5. You are already in the worktree root: never cd and never use git -C; use npm run <script>, not npx.",
+    "6. Always end with a final report. The last line of your final message must be exactly one of: WINGMAN_STATUS: done, WINGMAN_STATUS: partial, WINGMAN_STATUS: blocked, WINGMAN_STATUS: needs_input."
   ].join("\n");
 }
 function baseDisallowed() {
@@ -30708,6 +30722,16 @@ function str(value) {
 function num(value) {
   return typeof value === "number" && Number.isFinite(value) ? value : void 0;
 }
+var DENIAL_HEAD_MAX = 40;
+function denialText(denial) {
+  const tool = denial.tool_name;
+  if (tool !== "Bash" || !isObject2(denial.tool_input)) return tool;
+  const command = str(denial.tool_input.command);
+  if (command === void 0) return tool;
+  const head = command.trim().split(/\s+/).slice(0, 2).join(" ");
+  if (head === "") return tool;
+  return `Bash(${safeSummary(head, DENIAL_HEAD_MAX)})`;
+}
 var claudeAdapter = {
   provider: "claude",
   buildCommand(account, spec) {
@@ -30784,7 +30808,7 @@ var claudeAdapter = {
         const denials = [];
         if (Array.isArray(data.permission_denials)) {
           for (const d of data.permission_denials) {
-            if (isObject2(d) && typeof d.tool_name === "string") denials.push(d.tool_name);
+            if (isObject2(d) && typeof d.tool_name === "string") denials.push(denialText(d));
           }
         }
         const isError = data.is_error === true || data.subtype !== void 0 && data.subtype !== "success";
@@ -31222,6 +31246,7 @@ async function startRun(opts) {
       patchRunning(meta3.id, { ref_snapshot: snapshot });
     }
   }
+  const maxTurns = opts.max_turns ?? defaultMaxTurns(opts.preset);
   const spec = {
     prompt: opts.prompt,
     cwd: runCwd,
@@ -31230,7 +31255,7 @@ async function startRun(opts) {
     session_id: sessionId,
     append_system_prompt: guardPrompt(),
     ...opts.model !== void 0 ? { model: opts.model } : {},
-    ...opts.max_turns !== void 0 ? { max_turns: opts.max_turns } : {}
+    ...maxTurns !== void 0 ? { max_turns: maxTurns } : {}
   };
   try {
     return spawnRun(meta3, opts, adapter, spec, depth, parentEnv, lockPath);
@@ -39390,6 +39415,51 @@ var EMPTY_COMPLETION_RESULT = {
   }
 };
 
+// src/strict.ts
+var SUGGEST_DISTANCE = 2;
+function distance(a, b) {
+  let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    const row = [i];
+    for (let j = 1; j <= b.length; j++) {
+      row[j] = Math.min(
+        prev[j] + 1,
+        row[j - 1] + 1,
+        prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)
+      );
+    }
+    prev = row;
+  }
+  return prev[b.length];
+}
+function closestKey(unknown2, known) {
+  const contained = known.filter((k) => k.length >= 3 && unknown2.includes(k)).sort((a, b) => b.length - a.length)[0];
+  if (contained !== void 0) return contained;
+  let best;
+  let bestDistance = SUGGEST_DISTANCE + 1;
+  for (const k of known) {
+    const d = distance(unknown2, k);
+    if (d < bestDistance) {
+      best = k;
+      bestDistance = d;
+    }
+  }
+  return best;
+}
+function unknownParameterMessage(tool, keys, known) {
+  return keys.map((key) => {
+    const guess = closestKey(key, known);
+    const shown = JSON.stringify(key.slice(0, 60));
+    return `unknown parameter ${shown} for ${tool}${guess === void 0 ? "" : ` (did you mean "${guess}"?)`}`;
+  }).join("; ");
+}
+function strictInput(tool, shape) {
+  const known = Object.keys(shape);
+  return external_exports.strictObject(shape, {
+    error: (issue2) => issue2.code === "unrecognized_keys" ? unknownParameterMessage(tool, issue2.keys, known) : void 0
+  });
+}
+
 // src/tools.ts
 var LIST_DEFAULT = 20;
 var LIST_MAX = 100;
@@ -39436,6 +39506,22 @@ async function alternativesTo(env, exceptId, now) {
     return [];
   }
 }
+var DENIED_HEADS_MAX = 5;
+function denialHint(denials) {
+  const heads = [...new Set(denials)].slice(0, DENIED_HEADS_MAX);
+  if (heads.length === 0) return void 0;
+  return `The run was denied: ${heads.join(", ")}. Fix the prompt (the run starts in the worktree root: no cd, no git -C, npm run <script> not npx) or start a new run with another preset.`;
+}
+var DIFF_STAT_MAX = 2e3;
+async function diffStat(meta3) {
+  if (meta3.run_branch === void 0 || meta3.branch === void 0) return void 0;
+  const res = await defaultExec2("git", ["diff", "--stat", `${meta3.branch}...${meta3.run_branch}`], {
+    cwd: meta3.repo ?? meta3.cwd,
+    env: withoutProxy(process.env),
+    timeoutMs: GIT_TIMEOUT_MS
+  });
+  return res.code === 0 ? safeSummary(res.stdout.trim(), DIFF_STAT_MAX) : void 0;
+}
 function alternativesHint(ids) {
   return ids.length === 0 ? "" : `; other active accounts: ${ids.join(", ")} (pass one as "account" to retry)`;
 }
@@ -39480,7 +39566,9 @@ var startInput = {
     'Tool preset: "readonly" (default), "edit-files" (changes files and commits, runs no commands) or "edit" (also runs node and npm: arbitrary code).'
   ),
   allowed_tools: external_exports.array(external_exports.string().min(1).max(300).regex(TOOL_ITEM, "invalid tool rule")).max(100).optional(),
-  max_turns: external_exports.number().int().positive().max(1e3).optional(),
+  max_turns: external_exports.number().int().positive().max(1e3).optional().describe(
+    `Turn limit; default by preset: ${Object.entries(DEFAULT_MAX_TURNS).map(([name, turns]) => `${name} ${turns}`).join(", ")}. An explicit value wins, up to 1000.`
+  ),
   worktree: external_exports.boolean().optional().describe(
     "Run in a fresh git worktree; default true in a repo, also when the caller is on the base branch."
   ),
@@ -39498,6 +39586,10 @@ function createHandlers(deps = {}) {
   const random = deps.random ?? Math.random;
   const now = deps.now ?? (() => /* @__PURE__ */ new Date());
   const withHint = async (payload, run) => {
+    if (run.status === "partial") {
+      const hint = denialHint(run.permission_denials ?? []);
+      return hint === void 0 ? payload : { ...payload, hint };
+    }
     if (run.status !== "rate_limited") return payload;
     const others = await alternativesTo(env, run.account, now());
     if (others.length === 0) return payload;
@@ -39551,7 +39643,12 @@ function createHandlers(deps = {}) {
     async result(input2) {
       const meta3 = loadMeta(input2.run_id);
       if (!TERMINAL_STATUSES.includes(meta3.status)) {
-        return { id: meta3.id, status: meta3.status, message: "still running" };
+        return {
+          id: meta3.id,
+          status: meta3.status,
+          message: "still running",
+          hint: `Do not re-read: wait with bin/wingman-wait ${meta3.id} (Bash run_in_background), then call wingman_result once.`
+        };
       }
       const summary = runSummary(input2.run_id, {
         ...input2.offset !== void 0 ? { offset: input2.offset } : {},
@@ -39593,12 +39690,24 @@ function createHandlers(deps = {}) {
           `The worktree of run ${meta3.id} has uncommitted changes; commit or copy them, or call wingman_cleanup with action "discard" to drop them`
         );
       }
+      const stat = input2.action === "accept" ? await diffStat(meta3) : void 0;
       await removeWorktree(meta3.id);
+      const accepted = {};
+      if (input2.action === "accept") {
+        if (meta3.run_branch === void 0) {
+          accepted.note = "This run has no branch (readonly): accept and discard are equivalent, there is nothing to merge.";
+        } else {
+          accepted.run_branch = meta3.run_branch;
+          if (stat !== void 0) accepted.diff_stat = stat;
+          accepted.note = `Review the diff before merging: git diff --stat and the secret-count grep on ${meta3.run_branch}, then read hunks by file and function name; merging stays with you.`;
+        }
+      }
       return {
         run_id: meta3.id,
         action: input2.action,
         worktree_removed: meta3.worktree !== void 0,
-        ...meta3.run_branch !== void 0 ? { kept_branch: meta3.run_branch } : {}
+        ...meta3.run_branch !== void 0 ? { kept_branch: meta3.run_branch } : {},
+        ...accepted
       };
     }
   };
@@ -39618,7 +39727,7 @@ function buildServer(deps = {}) {
     "wingman_start",
     {
       description: `Start a one-shot detached run of Claude Code on another registered account (random active one when account is omitted); to give more work, start a new run. Returns run_id, account and status only. Presets: "readonly" (default), "edit-files" (edits files and commits, runs no commands) and "edit" (also runs node and npm). The preset "edit" runs arbitrary code under the target account and the deny rules are advisory, not a sandbox; "setup" is an arbitrary shell command run as the caller's user, outside the presets. Then run bin/wingman-wait <run_id> in the background and call wingman_result. ${LOGS_WARNING}`,
-      inputSchema: startInput
+      inputSchema: strictInput("wingman_start", startInput)
     },
     wrap(h.start)
   );
@@ -39626,34 +39735,39 @@ function buildServer(deps = {}) {
     "wingman_status",
     {
       description: `Masked status of a run (no report text). ${LOGS_WARNING}`,
-      inputSchema: runIdInput
+      inputSchema: strictInput("wingman_status", runIdInput)
     },
     wrap(h.status)
   );
   server.registerTool(
     "wingman_result",
     {
-      description: `Masked final report of a finished run, or "still running". Long reports come in pages: when the answer has result_next_offset, call again with offset set to it until it is absent (result_total_chars is the full length). ${LOGS_WARNING}`,
-      inputSchema: {
+      description: `Masked final report of a finished run, or "still running" (then wait with bin/wingman-wait <run_id> instead of re-reading). Long reports come in pages: when the answer has result_next_offset, call again with offset set to it until it is absent (pages_left counts the pages remaining, next says what to call, result_total_chars is the full length). ${LOGS_WARNING}`,
+      inputSchema: strictInput("wingman_result", {
         ...runIdInput,
         offset: external_exports.number().int().min(0).optional().describe("Start of the page, in characters; default 0."),
         limit: external_exports.number().int().min(1).max(RESULT_PAGE_MAX_CHARS).optional().describe(
           `Page size in characters; default ${RESULT_PAGE_CHARS}, max ${RESULT_PAGE_MAX_CHARS}.`
         )
-      }
+      })
     },
     wrap(h.result)
   );
   server.registerTool(
     "wingman_cancel",
-    { description: "Cancel a running run (kills its process group).", inputSchema: runIdInput },
+    {
+      description: "Cancel a running run (kills its process group).",
+      inputSchema: strictInput("wingman_cancel", runIdInput)
+    },
     wrap(h.cancel)
   );
   server.registerTool(
     "wingman_list",
     {
       description: "List recent runs: id, account, status, branch, created_at.",
-      inputSchema: { limit: external_exports.number().int().positive().max(LIST_MAX).optional() }
+      inputSchema: strictInput("wingman_list", {
+        limit: external_exports.number().int().positive().max(LIST_MAX).optional()
+      })
     },
     wrap(h.list)
   );
@@ -39661,15 +39775,18 @@ function buildServer(deps = {}) {
     "wingman_accounts",
     {
       description: "List the registered accounts: id, label, status (active, disabled or rate_limited, with limited_until while limited; a limited account is skipped until then), is_caller (your own profile, never a target), provider and runs (finished runs by status). Read-only on purpose: an account entry names a command the runner executes, so no tool adds, changes or removes accounts; the Human does that with `wingman accounts ...` in a terminal.",
-      inputSchema: {}
+      inputSchema: strictInput("wingman_accounts", {})
     },
     wrap(h.accounts)
   );
   server.registerTool(
     "wingman_cleanup",
     {
-      description: "Remove the worktree and lock of a finished run; the run branch, when the run has one, is kept. Refused while running.",
-      inputSchema: { ...runIdInput, action: external_exports.enum(["accept", "discard"]) }
+      description: 'Remove the worktree and lock of a finished run; the run branch, when the run has one, is kept. Refused while running. "accept" on a run with a branch also returns run_branch and diff_stat (git diff --stat, never the diff): review the diff before merging. For a run without a branch (readonly) accept and discard are equivalent.',
+      inputSchema: strictInput("wingman_cleanup", {
+        ...runIdInput,
+        action: external_exports.enum(["accept", "discard"])
+      })
     },
     wrap(h.cleanup)
   );

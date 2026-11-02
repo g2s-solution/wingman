@@ -96,6 +96,9 @@ export interface RunSummary {
   result_offset?: number;
   /** Absent on the last page. */
   result_next_offset?: number;
+  /** Pages still to read at the same limit; present together with result_next_offset. */
+  pages_left?: number;
+  next?: string;
 }
 
 export const RESULT_PAGE_CHARS = 4000;
@@ -304,7 +307,11 @@ export function runSummary(id: string, page: ResultPage = {}): RunSummary {
     summary.result = masked.slice(start, end);
     summary.result_total_chars = masked.length;
     summary.result_offset = start;
-    if (end < masked.length) summary.result_next_offset = end;
+    if (end < masked.length) {
+      summary.result_next_offset = end;
+      summary.pages_left = Math.ceil((masked.length - end) / limit);
+      summary.next = `call again with offset=${end}`;
+    }
   }
   if (meta.branch !== undefined) summary.branch = meta.branch;
   if (meta.run_branch !== undefined) summary.run_branch = meta.run_branch;

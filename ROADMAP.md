@@ -14,18 +14,21 @@ The order follows dependencies: first make the public project healthy, safe and 
 
 **v0.4** (0.4.0): a run that ends `rate_limited` writes `status: rate_limited` and `limited_until` to its account; the limit expires on read (no job); selection skips limited accounts and an explicit limited account is refused naming `limited_until`; `wingman accounts mark-limited --until` and `clear-limited`; the `rate_limited` answer and a refused start name the other active accounts; `accounts list` and `wingman_accounts` report limited state and run counts per outcome; `wingman doctor` lists limited accounts as warnings.
 
+**v0.4.1** (0.4.1): denied commands are reported (`permission_denials`, plus a `hint` naming up to five denied heads); prompt rule 5 forbids `cd`, `git -C` and `npx`; every tool rejects unknown parameters; `wingman_result` adds `pages_left` and a `next` line; `wingman_cleanup accept` returns the run branch and a capped `diff_stat`; default `max_turns` per preset.
+
+**v0.1.x** (patch releases): CI actions pinned by SHA and Dependabot; code of conduct, issue and PR templates, release checklist (`docs/RELEASING.md`); timing-dependent tests replaced by polling; retention and deletion of `~/.wingman` documented.
+
 ## Planned
 
 | Phase | Goal | Scope | Done when | Depends on |
 |---|---|---|---|---|
-| **v0.1.x** (patch releases) | Keep the public repository healthy. | Pin CI actions by SHA and add Dependabot; code of conduct, issue and PR templates, release checklist; remove timing-dependent tests (poll for conditions, never fixed sleeps); document retention of `~/.wingman` | CI actions pinned; the test suite passes three CI runs in a row without retries; templates exist | v0.1 |
 | **v0.5 Selection policy** | Pick targets by policy instead of at random. | `tags`, `priority`, `scope`, filters; least-recently-used default; skill `pick-account`; failover stays the caller's decision | With three accounts, selection honors tags and priority and skips limited ones, in tests | v0.4 |
 | **v0.6 Follow-ups and limits** | Continue work and avoid overloading an account. | Follow-up run on the same account (`--resume` with the recorded session id); per-account concurrency cap and an optional queue; optional sandbox wrapper (`bubblewrap`, `sandbox-exec`) for `edit`; `setup` restricted or opt-in | A follow-up run keeps the earlier context; N runs over M accounts never exceed the cap in a stress test; a documented attack test (`env git push`, `node -e`) is blocked under the sandbox | v0.2, v0.4 |
 | **v0.7 Other providers** | Delegate to agents other than Claude Code. | Adapters for OpenAI Codex, OpenCode and similar CLIs behind the runner interface; an account's `provider` selects the adapter, which builds the command, sets the account selection variable (for example `CLAUDE_CONFIG_DIR`, `CODEX_HOME`), injects the guardrail prompt, parses events and detects rate limits; guardrail and masking parity tests; per-provider sandbox notes | The same `wingman_*` tools drive a non-Claude run with the same masked, paged report | v0.3, v0.6 |
 
 ## Verification debt
 
-Not verified yet, each owned by the phase that depends on it: spawning from a real interactive Claude Code session (v0.1.x), whether `--bg` background sessions work under a custom `CLAUDE_CONFIG_DIR` (v0.6), `acceptEdits` versus `auto` permission mode for `edit` (v0.3), whether the settings symlink survives a Claude Code rewrite (v0.3 `doctor`), and a Claude Code version compatibility matrix with a canary CI job (v0.3).
+Not verified yet, each owned by the phase that depends on it: spawning from a real interactive Claude Code session (open since v0.1), whether `--bg` background sessions work under a custom `CLAUDE_CONFIG_DIR` (v0.6), `acceptEdits` versus `auto` permission mode for `edit` (open since v0.3), whether the settings symlink survives a Claude Code rewrite (v0.3 `doctor`), and a Claude Code version compatibility matrix with a canary CI job (open since v0.3).
 
 ## Out of scope for now
 

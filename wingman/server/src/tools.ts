@@ -6,7 +6,7 @@ import { z } from 'zod';
 import pkg from '../package.json' with { type: 'json' };
 import { publicAccounts } from './accounts.js';
 import type { Account } from './types.js';
-import { TOOL_ITEM } from './guard.js';
+import { DEFAULT_MAX_TURNS, TOOL_ITEM } from './guard.js';
 import { maskSecrets, safeSummary } from './mask.js';
 import { getAccount, isActive, isLimited, loadAccounts, targetsFor } from './registry.js';
 import { reconcile } from './reconcile.js';
@@ -19,8 +19,9 @@ import {
 } from './runs.js';
 import { cancelRun, startRun, type StartRunOptions } from './runner.js';
 import { callerProfile } from './self.js';
+import { strictInput } from './strict.js';
 import { TERMINAL_STATUSES, type RunMeta } from './types.js';
-import { removeWorktree, worktreeDirty } from './worktree.js';
+import { defaultExec, removeWorktree, withoutProxy, worktreeDirty } from './worktree.js';
 
 export interface ServerDeps {
   /** The caller's environment: decides the caller profile and the depth. */
@@ -90,6 +91,26 @@ async function alternativesTo(
   } catch {
     return [];
   }
+}
+
+const DENIED_HEADS_MAX = 5;
+
+function denialHint(denials: string[]): string | undefined {
+  const heads = [...new Set(denials)].slice(0, DENIED_HEADS_MAX);
+  if (heads.length === 0) return undefined;
+  return `The run was denied: ${heads.join(', ')}. Fix the prompt (the run starts in the worktree root: no cd, no git -C, npm run <script> not npx) or start a new run with another preset.`;
+}
+
+const DIFF_STAT_MAX = 2000;
+
+async function diffStat(meta: RunMeta): Promise<string | undefined> {
+  if (meta.run_branch === undefined || meta.branch === undefined) return undefined;
+  const res = await defaultExec('git', ['diff', '--stat', `${meta.branch}...${meta.run_branch}`], {
+    cwd: meta.repo ?? meta.cwd,
+    env: withoutProxy(process.env),
+    timeoutMs: GIT_TIMEOUT_MS,
+  });
+  return res.code === 0 ? safeSummary(res.stdout.trim(), DIFF_STAT_MAX) : undefined;
 }
 
 function alternativesHint(ids: string[]): string {
@@ -162,7 +183,17 @@ const startInput = {
     .array(z.string().min(1).max(300).regex(TOOL_ITEM, 'invalid tool rule'))
     .max(100)
     .optional(),
-  max_turns: z.number().int().positive().max(1000).optional(),
+  max_turns: z
+    .number()
+    .int()
+    .positive()
+    .max(1000)
+    .optional()
+    .describe(
+      `Turn limit; default by preset: ${Object.entries(DEFAULT_MAX_TURNS)
+        .map(([name, turns]) => `${name} ${turns}`)
+        .join(', ')}. An explicit value wins, up to 1000.`,
+    ),
   worktree: z
     .boolean()
     .optional()
@@ -194,8 +225,12 @@ export function createHandlers(deps: ServerDeps = {}) {
   /** On a rate_limited run: names the other usable accounts; the caller decides, nothing is rerouted. */
   const withHint = async (
     payload: Json,
-    run: { status: string; account: string },
+    run: { status: string; account: string; permission_denials?: string[] },
   ): Promise<Json> => {
+    if (run.status === 'partial') {
+      const hint = denialHint(run.permission_denials ?? []);
+      return hint === undefined ? payload : { ...payload, hint };
+    }
     if (run.status !== 'rate_limited') return payload;
     const others = await alternativesTo(env, run.account, now());
     if (others.length === 0) return payload;
@@ -255,7 +290,12 @@ export function createHandlers(deps: ServerDeps = {}) {
     async result(input: { run_id: string; offset?: number; limit?: number }): Promise<Json> {
       const meta = loadMeta(input.run_id);
       if (!TERMINAL_STATUSES.includes(meta.status)) {
-        return { id: meta.id, status: meta.status, message: 'still running' };
+        return {
+          id: meta.id,
+          status: meta.status,
+          message: 'still running',
+          hint: `Do not re-read: wait with bin/wingman-wait ${meta.id} (Bash run_in_background), then call wingman_result once.`,
+        };
       }
       const summary = runSummary(input.run_id, {
         ...(input.offset !== undefined ? { offset: input.offset } : {}),
@@ -309,12 +349,25 @@ export function createHandlers(deps: ServerDeps = {}) {
           `The worktree of run ${meta.id} has uncommitted changes; commit or copy them, or call wingman_cleanup with action "discard" to drop them`,
         );
       }
+      const stat = input.action === 'accept' ? await diffStat(meta) : undefined;
       await removeWorktree(meta.id);
+      const accepted: Json = {};
+      if (input.action === 'accept') {
+        if (meta.run_branch === undefined) {
+          accepted.note =
+            'This run has no branch (readonly): accept and discard are equivalent, there is nothing to merge.';
+        } else {
+          accepted.run_branch = meta.run_branch;
+          if (stat !== undefined) accepted.diff_stat = stat;
+          accepted.note = `Review the diff before merging: git diff --stat and the secret-count grep on ${meta.run_branch}, then read hunks by file and function name; merging stays with you.`;
+        }
+      }
       return {
         run_id: meta.id,
         action: input.action,
         worktree_removed: meta.worktree !== undefined,
         ...(meta.run_branch !== undefined ? { kept_branch: meta.run_branch } : {}),
+        ...accepted,
       };
     },
   };
@@ -340,7 +393,7 @@ export function buildServer(deps: ServerDeps = {}): McpServer {
     'wingman_start',
     {
       description: `Start a one-shot detached run of Claude Code on another registered account (random active one when account is omitted); to give more work, start a new run. Returns run_id, account and status only. Presets: "readonly" (default), "edit-files" (edits files and commits, runs no commands) and "edit" (also runs node and npm). The preset "edit" runs arbitrary code under the target account and the deny rules are advisory, not a sandbox; "setup" is an arbitrary shell command run as the caller's user, outside the presets. Then run bin/wingman-wait <run_id> in the background and call wingman_result. ${LOGS_WARNING}`,
-      inputSchema: startInput,
+      inputSchema: strictInput('wingman_start', startInput),
     },
     wrap(h.start),
   );
@@ -348,15 +401,15 @@ export function buildServer(deps: ServerDeps = {}): McpServer {
     'wingman_status',
     {
       description: `Masked status of a run (no report text). ${LOGS_WARNING}`,
-      inputSchema: runIdInput,
+      inputSchema: strictInput('wingman_status', runIdInput),
     },
     wrap(h.status),
   );
   server.registerTool(
     'wingman_result',
     {
-      description: `Masked final report of a finished run, or "still running". Long reports come in pages: when the answer has result_next_offset, call again with offset set to it until it is absent (result_total_chars is the full length). ${LOGS_WARNING}`,
-      inputSchema: {
+      description: `Masked final report of a finished run, or "still running" (then wait with bin/wingman-wait <run_id> instead of re-reading). Long reports come in pages: when the answer has result_next_offset, call again with offset set to it until it is absent (pages_left counts the pages remaining, next says what to call, result_total_chars is the full length). ${LOGS_WARNING}`,
+      inputSchema: strictInput('wingman_result', {
         ...runIdInput,
         offset: z
           .number()
@@ -373,20 +426,25 @@ export function buildServer(deps: ServerDeps = {}): McpServer {
           .describe(
             `Page size in characters; default ${RESULT_PAGE_CHARS}, max ${RESULT_PAGE_MAX_CHARS}.`,
           ),
-      },
+      }),
     },
     wrap(h.result),
   );
   server.registerTool(
     'wingman_cancel',
-    { description: 'Cancel a running run (kills its process group).', inputSchema: runIdInput },
+    {
+      description: 'Cancel a running run (kills its process group).',
+      inputSchema: strictInput('wingman_cancel', runIdInput),
+    },
     wrap(h.cancel),
   );
   server.registerTool(
     'wingman_list',
     {
       description: 'List recent runs: id, account, status, branch, created_at.',
-      inputSchema: { limit: z.number().int().positive().max(LIST_MAX).optional() },
+      inputSchema: strictInput('wingman_list', {
+        limit: z.number().int().positive().max(LIST_MAX).optional(),
+      }),
     },
     wrap(h.list),
   );
@@ -395,7 +453,7 @@ export function buildServer(deps: ServerDeps = {}): McpServer {
     {
       description:
         'List the registered accounts: id, label, status (active, disabled or rate_limited, with limited_until while limited; a limited account is skipped until then), is_caller (your own profile, never a target), provider and runs (finished runs by status). Read-only on purpose: an account entry names a command the runner executes, so no tool adds, changes or removes accounts; the Human does that with `wingman accounts ...` in a terminal.',
-      inputSchema: {},
+      inputSchema: strictInput('wingman_accounts', {}),
     },
     wrap(h.accounts),
   );
@@ -403,8 +461,11 @@ export function buildServer(deps: ServerDeps = {}): McpServer {
     'wingman_cleanup',
     {
       description:
-        'Remove the worktree and lock of a finished run; the run branch, when the run has one, is kept. Refused while running.',
-      inputSchema: { ...runIdInput, action: z.enum(['accept', 'discard']) },
+        'Remove the worktree and lock of a finished run; the run branch, when the run has one, is kept. Refused while running. "accept" on a run with a branch also returns run_branch and diff_stat (git diff --stat, never the diff): review the diff before merging. For a run without a branch (readonly) accept and discard are equivalent.',
+      inputSchema: strictInput('wingman_cleanup', {
+        ...runIdInput,
+        action: z.enum(['accept', 'discard']),
+      }),
     },
     wrap(h.cleanup),
   );

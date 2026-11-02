@@ -163,13 +163,13 @@ The skill drives these; you can also call them directly.
 
 | Tool | Purpose |
 |---|---|
-| `wingman_start` | start a run: `prompt` and `cwd` are required; `account`, `preset`, `model`, `max_turns`, `worktree`, `branch`, `lock_key`, `setup`, `allowed_tools` are optional. Omit `account` to get a random active target. Then run `bin/wingman-wait <run id>` and call `wingman_result` |
-| `wingman_status` | state of a run, no report text |
-| `wingman_result` | the final report, masked, in pages (`offset`, `limit`; default 4000, max 8000 characters): keep calling with `result_next_offset` until it is absent |
+| `wingman_start` | start a run: `prompt` and `cwd` are required; `account`, `preset`, `model`, `max_turns`, `worktree`, `branch`, `lock_key`, `setup`, `allowed_tools` are optional. Omit `account` to get a random active target. `max_turns` defaults by preset (`readonly` 40, `edit-files` 100, `edit` 200); an explicit value wins, up to 1000. Unknown parameters are rejected with the key named. Then run `bin/wingman-wait <run id>` and call `wingman_result` |
+| `wingman_status` | state of a run, no report text; a `partial` run with denied commands gets a `hint` naming them (the tool, and for `Bash` the first two masked words of the command) |
+| `wingman_result` | the final report, masked, in pages (`offset`, `limit`; default 4000, max 8000 characters): keep calling with `result_next_offset` (see `pages_left` and `next`) until it is absent. On a running run it says `still running` and hints to wait with `bin/wingman-wait` |
 | `wingman_cancel` | stop a run |
 | `wingman_list` | recent runs |
 | `wingman_accounts` | the registered accounts: id, label, status (with `limited_until` while limited), `is_caller`, provider, `runs` by status (read-only; no command or paths; accounts are changed only with the `wingman accounts` CLI) |
-| `wingman_cleanup` | remove a run's worktree (`accept` refuses uncommitted changes); the run branch, when there is one, is kept |
+| `wingman_cleanup` | remove a run's worktree (`accept` refuses uncommitted changes); the run branch, when there is one, is kept. `accept` on a run with a branch also returns `run_branch`, a `diff_stat` (never the diff) and a note to review before merging; on a readonly run `accept` and `discard` are the same |
 
 Run state lives in `~/.wingman/runs/<id>/`. Do not read `events.jsonl`: it holds raw tool output.
 

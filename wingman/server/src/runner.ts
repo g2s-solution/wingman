@@ -20,6 +20,7 @@ import { claudeAdapter, getAdapter, isRateLimitRejected } from './adapters/claud
 import { maskSecrets } from './mask.js';
 import {
   DEFAULT_PRESET,
+  defaultMaxTurns,
   guardPrompt,
   parseStatusLine,
   presetMayCommit,
@@ -532,6 +533,7 @@ export async function startRun(opts: StartRunOptions): Promise<RunMeta> {
     }
   }
 
+  const maxTurns = opts.max_turns ?? defaultMaxTurns(opts.preset);
   const spec: StartSpec = {
     prompt: opts.prompt,
     cwd: runCwd,
@@ -540,7 +542,7 @@ export async function startRun(opts: StartRunOptions): Promise<RunMeta> {
     session_id: sessionId,
     append_system_prompt: guardPrompt(),
     ...(opts.model !== undefined ? { model: opts.model } : {}),
-    ...(opts.max_turns !== undefined ? { max_turns: opts.max_turns } : {}),
+    ...(maxTurns !== undefined ? { max_turns: maxTurns } : {}),
   };
   try {
     return spawnRun(meta, opts, adapter, spec, depth, parentEnv, lockPath);
