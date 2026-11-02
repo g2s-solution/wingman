@@ -45,7 +45,7 @@ Claude Code updates a plugin only when its version number changes (see `CHANGELO
 Clone this repository (the login script is not part of the plugin) and run:
 
 ```bash
-./another-login.sh [--method claudeai|console|api_key] [config-dir]
+./another-login.sh [--method claudeai|console|api_key|api_key_unverified] [config-dir]
 ```
 
 A bare name such as `claude-second` becomes `~/.claude-second`; a value containing `/` or `~` is used as given. What the script does:
