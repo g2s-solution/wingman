@@ -1,7 +1,9 @@
 import { homedir } from 'node:os';
 import { isAbsolute, join, resolve } from 'node:path';
 import {
+  assertModelName,
   clearLimited,
+  MODEL_TIERS,
   effectiveStatus,
   isLimited,
   loadAccounts,
@@ -13,9 +15,11 @@ import { callerProfile, canonical } from './self.js';
 import type { Account } from './types.js';
 
 const ID = /^[A-Za-z0-9_-]{1,64}$/;
+const MODEL_FLAGS = ['--haiku', '--sonnet', '--opus'];
 
 const USAGE = `usage: wingman accounts list [--json]
-       wingman accounts add --id ID --config-dir DIR [--label L] [--command CMD] [--provider P] [--upsert]
+       wingman accounts add --id ID --config-dir DIR [--label L] [--command CMD] [--provider P]
+                              [--haiku M] [--sonnet M] [--opus M] [--upsert]
        wingman accounts disable ID
        wingman accounts enable ID
        wingman accounts mark-limited ID --until <ISO time with Z or offset, or epoch seconds>
@@ -33,6 +37,7 @@ export interface AccountRow {
   /** Present only while the account is limited. */
   limited_until?: string;
   provider: string;
+  models?: Account['models'];
   config_dir: string;
   command: string;
   is_caller: boolean;
@@ -47,6 +52,7 @@ export interface PublicAccount {
   limited_until?: string;
   is_caller: boolean;
   provider: string;
+  models?: Account['models'];
   runs: AccountRunCounts;
 }
 
@@ -64,6 +70,7 @@ export function accountRows(
       ? { limited_until: a.limited_until }
       : {}),
     provider: a.provider,
+    ...(a.models !== undefined && Object.keys(a.models).length > 0 ? { models: a.models } : {}),
     config_dir: a.config_dir,
     command: a.command,
     is_caller: canonical(a.config_dir) === caller,
@@ -84,6 +91,7 @@ export function publicAccounts(
     ...(r.limited_until !== undefined ? { limited_until: r.limited_until } : {}),
     is_caller: r.is_caller,
     provider: r.provider,
+    ...(r.models !== undefined ? { models: r.models } : {}),
     runs: r.runs,
   }));
 }
@@ -201,10 +209,23 @@ async function list(args: string[], now: Clock): Promise<number> {
   } else {
     write(
       table([
-        ['ID', 'LABEL', 'STATUS', 'LIMITED_UNTIL', 'RUNS', 'CONFIG_DIR', 'COMMAND', ''],
+        [
+          'ID',
+          'LABEL',
+          'PROVIDER',
+          'MODELS',
+          'STATUS',
+          'LIMITED_UNTIL',
+          'RUNS',
+          'CONFIG_DIR',
+          'COMMAND',
+          '',
+        ],
         ...rows.map((r) => [
           r.id,
           r.label,
+          r.provider,
+          modelsCell(r.models),
           r.status,
           r.limited_until ?? '-',
           runsCell(r.runs),
@@ -216,6 +237,13 @@ async function list(args: string[], now: Clock): Promise<number> {
     );
   }
   return 0;
+}
+
+function modelsCell(models: Account['models']): string {
+  const parts = MODEL_TIERS.filter((t) => models?.[t] !== undefined).map(
+    (t) => `${t}=${models![t]}`,
+  );
+  return parts.length > 0 ? parts.join(',') : '-';
 }
 
 async function limit(
@@ -252,7 +280,7 @@ async function limit(
 async function add(args: string[]): Promise<number> {
   const p = parse(
     args,
-    ['--id', '--config-dir', '--label', '--command', '--provider'],
+    ['--id', '--config-dir', '--label', '--command', '--provider', ...MODEL_FLAGS],
     ['--upsert'],
   );
   if (p.positional.length > 0) throw new AccountsUsageError(`unexpected argument\n${USAGE}`);
@@ -263,9 +291,18 @@ async function add(args: string[]): Promise<number> {
   }
   if (!ID.test(id)) throw new AccountsUsageError('--id must match [A-Za-z0-9_-]{1,64}');
   const configDir = normalizeConfigDir(rawDir);
-  for (const flag of ['--label', '--command', '--provider']) {
+  for (const flag of ['--label', '--command', '--provider', ...MODEL_FLAGS]) {
     if (p.values[flag] !== undefined && p.values[flag]!.trim() === '') {
       throw new AccountsUsageError(`${flag} must not be empty`);
+    }
+  }
+  for (const flag of MODEL_FLAGS) {
+    const value = p.values[flag];
+    if (value === undefined || value === '-') continue;
+    try {
+      assertModelName(value, flag);
+    } catch (err) {
+      throw new AccountsUsageError((err as Error).message);
     }
   }
   const isCaller = canonical(configDir) === callerProfile();
@@ -279,6 +316,17 @@ async function add(args: string[]): Promise<number> {
   if (p.values['--label'] !== undefined) given.label = p.values['--label'];
   if (p.values['--command'] !== undefined) given.command = p.values['--command'];
   if (p.values['--provider'] !== undefined) given.provider = p.values['--provider'];
+  const models: NonNullable<Account['models']> = { ...(registry.accounts[i]?.models ?? {}) };
+  for (const tier of MODEL_TIERS) {
+    const value = p.values[`--${tier}`];
+    if (value === undefined) continue;
+    if (value === '-') delete models[tier];
+    else models[tier] = value;
+  }
+  if (MODEL_FLAGS.some((f) => p.values[f] !== undefined)) {
+    if (Object.keys(models).length > 0) given.models = models;
+    else if (i >= 0) delete registry.accounts[i]!.models;
+  }
   if (i >= 0) {
     registry.accounts[i] = { ...registry.accounts[i]!, ...given };
   } else {
@@ -286,7 +334,7 @@ async function add(args: string[]): Promise<number> {
       id,
       label: id,
       provider: 'claude',
-      command: 'claude',
+      command: given.provider ?? 'claude',
       ...given,
       config_dir: configDir,
     });

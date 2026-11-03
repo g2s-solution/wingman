@@ -47,6 +47,7 @@ interface RegistryAccount {
   id: string;
   config_dir: string;
   command: string;
+  provider: string;
   status?: string;
   limited_until?: string;
 }
@@ -184,6 +185,7 @@ function checkState(stateDir: string, results: CheckResult[]): RegistryAccount[]
       id: a.id,
       config_dir: a.config_dir,
       command: typeof a.command === 'string' && a.command !== '' ? a.command : 'claude',
+      provider: typeof a.provider === 'string' && a.provider !== '' ? a.provider : 'claude',
       ...(typeof a.status === 'string' && a.status !== '' ? { status: a.status } : {}),
       ...(typeof a.limited_until === 'string' && a.limited_until !== ''
         ? { limited_until: a.limited_until }
@@ -298,6 +300,14 @@ function checkAccount(
     });
   }
 
+  if (account.provider !== 'claude') {
+    results.push({
+      id: `${p}.provider`,
+      level: 'ok',
+      message: `${account.id}: provider ${account.provider}; shared items and plugin checks apply to claude profiles only`,
+    });
+    return;
+  }
   if (dirOk && canonical(account.config_dir) !== canonical(defaultDir)) {
     checkShared(account, defaultDir, results);
   }
@@ -473,6 +483,14 @@ async function checkOnline(
 
   for (const account of accounts) {
     const id = `online.${account.id}`;
+    if (account.provider !== 'claude') {
+      results.push({
+        id,
+        level: 'ok',
+        message: `${account.id}: provider ${account.provider}; no online sign-in check for this provider`,
+      });
+      continue;
+    }
     const r = await authStatus(account.command, deps);
     if ('error' in r) {
       results.push({ id, level: 'warn', message: `${account.id}: auth status ${r.error}` });

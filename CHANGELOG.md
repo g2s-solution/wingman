@@ -2,7 +2,7 @@
 
 Versions are the plugin version in `wingman/.claude-plugin/plugin.json`. Claude Code only updates an installed plugin when this number changes.
 
-## 0.4.2
+## 0.5.4
 
 - The hooks guardrail now hashes the directory from `git rev-parse --git-path hooks`, so a repository with `core.hooksPath` (for example husky) is covered; before, edits to the hooks that actually run went unnoticed.
 - `setup` is refused with a clear error when the run has no worktree, instead of being accepted and silently ignored.
@@ -10,6 +10,43 @@ Versions are the plugin version in `wingman/.claude-plugin/plugin.json`. Claude 
 - `wingman_cleanup` only deletes a leftover worktree directory that is inside `~/.wingman/worktrees`; the old string-prefix check also matched sibling paths such as `worktrees-old/`.
 - `meta.json` keeps unknown fields when an older run is read and rewritten, so a newer version's data is not dropped.
 - Docs: `edit-files` is described as running git and `date` (not "no commands"); paging fields on the last page; run-branch names in the cleanup section; `accounts remove` needs `--yes` after the preview; `CLAUDE.md` status; `wingman accounts` usage lists `mark-limited` and `clear-limited`.
+
+## 0.5.3
+
+- OpenCode provider: an account with `--provider opencode` runs `opencode run --format json --standalone` with the prompt on stdin, its `config_dir` mapped to the four XDG roots, and a per-run permission config (`OPENCODE_CONFIG_CONTENT`) that denies web fetches, nested agents and paths outside the worktree and allows only the preset's git/node/npm commands. OpenCode commits for itself. `allowed_tools` and `max_turns` are refused. `Adapter.buildEnv` receives the run's spec.
+
+## 0.5.2
+
+- A model name that fails validation (for example one starting with `-`) is now refused before a run, worktree or branch is created; it used to leave a run stuck in `running` with a detached worktree.
+
+## 0.5.1
+
+- Codex provider: an account with `--provider codex` runs `codex exec --json` under its own `CODEX_HOME` (read-only or workspace-write sandbox by preset, user config and rules ignored, guardrail prepended to the prompt). Codex cannot commit in a worktree, so wingman commits the run's changes on the run branch after the run. `allowed_tools` and `max_turns` are refused for it. `accounts add --provider P` defaults `--command` to `P`.
+- `Adapter` gains `capabilities`, `buildPrompt` and `createLineParser`; the allowlisted environment moved to `adapters/env.ts`.
+
+## 0.5.0
+
+- Starts v0.5 "Other providers": the provider plumbing (0.4.5) and per-account model tiers (0.4.6) are in. The Codex and OpenCode adapters themselves are not in this release; accounts with a provider other than `claude` are rejected at start with "No adapter for provider".
+
+## 0.4.6
+
+- Model tiers per account (values are validated as model names: no leading dash, spaces or control characters, also for `model` in `wingman_start`): `wingman accounts add --haiku M --sonnet M --opus M` (`-` clears a tier). `wingman_start` with `model: "haiku" | "sonnet" | "opus"` uses the account's model for that tier; unset tiers and other values pass through unchanged. `accounts list` shows a MODELS column and `wingman_accounts` returns `models`.
+
+## 0.4.5
+
+- Provider plumbing for v0.5 (no behaviour change for Claude accounts): adapters are looked up by the account's `provider` (`src/adapters/index.ts`), the adapter decides what a rate-limit rejection is, the guardrail prompt has neutral wording for non-Claude providers, plugin-change detection and the doctor checks that only make sense for Claude profiles are skipped for other providers, `wingman_start` rejects `allowed_tools` for them, and `wingman accounts list` shows a PROVIDER column.
+
+## 0.4.4
+
+- New skill `remove-account`: pause an account, unregister it while keeping the profile, or remove the whole profile with `another-logout.sh`. `add-account` points to it.
+
+## 0.4.3
+
+- The `add-account` skill explains that an `api_key_unverified` profile shows `signed in no` until its key is active.
+
+## 0.4.2
+
+- `another-login.sh` has a new method `api_key_unverified` (menu option 4): it stores the key and does every other setup step but skips the sign-in check, for a key that is activated later.
 
 ## 0.4.1
 

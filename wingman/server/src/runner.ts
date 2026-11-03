@@ -16,7 +16,7 @@ import { closeSync, mkdirSync, openSync, realpathSync, rmSync } from 'node:fs';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { relative, join, isAbsolute } from 'node:path';
-import { claudeAdapter, getAdapter, isRateLimitRejected } from './adapters/claude.js';
+import { getAdapter } from './adapters/index.js';
 import { maskSecrets } from './mask.js';
 import {
   DEFAULT_PRESET,
@@ -27,7 +27,7 @@ import {
   resolveTools,
 } from './guard.js';
 import { runDir, wingmanHome } from './paths.js';
-import { recordRateLimit } from './registry.js';
+import { assertModelName, recordRateLimit, resolveModel } from './registry.js';
 import {
   appendEvent,
   createRun,
@@ -122,6 +122,8 @@ interface SupervisorPayload {
   cwd: string;
   timeout_ms: number;
   wingman_home: string;
+  /** The agent cannot commit in a worktree: the supervisor commits its changes after the run. */
+  auto_commit?: boolean;
 }
 
 export interface Outcome {
@@ -136,6 +138,7 @@ export function mapOutcome(input: {
   timedOut: boolean;
   rateRejected: boolean;
   spawnError?: string;
+  provider?: string;
 }): Outcome {
   const { finished, exitCode, timedOut, rateRejected } = input;
   const exit = `exit code ${exitCode ?? 'none'}${input.signal ? `, signal ${input.signal}` : ''}`;
@@ -170,7 +173,8 @@ export function mapOutcome(input: {
     if (rateRejected) return { status: 'rate_limited', text };
     return { status: 'failed', text };
   }
-  if (reportsPluginChange(text)) return { status: 'needs_caller', text };
+  if ((input.provider ?? 'claude') === 'claude' && reportsPluginChange(text))
+    return { status: 'needs_caller', text };
   return { status: parseStatusLine(text) ?? 'needs_input', text };
 }
 
@@ -198,11 +202,80 @@ async function readStdin(): Promise<string> {
   return Buffer.concat(chunks).toString('utf8');
 }
 
+const RISKY_STAGED_PATH =
+  /(^|\/)(\.env(\..*)?|.*\.pem|id_(rsa|ed25519|ecdsa).*|auth\.json|\.credentials\.json|api-key\.env|\.netrc)$/;
+
+/** Config that would make git run a program or sign with a key while wingman commits for the agent. */
+const SAFE_GIT = [
+  '-c',
+  'core.fsmonitor=false',
+  '-c',
+  'core.hooksPath=/dev/null',
+  '-c',
+  'commit.gpgsign=false',
+  '-c',
+  'core.sshCommand=false',
+];
+
+/** Commits what a provider that cannot commit left in the worktree; returns a note for the report. */
+async function commitForAgent(cwd: string, runId: string): Promise<string> {
+  const exec = defaultExec;
+  const env = {
+    ...withoutProxy(process.env),
+    GIT_CONFIG_NOSYSTEM: '1',
+    GIT_TERMINAL_PROMPT: '0',
+    GIT_OPTIONAL_LOCKS: '0',
+  };
+  const opts = { cwd, env, timeoutMs: 60_000 };
+  const git = (...args: string[]) => exec('git', [...SAFE_GIT, ...args], opts);
+  const failed =
+    '[wingman] the agent left changes in the worktree and wingman could not commit them';
+  const status = await git('status', '--porcelain');
+  if (status.code !== 0) return failed;
+  if (status.stdout.trim() === '') return '';
+  if ((await git('add', '-A')).code !== 0) return failed;
+  const staged = await git('diff', '--cached', '--raw', '--no-renames', '--no-ext-diff');
+  const risky = staged.stdout
+    .split('\n')
+    .filter((line) => line.trim() !== '')
+    .filter((line) => {
+      const [meta = '', path = ''] = line.split('\t');
+      const modes = meta.replace(/^:/, '').split(' ');
+      return (
+        modes[0] === '160000' ||
+        modes[1] === '160000' ||
+        modes[1] === '120000' ||
+        RISKY_STAGED_PATH.test(path)
+      );
+    });
+  if (staged.code !== 0 || risky.length > 0) {
+    await git('reset', '-q');
+    return risky.length > 0
+      ? `[wingman] the agent left changes in the worktree and wingman did not commit them: ${risky.length} staged entries are symlinks, nested repositories or look like credential files`
+      : failed;
+  }
+  const commit = await git(
+    '-c',
+    'user.name=wingman',
+    '-c',
+    'user.email=wingman@localhost',
+    'commit',
+    '--no-verify',
+    '-q',
+    '-m',
+    `wingman run ${runId}`,
+  );
+  return commit.code === 0
+    ? '[wingman] the agent cannot commit here; wingman committed its changes on the run branch'
+    : failed;
+}
+
 export async function runSupervisor(runId: string): Promise<void> {
   const payload = JSON.parse(await readStdin()) as SupervisorPayload;
   const childEnv = { ...process.env } as Record<string, string>;
   process.env.WINGMAN_HOME = payload.wingman_home;
   const adapter = getAdapter(payload.provider);
+  const parseLine = adapter.createLineParser?.() ?? ((line: string) => adapter.parseLine(line));
 
   let sessionRateLimit: RateLimitInfo | undefined;
   let rejectedRateLimit: RateLimitInfo | undefined;
@@ -251,10 +324,10 @@ export async function runSupervisor(runId: string): Promise<void> {
   if (child.stdout) {
     createInterface({ input: child.stdout }).on('line', (line) => {
       appendEvent(runId, line);
-      for (const event of adapter.parseLine(line)) {
+      for (const event of parseLine(line)) {
         if (event.kind === 'rate_limited') {
           sessionRateLimit = event.info;
-          if (isRateLimitRejected(event.info)) {
+          if (adapter.isRateLimitRejected(event.info)) {
             rateRejected = true;
             rejectedRateLimit = event.info;
           }
@@ -293,12 +366,19 @@ export async function runSupervisor(runId: string): Promise<void> {
 
   const current = readMeta(runId);
   if (TERMINAL_STATUSES.includes(current.status)) return;
+  let commitNote = '';
+  if (payload.auto_commit) {
+    commitNote = timedOut
+      ? '[wingman] the run timed out; any changes it made are left uncommitted in the worktree'
+      : await commitForAgent(payload.cwd, runId);
+  }
   const input: Parameters<typeof mapOutcome>[0] = {
     finished,
     exitCode: end.code,
     signal: end.signal,
     timedOut,
     rateRejected,
+    provider: payload.provider,
   };
   if (spawnError !== undefined) input.spawnError = spawnError;
   let outcome = mapOutcome(input);
@@ -306,6 +386,7 @@ export async function runSupervisor(runId: string): Promise<void> {
     const changed = await changedSince(defaultExec, payload.repo, payload.ref_snapshot);
     if (changed.length > 0) outcome = flagGuardrail(outcome, changed);
   }
+  if (commitNote) outcome = { ...outcome, text: `${outcome.text}\n\n${commitNote}` };
   writeResult(runId, outcome.text);
   const patch: Partial<Omit<RunMeta, 'id' | 'status'>> = {
     exit_code: end.code,
@@ -429,7 +510,19 @@ function launchSupervisor(
 export async function startRun(opts: StartRunOptions): Promise<RunMeta> {
   const parentEnv = opts.parentEnv ?? process.env;
   assertCanStart(parentEnv);
-  const adapter = opts.adapter ?? claudeAdapter;
+  const adapter = opts.adapter ?? getAdapter(opts.account.provider);
+  if (!adapter.capabilities.allowedTools && opts.allowed_tools !== undefined) {
+    throw new Error(
+      `allowed_tools are Claude tool rules and are not supported for provider "${adapter.provider}"; choose a preset instead`,
+    );
+  }
+  const model = resolveModel(opts.account, opts.model);
+  if (model !== undefined) assertModelName(model);
+  if (!adapter.capabilities.maxTurns && opts.max_turns !== undefined) {
+    throw new Error(
+      `max_turns is not supported for provider "${adapter.provider}"; the run is bounded by its time limit`,
+    );
+  }
   const exec = opts.exec ?? defaultExec;
   const depth = currentDepth(parentEnv) + 1;
   const tools = resolveTools({
@@ -536,19 +629,27 @@ export async function startRun(opts: StartRunOptions): Promise<RunMeta> {
     }
   }
 
-  const maxTurns = opts.max_turns ?? defaultMaxTurns(opts.preset);
+  const maxTurns = adapter.capabilities.maxTurns
+    ? (opts.max_turns ?? defaultMaxTurns(opts.preset))
+    : undefined;
   const spec: StartSpec = {
     prompt: opts.prompt,
     cwd: runCwd,
     allowed_tools: tools.allowed,
     disallowed_tools: tools.disallowed,
     session_id: sessionId,
-    append_system_prompt: guardPrompt(),
-    ...(opts.model !== undefined ? { model: opts.model } : {}),
+    append_system_prompt: guardPrompt(adapter.provider),
+    preset: opts.preset ?? DEFAULT_PRESET,
+    ...(model !== undefined ? { model } : {}),
     ...(maxTurns !== undefined ? { max_turns: maxTurns } : {}),
   };
   try {
-    return spawnRun(meta, opts, adapter, spec, depth, parentEnv, lockPath);
+    const autoCommit =
+      !adapter.capabilities.agentCommits &&
+      mayCommit &&
+      opts.worktree === true &&
+      meta.run_branch !== undefined;
+    return spawnRun(meta, opts, adapter, spec, depth, parentEnv, lockPath, autoCommit);
   } catch (err) {
     await discardStart(meta, exec);
     throw err;
@@ -605,6 +706,7 @@ function spawnRun(
   depth: number,
   parentEnv: NodeJS.ProcessEnv,
   lockPath: string | undefined,
+  autoCommit: boolean,
 ): RunMeta {
   const { command, args } = adapter.buildCommand(opts.account, spec);
   const payload: SupervisorPayload = {
@@ -613,8 +715,9 @@ function spawnRun(
     provider: adapter.provider,
     command,
     args,
-    prompt: spec.prompt,
+    prompt: adapter.buildPrompt ? adapter.buildPrompt(spec) : spec.prompt,
     cwd: spec.cwd,
+    ...(autoCommit ? { auto_commit: true } : {}),
     timeout_ms: opts.timeout_ms ?? DEFAULT_TIMEOUT_MS,
     wingman_home: wingmanHome(),
   };
@@ -624,7 +727,7 @@ function spawnRun(
     const { pid } = launchSupervisor(
       meta,
       payload,
-      adapter.buildEnv(parentEnv, opts.account, depth),
+      adapter.buildEnv(parentEnv, opts.account, depth, spec),
       entry,
     );
     if (lockPath) setLockOwner(lockPath, pid);

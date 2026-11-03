@@ -24,6 +24,7 @@ const spec: StartSpec = {
   disallowed_tools: ['AskUserQuestion'],
   session_id: 'sid-1',
   append_system_prompt: 'guard',
+  preset: 'readonly',
   max_turns: 7,
   model: 'opus',
 };

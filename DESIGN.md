@@ -25,8 +25,8 @@ The CLI `wingman accounts list|add|disable|enable|remove` is the normal way to c
 | `config_dir` | profile directory |
 | `provider` | agent backend, default `claude` |
 | `command` | executable that starts the agent for this profile, default `claude`; for a profile made by `another-login.sh` it is the launcher (for example `~/.local/bin/claude-second`), which sets `CLAUDE_CONFIG_DIR` and loads that profile's credential |
-| `scope` | data boundary (for example `company`); a run only goes to an account whose scope matches the work (v0.5) |
-| `tags`, `priority` | selection hints (v0.5) |
+| `scope` | data boundary (for example `company`); a run only goes to an account whose scope matches the work (v0.6) |
+| `tags`, `priority` | selection hints (v0.6) |
 | `status` | `active` (or absent), `disabled`, `rate_limited` (written back automatically when a run ends `rate_limited`, or by `wingman accounts mark-limited`) |
 | `limited_until` | ISO time (UTC) when `rate_limited` ends; optional, so entries written before v0.4 stay valid |
 
@@ -43,7 +43,7 @@ Limit state (v0.4):
 
 `account` is optional in `wingman_start`. When omitted, the server picks one at random among the registry targets that are not the caller's profile and are active (not `disabled`, not currently limited). When given, it must be a target that is active: a limited account is refused with an error naming `limited_until`. When a start is refused for a limit, or a run ends `rate_limited`, the tool response lists the other active accounts (`other_active_accounts` and a `hint` on `wingman_status` and `wingman_result`; the refusal message for a start); nothing is rerouted.
 
-v0.5 (skill `pick-account`) replaces the random pick with a smarter one:
+v0.6 (skill `pick-account`) replaces the random pick with a smarter one:
 
 1. Hard filter: `status = active` and matching `scope`.
 2. Match `tags` to the task (heavy implementation, cheap lookup).
@@ -104,7 +104,7 @@ A Claude Code plugin named `wingman`: MCP server declared in the plugin's `.mcp.
 
 ## Backends
 
-v0.1 supports Claude Code only, but the runner is written against a small adapter interface: build the command, set the account selector env, inject the guardrail prompt, parse events into a common shape (`started`, `message`, `tool`, `rate_limited`, `finished`), and report the session id. Registry entries have a `provider` field (default `claude`). Other providers (OpenAI Codex, OpenCode, and similar CLIs) are added as further adapters in v0.7; the guardrails and the capped-report rule stay in the server so they apply to every provider.
+v0.1 supports Claude Code only, but the runner is written against a small adapter interface: build the command, set the account selector env, inject the guardrail prompt, parse events into a common shape (`started`, `message`, `tool`, `rate_limited`, `finished`), and report the session id. Registry entries have a `provider` field (default `claude`). Other providers (OpenAI Codex, OpenCode, and similar CLIs) are added as further adapters in v0.5 (Codex and OpenCode are in); the guardrails and the capped-report rule stay in the server so they apply to every provider.
 
 ## Engine
 

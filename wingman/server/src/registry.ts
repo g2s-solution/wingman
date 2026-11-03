@@ -3,7 +3,18 @@ import { chmod, mkdir, realpath, rename, writeFile, readFile, unlink } from 'nod
 import { dirname, resolve } from 'node:path';
 import { z } from 'zod';
 import { accountsFile } from './paths.js';
-import type { Account } from './types.js';
+import type { Account, ModelTier } from './types.js';
+
+/** A model name is one argv element after --model: no leading dash, no spaces or control characters. */
+export const MODEL_NAME = /^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,127}$/;
+
+export function assertModelName(value: string, what = 'model'): void {
+  if (!MODEL_NAME.test(value)) {
+    throw new Error(
+      `${what} "${value.slice(0, 40)}" is not a valid model name (letters, digits and . _ : / @ + -, starting with a letter or digit, up to 128 characters)`,
+    );
+  }
+}
 
 // passthrough: a write-back must not drop keys a newer version or a hand edit added
 const accountSchema = z
@@ -15,6 +26,13 @@ const accountSchema = z
     command: z.string().min(1).default('claude'),
     status: z.string().min(1).optional(),
     limited_until: z.string().min(1).optional(),
+    models: z
+      .object({
+        haiku: z.string().regex(MODEL_NAME).optional(),
+        sonnet: z.string().regex(MODEL_NAME).optional(),
+        opus: z.string().regex(MODEL_NAME).optional(),
+      })
+      .optional(),
   })
   .passthrough();
 
@@ -179,4 +197,13 @@ export async function recordRateLimit(
   } catch {
     return false;
   }
+}
+
+export const MODEL_TIERS: readonly ModelTier[] = ['haiku', 'sonnet', 'opus'];
+
+/** A tier name becomes the account's model for it; anything else, or an unset tier, passes through unchanged. */
+export function resolveModel(account: Account, model: string | undefined): string | undefined {
+  if (model === undefined) return undefined;
+  const tier = MODEL_TIERS.find((t) => t === model);
+  return (tier && account.models?.[tier]) || model;
 }

@@ -2,7 +2,7 @@
 
 Concepts and decisions are in `DESIGN.md`; the original v0.1 build plan is kept in `docs/history/PLAN.md`. Two principles hold for every phase: tools take an `account` parameter and no code mentions "A" or "B" (so going from 2 to N accounts needs no rewrite), and everything specific to Claude Code (command line, environment variable, event format, system prompt injection) stays behind the runner interface so other providers plug in as adapters.
 
-The order follows dependencies: first make the public project healthy, safe and portable, then manage accounts, then act on account state, and only then choose targets by policy, continue runs and add providers.
+The order follows dependencies: first make the public project healthy, safe and portable, then manage accounts, then act on account state, add providers (Codex, OpenCode) once account state is known, and only then choose targets by policy, continue runs and cap load across all providers.
 
 ## Done
 
@@ -16,19 +16,20 @@ The order follows dependencies: first make the public project healthy, safe and 
 
 **v0.4.1** (0.4.1): denied commands are reported (`permission_denials`, plus a `hint` naming up to five denied heads); prompt rule 5 forbids `cd`, `git -C` and `npx`; every tool rejects unknown parameters; `wingman_result` adds `pages_left` and a `next` line; `wingman_cleanup accept` returns the run branch and a capped `diff_stat`; default `max_turns` per preset.
 
+**v0.5** (0.5.0 to 0.5.3): providers other than Claude Code. The adapter registry picks the adapter from the account's `provider`; accounts can set a model per tier (`--haiku`, `--sonnet`, `--opus`); Codex (`codex exec`, sandbox by preset, wingman commits for it) and OpenCode (`opencode run`, per-run permission config, XDG-isolated profile) run behind the same `wingman_*` tools and masked, paged report. Guardrails are weaker than for Claude (prompt-level plus the sandbox or permission config); see the README.
+
 **v0.1.x** (patch releases): CI actions pinned by SHA and Dependabot; code of conduct, issue and PR templates, release checklist (`docs/RELEASING.md`); timing-dependent tests replaced by polling; retention and deletion of `~/.wingman` documented.
 
 ## Planned
 
 | Phase | Goal | Scope | Done when | Depends on |
 |---|---|---|---|---|
-| **v0.5 Selection policy** | Pick targets by policy instead of at random. | `tags`, `priority`, `scope`, filters; least-recently-used default; skill `pick-account`; failover stays the caller's decision | With three accounts, selection honors tags and priority and skips limited ones, in tests | v0.4 |
-| **v0.6 Follow-ups and limits** | Continue work and avoid overloading an account. | Follow-up run on the same account (`--resume` with the recorded session id); per-account concurrency cap and an optional queue; optional sandbox wrapper (`bubblewrap`, `sandbox-exec`) for `edit`; `setup` restricted or opt-in | A follow-up run keeps the earlier context; N runs over M accounts never exceed the cap in a stress test; a documented attack test (`env git push`, `node -e`) is blocked under the sandbox | v0.2, v0.4 |
-| **v0.7 Other providers** | Delegate to agents other than Claude Code. | Adapters for OpenAI Codex, OpenCode and similar CLIs behind the runner interface; an account's `provider` selects the adapter, which builds the command, sets the account selection variable (for example `CLAUDE_CONFIG_DIR`, `CODEX_HOME`), injects the guardrail prompt, parses events and detects rate limits; guardrail and masking parity tests; per-provider sandbox notes | The same `wingman_*` tools drive a non-Claude run with the same masked, paged report | v0.3, v0.6 |
+| **v0.6 Selection policy** | Pick targets by policy instead of at random. | `tags`, `priority`, `scope`, filters; least-recently-used default; skill `pick-account`; failover stays the caller's decision | With three accounts, selection honors tags and priority and skips limited ones, in tests | v0.4, v0.5 |
+| **v0.7 Follow-ups and limits** | Continue work and avoid overloading an account. | Follow-up run on the same account (`--resume` with the recorded session id); per-account concurrency cap and an optional queue; optional sandbox wrapper (`bubblewrap`, `sandbox-exec`) for `edit`; `setup` restricted or opt-in | A follow-up run keeps the earlier context; N runs over M accounts never exceed the cap in a stress test; a documented attack test (`env git push`, `node -e`) is blocked under the sandbox | v0.2, v0.4, v0.5 |
 
 ## Verification debt
 
-Not verified yet, each owned by the phase that depends on it: spawning from a real interactive Claude Code session (open since v0.1), whether `--bg` background sessions work under a custom `CLAUDE_CONFIG_DIR` (v0.6), `acceptEdits` versus `auto` permission mode for `edit` (open since v0.3), whether the settings symlink survives a Claude Code rewrite (v0.3 `doctor`), and a Claude Code version compatibility matrix with a canary CI job (open since v0.3).
+Not verified yet, each owned by the phase that depends on it: spawning from a real interactive Claude Code session (open since v0.1), whether `--bg` background sessions work under a custom `CLAUDE_CONFIG_DIR` (v0.7), `acceptEdits` versus `auto` permission mode for `edit` (open since v0.3), whether the settings symlink survives a Claude Code rewrite (v0.3 `doctor`), and a Claude Code version compatibility matrix with a canary CI job (open since v0.3).
 
 ## Out of scope for now
 

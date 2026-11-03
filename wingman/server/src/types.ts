@@ -10,7 +10,11 @@ export interface Account {
   status?: string;
   /** ISO time; with status 'rate_limited', the account is skipped until then. */
   limited_until?: string;
+  /** Provider model name for each tier, so a caller can ask for haiku, sonnet or opus on any provider. */
+  models?: Partial<Record<ModelTier, string>>;
 }
+
+export type ModelTier = 'haiku' | 'sonnet' | 'opus';
 
 export type RunStatus =
   | 'running'
@@ -104,11 +108,35 @@ export interface StartSpec {
   max_turns?: number;
   session_id: string;
   append_system_prompt: string;
+  /** Preset name the caller chose; adapters without tool-rule syntax map it to their own sandbox. */
+  preset: string;
+}
+
+export interface AdapterCapabilities {
+  /** Accepts Claude tool-rule strings in `allowed_tools`. */
+  allowedTools: boolean;
+  /** Has a turn limit flag, so `max_turns` is enforced. */
+  maxTurns: boolean;
+  /** Can run `git commit` itself inside the run worktree; if not, wingman commits its changes afterwards. */
+  agentCommits: boolean;
 }
 
 export interface Adapter {
   provider: string;
+  capabilities: AdapterCapabilities;
+  /** The text sent on stdin; default is `spec.prompt` (a provider without a system-prompt flag prepends the guardrail). */
+  buildPrompt?(spec: StartSpec): string;
+  /** A parser with per-run state, for providers whose final result needs earlier lines. Default: `parseLine`. */
+  createLineParser?(): (line: string) => AgentEvent[];
   buildCommand(account: Account, spec: StartSpec): { command: string; args: string[] };
-  buildEnv(parent: NodeJS.ProcessEnv, account: Account, depth: number): Record<string, string>;
+  buildEnv(
+    parent: NodeJS.ProcessEnv,
+    account: Account,
+    depth: number,
+    /** Absent when the environment is for a setup command rather than the agent. */
+    spec?: StartSpec,
+  ): Record<string, string>;
   parseLine(line: string): AgentEvent[];
+  /** True when the rate-limit info from this provider means the run was refused. */
+  isRateLimitRejected(info: RateLimitInfo): boolean;
 }

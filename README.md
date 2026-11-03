@@ -45,15 +45,39 @@ Claude Code updates a plugin only when its version number changes (see `CHANGELO
 Clone this repository (the login script is not part of the plugin) and run:
 
 ```bash
-./another-login.sh [--method claudeai|console|api_key] [config-dir]
+./another-login.sh [--method claudeai|console|api_key|api_key_unverified] [config-dir]
 ```
 
 A bare name such as `claude-second` becomes `~/.claude-second`; a value containing `/` or `~` is used as given. What the script does:
 
-- Creates the profile directory (mode 0700) and signs in with `claude auth login`, or stores an API key or token in `<profile>/api-key.env` (mode 0600) for the `api_key` method.
+- Creates the profile directory (mode 0700) and signs in with `claude auth login`, or stores an API key or token in `<profile>/api-key.env` (mode 0600) for the `api_key` method. `api_key_unverified` does the same and every other step, but accepts any non-empty key (no format check) and skips the sign-in check at the end so the key can be activated later; check it then with `<launcher> auth status --text`. Wingman registers the profile either way, so it may show as not signed in until the key works.
 - **Links these items from your default profile into the new one** (only those that exist): `CLAUDE.md`, `settings.json`, `skills`, `agents`, `commands`, `rules`, `plugins`. So the target runs with your instructions, settings, hooks and plugins, and editing one of them from the target edits your default profile. To share less, edit the `SHARED=(...)` line at the top of the script before running it. Credentials, `.claude.json`, history and sessions are not shared. If the new profile already has a real `plugins` directory the script skips it and prints the two commands to migrate it (see [Delegate in both directions](#delegate-in-both-directions-role-swap)).
 - Writes a launcher (for example `~/.local/bin/claude-second`) that sets `CLAUDE_CONFIG_DIR` and loads the profile's key file, if any.
 - Registers the profile in `~/.wingman/accounts.json` (id = the name without a leading `claude-`, so `claude-second` becomes `second`).
+
+### Set environment variables for one profile
+
+Put a profile's environment variables in `<profile>/api-key.env`, not in `settings.json`. `settings.json` is shared with your default profile, so variables added there reach every profile. The launcher sources `api-key.env` before it starts `claude`, so the variables apply to that profile only.
+
+Add the lines by hand, quoted, and replace the placeholders with your own values. The values below are examples only:
+
+```bash
+ANTHROPIC_BASE_URL="http://10.0.0.5:8080"
+ANTHROPIC_AUTH_TOKEN="<YOUR_TEAM_KEY>"
+ANTHROPIC_DEFAULT_HAIKU_MODEL="example/haiku-model"
+ANTHROPIC_DEFAULT_SONNET_MODEL="example/sonnet-model"
+ANTHROPIC_DEFAULT_OPUS_MODEL="example/opus-model"
+CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1"
+```
+
+Keep these in mind:
+
+- `another-login.sh` rewrites `api-key.env` on every login, and deletes it when the method changes, so run it again only if you add the lines again afterwards.
+- Remove any `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` line that an earlier login wrote, or Claude may use that key instead of the gateway token.
+- The file holds a credential: keep its mode at 0600 and do not commit it.
+- To check that the profile picks up the variables, start it with its launcher and run `/status`, then check that `~/.claude/settings.json` is unchanged.
+
+To remove a profile again, run `./another-logout.sh [--yes] [--keep-dir] <config-dir>`. It shows what it will remove and asks first; it unregisters the account from wingman, deletes the launcher this script made and (unless `--keep-dir`) the profile directory with its credentials. It refuses the default profile, and the shared items it linked are unlinked, never deleted.
 
 The wingman MCP server never reads credentials: it only runs the launcher named in the registry. `CLAUDE_CONFIG_DIR` is not a documented Claude Code setting, so treat profile isolation as working but unsupported.
 
@@ -80,8 +104,9 @@ The registry is a plain file (directory mode 0700, file mode 0600). `another-log
 Run these in a terminal: `node <plugin dir>/wingman/bin/wingman accounts <command>`.
 
 ```sh
-wingman accounts list [--json]            # id, label, status, limited_until, runs by status, config_dir, command; marks your own profile
-wingman accounts add --id ID --config-dir DIR [--label L] [--command CMD] [--provider P] [--upsert]
+wingman accounts list [--json]            # id, label, provider, models, status, limited_until, runs by status, config_dir, command; marks your own profile
+wingman accounts add --id ID --config-dir DIR [--label L] [--command CMD] [--provider P]
+                     [--haiku M] [--sonnet M] [--opus M] [--upsert]
 wingman accounts disable ID               # status disabled: never picked, and refused when named
 wingman accounts enable ID                # back to active
 wingman accounts mark-limited ID --until T   # T: ISO time with Z or an offset, a date (UTC) or epoch seconds
@@ -90,6 +115,37 @@ wingman accounts remove ID --yes          # registry entry only; the profile dir
 ```
 
 `add` needs an absolute `--config-dir` (a leading `~` is expanded), refuses a duplicate id unless `--upsert` (which keeps fields you set by hand, such as `status`). Registering your own profile is allowed and prints a note: it is skipped when you delegate from it and used when you delegate from another profile. `remove` without `--yes` only prints what it would do and exits 2. Exit codes: 0 ok, 2 usage or validation error, 1 unexpected error. The commands never read or write credentials.
+
+**Model tiers.** `--haiku`, `--sonnet` and `--opus` set the model this account uses for each tier (for example a Codex or OpenCode model name; `-` clears a tier; an `--upsert` without these flags keeps them). When `wingman_start` is called with `model: "sonnet"` (or `haiku`, `opus`) the account's model for that tier is used; a tier that is not set, or any other value, is passed to the provider unchanged, and an omitted `model` leaves the provider default. `wingman_accounts` shows each account's `models`, so Claude can see what a tier means before it picks.
+
+**Other providers (Codex).** An account with `--provider codex` runs `codex exec` instead of Claude Code:
+
+```sh
+wingman accounts add --id codex1 --config-dir ~/.codex --provider codex --sonnet <codex model>
+```
+
+`--command` defaults to the provider name (`codex`); `--config-dir` becomes `CODEX_HOME`, so use a dedicated profile, not one you also use for something else. Log in with `codex login` under that `CODEX_HOME` first. Differences from a Claude account, all deliberate:
+
+- Presets map to Codex sandboxes: `readonly` is `read-only`; `edit-files` and `edit` are `workspace-write`. Codex cannot commit inside a git worktree, so wingman commits the changes on the run branch itself after the run (the report says so). `edit` adds nothing over `edit-files` for Codex.
+- The guardrail text is prepended to the prompt instead of being a system prompt, and there is no tool deny list: the sandbox is the real boundary. A `read-only` sandbox can still read files under `$HOME`, including that profile's own login file. Treat a Codex run as less contained than a Claude run. When wingman commits for the agent it runs git with hooks, fsmonitor and signing disabled, and it skips the commit (leaving the changes in the worktree and saying so) if the staged changes include symlinks, nested repositories or files that look like credentials; a process the agent left running in the background could still touch the worktree while wingman commits.
+- `allowed_tools` and `max_turns` are refused (Codex has no such flags); the run is bounded by its time limit.
+- User config and rules are not loaded (`--ignore-user-config`, `--ignore-rules`), so MCP servers and hooks from that profile do not run.
+- `wingman doctor` checks only that the directory and command exist; the shared-item, plugin and sign-in checks are for Claude profiles.
+- `events.jsonl` keeps Codex's raw output (command output, file contents) unmasked on disk like Claude's; tools never return it, and `wingman gc` prunes it.
+
+**Other providers (OpenCode).** An account with `--provider opencode` runs `opencode run --format json --standalone`:
+
+```sh
+wingman accounts add --id oc1 --config-dir ~/.wingman-opencode --provider opencode --sonnet <provider/model>
+```
+
+`--config-dir` is a directory that wingman maps to four XDG roots for the run (`config`, `data`, `state`, `cache` inside it), so the profile has its own login, settings and MCP servers instead of your normal OpenCode setup (npm's user config is moved there too). Log in once with `XDG_CONFIG_HOME=<dir>/config XDG_DATA_HOME=<dir>/data XDG_STATE_HOME=<dir>/state XDG_CACHE_HOME=<dir>/cache opencode auth login`. Model names are `provider/model` (see `opencode models`); name one with `--sonnet` and so on, or `model` in `wingman_start`; OpenCode's own default model may not work for your plan. Differences from a Claude account:
+
+- OpenCode has no sandbox; wingman gives each run a permission config (through `OPENCODE_CONFIG_CONTENT`, never on disk). It denies web fetches, nested agents (`task`) and any path outside the worktree (`external_directory`), and allows only the git commands of the preset in `bash`: `readonly` reads (`git status|log|diff|show`, `date`); `edit-files` also edits files and runs `git add|commit|mv|rm|restore|rev-parse|ls-files`; `edit` also runs `node` and `npm` (never `npm publish` or a global install). Chained commands are judged one by one, and the last matching rule wins, so the refusals come last. OpenCode commits for itself, so wingman does not.
+- The shell rules name commands exactly (`git status` and `git status *`, never `git status*`, which would also match `git difftool`), and refusals for output files, `--no-index`, external diff tools and global installs come last. Shell children are not confined to the worktree (only OpenCode's own file tools are), and a repository's own `opencode.json`, plugins or MCP servers are not disabled: the run's permission config wins for tool permissions, but treat an untrusted repository with care.
+- The guardrail text is prepended to the prompt (no system-prompt flag). `allowed_tools` and `max_turns` are refused.
+- A run's report is its last text message; a run that ends without a finished step is `failed_no_report`; an error event (or HTTP 429) ends it as `failed` or `rate_limited`.
+- `wingman doctor` checks only the directory and the command. `events.jsonl` keeps the raw output on disk like the other providers.
 
 When a run ends `rate_limited`, wingman marks its account `rate_limited` until the reset time the run reported (`limited_until`). A limited account is skipped when Claude does not name one, and refused when it does; once the time has passed it counts as active again, with no job running. The `rate_limited` answer names the other active accounts, if any, and Claude (not wingman) decides whether to retry on one. `mark-limited` and `clear-limited` set or lift the state by hand. `wingman doctor` lists limited accounts as warnings and does not fail because of them.
 
@@ -144,7 +200,7 @@ It checks the state directory and `accounts.json` (modes 0700 and 0600, valid JS
 
 `--online` runs `auth status --json` for you and for each account (20 s timeout) and prints only whether it is signed in, the auth method, and whether the account differs from yours. A profile whose `CLAUDE_CONFIG_DIR` stopped taking effect shows up as `different account from the caller: no`. Emails and organisation ids are compared by hash and never printed.
 
-The `add-account` skill walks through adding a second account and reading this output; `new-agent` runs the tasks.
+The `add-account` skill walks through adding a second account and reading this output; `remove-account` pauses, unregisters or removes one; `new-agent` runs the tasks.
 
 ## Presets, worktrees and branches
 

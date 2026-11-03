@@ -1,6 +1,6 @@
 ---
 name: add-account
-description: Set up a second Claude account for wingman. Use when the user wants to add, register or check a second account, or asks why a target account does not work.
+description: Set up or check a second Claude account for wingman. Use when the user wants to add, register, check or disable a second account, or asks why a target account does not work.
 ---
 
 # add-account
@@ -17,12 +17,20 @@ Guide the user through adding a second Claude account that wingman can hand work
 Signing in needs the user's own credentials, so the user runs this in their own terminal, from a checkout of the wingman repository (`another-login.sh` is not shipped in the plugin):
 
 ```sh
-./another-login.sh [--method claudeai|console|api_key] <name>
+./another-login.sh [--method claudeai|console|api_key|api_key_unverified] <name>
 ```
 
 Wait until they say it is done. Do not run it for them.
 
+With `api_key_unverified` the key is only stored: nothing is checked and the key may not be active yet. Skip step 3 for that profile until the user says the key is active; `signed in no` from `doctor --online` is then expected, not a fault.
+
 To delegate in both directions (role swap), every profile involved must be registered, including the default one. The user registers it from any profile: `${CLAUDE_PLUGIN_ROOT}/bin/wingman accounts add --id main --label default --config-dir ~/.claude --command claude`. Each profile skips itself when choosing a target, so registering your own profile is safe.
+
+To let callers ask for `haiku`, `sonnet` or `opus` on this account, the user sets the model for each tier: `${CLAUDE_PLUGIN_ROOT}/bin/wingman accounts add --upsert --id ID --config-dir DIR --haiku NAME --sonnet NAME --opus NAME` (names are provider model names; `-` clears one). Unset tiers pass the name through unchanged.
+
+For a Codex account the user runs `codex login` with `CODEX_HOME` set to a dedicated directory and registers it with `wingman accounts add --id ID --config-dir DIR --provider codex`. `wingman doctor` then checks only the directory and the command; `doctor --online` has no sign-in check for it. Say that Codex runs are less contained than Claude runs (README, "Other providers").
+
+For an OpenCode account the user gives a dedicated directory as `--config-dir` (wingman maps it to the XDG config, data, state and cache roots) and logs in once with those variables set (README, "Other providers"); model names are `provider/model`. Runs are confined by a permission config, not a sandbox.
 
 ## 2. Check the registry and the profile
 
@@ -33,7 +41,7 @@ ${CLAUDE_PLUGIN_ROOT}/bin/wingman accounts list
 ${CLAUDE_PLUGIN_ROOT}/bin/wingman doctor
 ```
 
-Explain every `[warn]` and `[fail]` line in plain words with its fix:
+(`accounts` may arrive in the same release as `doctor`; if it is missing, skip it and use `doctor` alone.) Explain every `[warn]` and `[fail]` line in plain words with its fix:
 
 - `config_dir does not exist` (fail): the profile directory is gone; run `another-login.sh` again.
 - `command ... not found` or `not executable` (fail): the launcher is missing or lost its execute bit; `chmod +x` it or re-run `another-login.sh`.
@@ -55,4 +63,4 @@ This runs `auth status` for the caller and each account and prints only: signed 
 ## 4. Disable or remove
 
 - Pause an account: `${CLAUDE_PLUGIN_ROOT}/bin/wingman accounts disable ID` (`enable` brings it back).
-- Remove it from the registry: `${CLAUDE_PLUGIN_ROOT}/bin/wingman accounts remove ID` first prints what it would do and exits 2; run it again with `--yes` to remove the entry. Say what it does and does not delete as the command reports it; deleting the profile directory is the user's own decision.
+- Remove an account or its whole profile: use the `remove-account` skill.
