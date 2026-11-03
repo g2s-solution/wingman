@@ -55,6 +55,28 @@ A bare name such as `claude-second` becomes `~/.claude-second`; a value containi
 - Writes a launcher (for example `~/.local/bin/claude-second`) that sets `CLAUDE_CONFIG_DIR` and loads the profile's key file, if any.
 - Registers the profile in `~/.wingman/accounts.json` (id = the name without a leading `claude-`, so `claude-second` becomes `second`).
 
+### Set environment variables for one profile
+
+Put a profile's environment variables in `<profile>/api-key.env`, not in `settings.json`. `settings.json` is shared with your default profile, so variables added there reach every profile. The launcher sources `api-key.env` before it starts `claude`, so the variables apply to that profile only.
+
+Add the lines by hand, quoted, and replace the placeholders with your own values. The values below are examples only:
+
+```bash
+ANTHROPIC_BASE_URL="http://10.0.0.5:8080"
+ANTHROPIC_AUTH_TOKEN="<YOUR_TEAM_KEY>"
+ANTHROPIC_DEFAULT_HAIKU_MODEL="example/haiku-model"
+ANTHROPIC_DEFAULT_SONNET_MODEL="example/sonnet-model"
+ANTHROPIC_DEFAULT_OPUS_MODEL="example/opus-model"
+CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1"
+```
+
+Keep these in mind:
+
+- `another-login.sh` rewrites `api-key.env` on every login, and deletes it when the method changes, so run it again only if you add the lines again afterwards.
+- Remove any `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` line that an earlier login wrote, or Claude may use that key instead of the gateway token.
+- The file holds a credential: keep its mode at 0600 and do not commit it.
+- To check that the profile picks up the variables, start it with its launcher and run `/status`, then check that `~/.claude/settings.json` is unchanged.
+
 To remove a profile again, run `./another-logout.sh [--yes] [--keep-dir] <config-dir>`. It shows what it will remove and asks first; it unregisters the account from wingman, deletes the launcher this script made and (unless `--keep-dir`) the profile directory with its credentials. It refuses the default profile, and the shared items it linked are unlinked, never deleted.
 
 The wingman MCP server never reads credentials: it only runs the launcher named in the registry. `CLAUDE_CONFIG_DIR` is not a documented Claude Code setting, so treat profile isolation as working but unsupported.
