@@ -553,6 +553,9 @@ export async function startRun(opts: StartRunOptions): Promise<RunMeta> {
   if (opts.lock_key !== undefined && !repo) {
     throw new Error('lock_key needs a worktree run inside a git repository');
   }
+  if (opts.setup !== undefined && !repo) {
+    throw new Error('setup needs a worktree run inside a git repository');
+  }
   const offset = repo ? offsetInRepo(repo, opts.cwd) : '';
 
   const sessionId = randomUUID();

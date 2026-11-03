@@ -14,7 +14,7 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
-import { join } from 'node:path';
+import { isAbsolute, join, relative } from 'node:path';
 import { maskSecrets, safeSummary } from './mask.js';
 import { runDir, wingmanHome, worktreesDir } from './paths.js';
 import { groupMembers, isAlive, isSameProcess, readStartTime } from './proc.js';
@@ -363,8 +363,11 @@ export async function removeWorktree(runId: string, exec: ExecFn = defaultExec):
       env,
       timeoutMs: DEFAULT_ADD_TIMEOUT_MS,
     });
-    if (removed.code !== 0 && meta.worktree.startsWith(worktreesDir())) {
-      rmSync(meta.worktree, { recursive: true, force: true });
+    if (removed.code !== 0) {
+      const inside = relative(worktreesDir(), meta.worktree);
+      if (inside !== '' && !inside.startsWith('..') && !isAbsolute(inside)) {
+        rmSync(meta.worktree, { recursive: true, force: true });
+      }
     }
     await exec('git', ['worktree', 'prune'], {
       cwd: meta.cwd,

@@ -2,6 +2,15 @@
 
 Versions are the plugin version in `wingman/.claude-plugin/plugin.json`. Claude Code only updates an installed plugin when this number changes.
 
+## 0.5.4
+
+- The hooks guardrail now hashes the directory from `git rev-parse --git-path hooks`, so a repository with `core.hooksPath` (for example husky) is covered; before, edits to the hooks that actually run went unnoticed.
+- `setup` is refused with a clear error when the run has no worktree, instead of being accepted and silently ignored.
+- `WINGMAN_HOME` is resolved to an absolute path, so a relative value means the same directory in the supervisor as in the MCP server.
+- `wingman_cleanup` only deletes a leftover worktree directory that is inside `~/.wingman/worktrees`; the old string-prefix check also matched sibling paths such as `worktrees-old/`.
+- `meta.json` keeps unknown fields when an older run is read and rewritten, so a newer version's data is not dropped.
+- Docs: `edit-files` is described as running git and `date` (not "no commands"); paging fields on the last page; run-branch names in the cleanup section; `accounts remove` needs `--yes` after the preview; `CLAUDE.md` status; `wingman accounts` usage lists `mark-limited` and `clear-limited`.
+
 ## 0.5.3
 
 - OpenCode provider: an account with `--provider opencode` runs `opencode run --format json --standalone` with the prompt on stdin, its `config_dir` mapped to the four XDG roots, and a per-run permission config (`OPENCODE_CONFIG_CONTENT`) that denies web fetches, nested agents and paths outside the worktree and allows only the preset's git/node/npm commands. OpenCode commits for itself. `allowed_tools` and `max_turns` are refused. `Adapter.buildEnv` receives the run's spec.
