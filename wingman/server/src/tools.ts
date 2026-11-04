@@ -143,8 +143,9 @@ async function chooseAccount(
         account.limited_until === undefined
           ? 'no end time, until cleared'
           : `limited_until ${account.limited_until}`;
+      const why = account.limited_reason === undefined ? '' : `, ${account.limited_reason}`;
       throw new Error(
-        `Account "${accountId}" is rate limited (${until}); pick another account${alternativesHint(await alternativesTo(env, accountId, now))}`,
+        `Account "${accountId}" is rate limited (${until}${why}); pick another account${alternativesHint(await alternativesTo(env, accountId, now))}`,
       );
     }
     if (!isActive(account, now)) {
@@ -160,7 +161,7 @@ async function chooseAccount(
     const note =
       limited.length === 0
         ? ''
-        : `; rate limited: ${limited.map((a) => `${a.id} (limited_until ${a.limited_until ?? 'none'})`).join(', ')}`;
+        : `; rate limited: ${limited.map((a) => `${a.id} (limited_until ${a.limited_until ?? 'none'}${a.limited_reason === undefined ? '' : `, ${a.limited_reason}`})`).join(', ')}`;
     throw new Error(
       `No other active account is registered to run on${note}; see \`wingman accounts list\``,
     );
@@ -471,7 +472,7 @@ export function buildServer(deps: ServerDeps = {}): McpServer {
     'wingman_accounts',
     {
       description:
-        'List the registered accounts: id, label, status (active, disabled or rate_limited, with limited_until while limited; a limited account is skipped until then), is_caller (your own profile, never a target), provider and runs (finished runs by status). Read-only on purpose: an account entry names a command the runner executes, so no tool adds, changes or removes accounts; the Human does that with `wingman accounts ...` in a terminal.',
+        'List the registered accounts: id, label, status (active, disabled or rate_limited, with limited_until and, for a failure breaker trip, limited_reason while limited; a limited account is skipped until then), is_caller (your own profile, never a target), provider and runs (finished runs by status). Read-only on purpose: an account entry names a command the runner executes, so no tool adds, changes or removes accounts; the Human does that with `wingman accounts ...` in a terminal.',
       inputSchema: strictInput('wingman_accounts', {}),
     },
     wrap(h.accounts),

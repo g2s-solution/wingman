@@ -40,6 +40,7 @@ export interface AccountRow {
   status: string;
   /** Present only while the account is limited. */
   limited_until?: string;
+  limited_reason?: string;
   provider: string;
   weight: number;
   /** Percent chance of being picked when the caller omits the account; absent when not eligible. */
@@ -57,6 +58,7 @@ export interface PublicAccount {
   label: string;
   status: string;
   limited_until?: string;
+  limited_reason?: string;
   is_caller: boolean;
   provider: string;
   weight: number;
@@ -81,6 +83,9 @@ export function accountRows(
     ...(isLimited(a, now) && a.limited_until !== undefined
       ? { limited_until: a.limited_until }
       : {}),
+    ...(isLimited(a, now) && a.limited_reason !== undefined
+      ? { limited_reason: a.limited_reason }
+      : {}),
     provider: a.provider,
     weight: weightOf(a),
     ...(eligible(a) ? { share: Math.round((weightOf(a) / total) * 1000) / 10 } : {}),
@@ -103,6 +108,7 @@ export function publicAccounts(
     label: r.label,
     status: r.status,
     ...(r.limited_until !== undefined ? { limited_until: r.limited_until } : {}),
+    ...(r.limited_reason !== undefined ? { limited_reason: r.limited_reason } : {}),
     is_caller: r.is_caller,
     provider: r.provider,
     weight: r.weight,
@@ -245,7 +251,9 @@ async function list(args: string[], now: Clock): Promise<number> {
           modelsCell(r.models),
           r.share === undefined ? String(r.weight) : `${r.weight} (${r.share}%)`,
           r.status,
-          r.limited_until ?? '-',
+          r.limited_until === undefined
+            ? '-'
+            : `${r.limited_until}${r.limited_reason === undefined ? '' : ` (${r.limited_reason})`}`,
           runsCell(r.runs),
           r.config_dir,
           r.command,
@@ -423,6 +431,7 @@ async function change(verb: 'disable' | 'enable' | 'remove', args: string[]): Pr
   }
   const entry = { ...registry.accounts[i]! };
   delete entry.limited_until;
+  delete entry.limited_reason;
   if (verb === 'disable') entry.status = 'disabled';
   else delete entry.status;
   registry.accounts[i] = entry;

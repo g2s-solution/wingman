@@ -485,6 +485,22 @@ describe('doctor', () => {
     expect(status?.message).toContain(`until ${at(HOUR).toISOString()}`);
     expect(results.some((r) => r.level === 'fail')).toBe(false);
 
+    await saveAccounts({
+      accounts: [
+        account('a', {
+          status: 'rate_limited',
+          limited_until: at(HOUR).toISOString(),
+          limited_reason: 'consecutive_failures',
+          command: process.execPath,
+        }),
+        account('self', { config_dir: callerDir, command: process.execPath }),
+      ],
+    });
+    const tripped = await runChecks(false, { ...deps, now: () => T0 });
+    expect(tripped.find((r) => r.id === 'account.a.status')?.message).toContain(
+      'limited (consecutive_failures)',
+    );
+
     const expired = await runChecks(false, { ...deps, now: () => at(HOUR) });
     expect(expired.find((r) => r.id === 'account.a.status')).toMatchObject({
       level: 'ok',

@@ -28652,6 +28652,7 @@ var accountSchema = external_exports.object({
   command: external_exports.string().min(1).default("claude"),
   status: external_exports.string().min(1).optional(),
   limited_until: external_exports.string().min(1).optional(),
+  limited_reason: external_exports.string().min(1).optional(),
   weight: external_exports.number().min(0).max(1e6).optional(),
   models: external_exports.object({
     haiku: external_exports.string().regex(MODEL_NAME).optional(),
@@ -28749,14 +28750,17 @@ function indexOfAccount(registry2, id) {
   }
   return i;
 }
-async function markLimited(id, until) {
+async function markLimited(id, until, reason) {
   const registry2 = await loadAccounts();
   const i = indexOfAccount(registry2, id);
   const account = registry2.accounts[i];
   if (account.status !== void 0 && account.status !== "active" && account.status !== RATE_LIMITED) {
     throw new Error(`Account "${id}" is ${account.status}; enable it before marking it limited`);
   }
-  registry2.accounts[i] = { ...account, status: RATE_LIMITED, limited_until: until.toISOString() };
+  const entry = { ...account, status: RATE_LIMITED, limited_until: until.toISOString() };
+  if (reason === void 0) delete entry.limited_reason;
+  else entry.limited_reason = reason;
+  registry2.accounts[i] = entry;
   await saveAccounts(registry2);
 }
 async function clearLimited(id) {
@@ -28766,6 +28770,7 @@ async function clearLimited(id) {
   if (entry.status !== RATE_LIMITED) return false;
   delete entry.status;
   delete entry.limited_until;
+  delete entry.limited_reason;
   registry2.accounts[i] = entry;
   await saveAccounts(registry2);
   return true;
@@ -29163,6 +29168,7 @@ function accountRows(accounts, caller, now = /* @__PURE__ */ new Date(), counts 
     label: a.label,
     status: effectiveStatus(a, now),
     ...isLimited(a, now) && a.limited_until !== void 0 ? { limited_until: a.limited_until } : {},
+    ...isLimited(a, now) && a.limited_reason !== void 0 ? { limited_reason: a.limited_reason } : {},
     provider: a.provider,
     weight: weightOf(a),
     ...eligible(a) ? { share: Math.round(weightOf(a) / total * 1e3) / 10 } : {},
@@ -29179,6 +29185,7 @@ function publicAccounts(accounts, caller, now = /* @__PURE__ */ new Date(), coun
     label: r.label,
     status: r.status,
     ...r.limited_until !== void 0 ? { limited_until: r.limited_until } : {},
+    ...r.limited_reason !== void 0 ? { limited_reason: r.limited_reason } : {},
     is_caller: r.is_caller,
     provider: r.provider,
     weight: r.weight,
@@ -29292,7 +29299,7 @@ ${USAGE}`);
           modelsCell(r.models),
           r.share === void 0 ? String(r.weight) : `${r.weight} (${r.share}%)`,
           r.status,
-          r.limited_until ?? "-",
+          r.limited_until === void 0 ? "-" : `${r.limited_until}${r.limited_reason === void 0 ? "" : ` (${r.limited_reason})`}`,
           runsCell(r.runs),
           r.config_dir,
           r.command,
@@ -29467,6 +29474,7 @@ ${USAGE}`);
   }
   const entry = { ...registry2.accounts[i] };
   delete entry.limited_until;
+  delete entry.limited_reason;
   if (verb === "disable") entry.status = "disabled";
   else delete entry.status;
   registry2.accounts[i] = entry;
@@ -29512,7 +29520,7 @@ import { homedir as homedir4 } from "node:os";
 import { delimiter, isAbsolute as isAbsolute2, join as join5, resolve as resolve5 } from "node:path";
 
 // package.json
-var package_default = { version: "0.5.5" };
+var package_default = { version: "0.5.6" };
 
 // src/doctor.ts
 var SHARED_ITEMS = [
@@ -29641,7 +29649,8 @@ function checkState(stateDir, results) {
       command: typeof a.command === "string" && a.command !== "" ? a.command : "claude",
       provider: typeof a.provider === "string" && a.provider !== "" ? a.provider : "claude",
       ...typeof a.status === "string" && a.status !== "" ? { status: a.status } : {},
-      ...typeof a.limited_until === "string" && a.limited_until !== "" ? { limited_until: a.limited_until } : {}
+      ...typeof a.limited_until === "string" && a.limited_until !== "" ? { limited_until: a.limited_until } : {},
+      ...typeof a.limited_reason === "string" && a.limited_reason !== "" ? { limited_reason: a.limited_reason } : {}
     });
   }
   const ids = accounts.map((a) => a.id);
@@ -29722,7 +29731,7 @@ function checkAccount(account, callerDir, defaultDir, deps, results) {
     results.push({
       id: `${p}.status`,
       level: "warn",
-      message: `${account.id}: rate limited${account.limited_until === void 0 ? " with no end time (fix: wingman accounts clear-limited)" : ` until ${account.limited_until}`}; skipped as a target until then`
+      message: `${account.id}: ${account.limited_reason === void 0 ? "rate limited" : `limited (${account.limited_reason})`}${account.limited_until === void 0 ? " with no end time (fix: wingman accounts clear-limited)" : ` until ${account.limited_until}`}; skipped as a target until then`
     });
   } else {
     results.push({
@@ -31244,6 +31253,53 @@ function getAdapter(provider) {
   return adapter;
 }
 
+// src/breaker.ts
+var BREAKER_REASON = "consecutive_failures";
+var DEFAULT_FAILURE_THRESHOLD = 3;
+var DEFAULT_COOLDOWN_MINUTES = 30;
+var FAILURES = /* @__PURE__ */ new Set(["failed", "failed_no_report"]);
+var SUCCESSES = /* @__PURE__ */ new Set(["done", "partial"]);
+var MAX_COOLDOWN_MINUTES = 7 * 24 * 60;
+function wholeNumber(raw, fallback, min, max) {
+  if (raw === void 0 || !/^\d+$/.test(raw)) return fallback;
+  return Math.min(Math.max(Number(raw), min), max);
+}
+function breakerConfig(env = process.env) {
+  return {
+    threshold: wholeNumber(env.WINGMAN_BREAKER_FAILURES, DEFAULT_FAILURE_THRESHOLD, 0, 1e3),
+    cooldownMs: wholeNumber(
+      env.WINGMAN_BREAKER_COOLDOWN_MINUTES,
+      DEFAULT_COOLDOWN_MINUTES,
+      1,
+      MAX_COOLDOWN_MINUTES
+    ) * 6e4
+  };
+}
+function consecutiveFailures(runs, account) {
+  const finished = runs.filter((r) => r.account === account && r.finished_at !== void 0).sort(
+    (a, b) => b.finished_at.localeCompare(a.finished_at) || b.created_at.localeCompare(a.created_at)
+  );
+  let count = 0;
+  for (const run of finished) {
+    if (SUCCESSES.has(run.status)) break;
+    if (FAILURES.has(run.status)) count += 1;
+  }
+  return count;
+}
+async function tripBreaker(account, config2 = breakerConfig(), runs = listRuns(), now = /* @__PURE__ */ new Date()) {
+  if (config2.threshold === 0 || consecutiveFailures(runs, account) < config2.threshold) {
+    return false;
+  }
+  const entry = (await loadAccounts()).accounts.find((a) => a.id === account);
+  if (entry === void 0 || isLimited(entry, now)) return false;
+  try {
+    await markLimited(account, new Date(now.getTime() + config2.cooldownMs), BREAKER_REASON);
+  } catch {
+    return false;
+  }
+  return true;
+}
+
 // src/snapshot.ts
 import { createHash as createHash3 } from "node:crypto";
 import { existsSync as existsSync6, readFileSync as readFileSync6, readdirSync as readdirSync5, statSync as statSync3 } from "node:fs";
@@ -31528,6 +31584,14 @@ ${commitNote}` };
   if (sessionRateLimit) patch.rate_limit = sessionRateLimit;
   if (outcome.status === "rate_limited") {
     await recordRateLimit(current2.account, rejectedRateLimit);
+  } else if (outcome.status === "failed" || outcome.status === "failed_no_report") {
+    const ended = {
+      ...current2,
+      status: outcome.status,
+      finished_at: (/* @__PURE__ */ new Date()).toISOString()
+    };
+    const others = listRuns().filter((r) => r.id !== runId);
+    await tripBreaker(current2.account, breakerConfig(), [...others, ended]).catch(() => false);
   }
   try {
     updateStatus(runId, outcome.status, patch);
@@ -40022,8 +40086,9 @@ async function chooseAccount(env, accountId, random, now) {
     }
     if (isLimited(account, now)) {
       const until = account.limited_until === void 0 ? "no end time, until cleared" : `limited_until ${account.limited_until}`;
+      const why = account.limited_reason === void 0 ? "" : `, ${account.limited_reason}`;
       throw new Error(
-        `Account "${accountId}" is rate limited (${until}); pick another account${alternativesHint(await alternativesTo(env, accountId, now))}`
+        `Account "${accountId}" is rate limited (${until}${why}); pick another account${alternativesHint(await alternativesTo(env, accountId, now))}`
       );
     }
     if (!isActive(account, now)) {
@@ -40036,7 +40101,7 @@ async function chooseAccount(env, accountId, random, now) {
   const pool = targets.filter((a) => isActive(a, now));
   if (pool.length === 0) {
     const limited = targets.filter((a) => isLimited(a, now));
-    const note = limited.length === 0 ? "" : `; rate limited: ${limited.map((a) => `${a.id} (limited_until ${a.limited_until ?? "none"})`).join(", ")}`;
+    const note = limited.length === 0 ? "" : `; rate limited: ${limited.map((a) => `${a.id} (limited_until ${a.limited_until ?? "none"}${a.limited_reason === void 0 ? "" : `, ${a.limited_reason}`})`).join(", ")}`;
     throw new Error(
       `No other active account is registered to run on${note}; see \`wingman accounts list\``
     );
@@ -40270,7 +40335,7 @@ function buildServer(deps = {}) {
   server.registerTool(
     "wingman_accounts",
     {
-      description: "List the registered accounts: id, label, status (active, disabled or rate_limited, with limited_until while limited; a limited account is skipped until then), is_caller (your own profile, never a target), provider and runs (finished runs by status). Read-only on purpose: an account entry names a command the runner executes, so no tool adds, changes or removes accounts; the Human does that with `wingman accounts ...` in a terminal.",
+      description: "List the registered accounts: id, label, status (active, disabled or rate_limited, with limited_until and, for a failure breaker trip, limited_reason while limited; a limited account is skipped until then), is_caller (your own profile, never a target), provider and runs (finished runs by status). Read-only on purpose: an account entry names a command the runner executes, so no tool adds, changes or removes accounts; the Human does that with `wingman accounts ...` in a terminal.",
       inputSchema: strictInput("wingman_accounts", {})
     },
     wrap(h.accounts)
