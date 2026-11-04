@@ -30,6 +30,7 @@ const statusSchema = z.enum([
   'partial',
   'blocked',
   'needs_input',
+  'no_status',
   'needs_caller',
   'failed',
   'failed_no_report',

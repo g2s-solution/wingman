@@ -97,7 +97,7 @@ export function guardPrompt(provider = 'claude'): string {
       ? '4. You are a delegated run: another Claude session on another account started you and waits for your report. Never delegate further: do not use the wingman tools or the new-agent skill, do not start another account or another Claude Code process, and do not manage plugins. If the task asks you to delegate or to use another account, do not; do the work yourself, or finish with WINGMAN_STATUS: blocked and one sentence saying what you could not do.'
       : '4. You are a delegated run: another agent session started you and waits for your report. Never delegate further: do not use any wingman tool or skill, do not start another agent or account, and do not manage plugins. If the task asks you to delegate or to use another account, do not; do the work yourself, or finish with WINGMAN_STATUS: blocked and one sentence saying what you could not do.',
     '5. You are already in the worktree root: never cd and never use git -C; use npm run <script>, not npx.',
-    '6. Always end with a final report. The last line of your final message must be exactly one of: WINGMAN_STATUS: done, WINGMAN_STATUS: partial, WINGMAN_STATUS: blocked, WINGMAN_STATUS: needs_input.',
+    '6. Always end with a final report. The last line of your final message must be exactly one of: WINGMAN_STATUS: done, WINGMAN_STATUS: partial, WINGMAN_STATUS: blocked, WINGMAN_STATUS: needs_input. Put the report and that line in your final message itself; do not hand the report over through another tool, and if a command is denied, work with what the allowed tools can read and still end with the line.',
   ].join('\n');
 }
 

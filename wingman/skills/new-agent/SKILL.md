@@ -47,6 +47,7 @@ Fallback checklist: when you use the built-in Agent tool instead of wingman, sta
 
 - `done` / `partial`: review as in step 5; for `partial`, list what remains and offer a new run.
 - `blocked`: show the report and ask the user.
+- `no_status`: the run finished but its final message had no `WINGMAN_STATUS:` line (often after a denied command). The report is usually still usable: read it, check `permission_denials` and the `hint`, and fix the prompt (allowed tools only, end with the status line) before starting a new run.
 - `needs_input`: relay the question; the answer goes into a new run with a fresh prompt.
 - `needs_caller`: something must be done in the caller session: a plugin install or update, or a guardrail trip (the base branch, the caller branch ref, the git config or the git hooks changed while the run was active). For a plugin, do it and start a new run; for a guardrail note, inspect the refs with `git log --oneline` (never print config values) and decide with the user.
 - `rate_limited`: tell the user when the limit resets. The caller decides to wait or start a new run on another account; never reroute automatically.
