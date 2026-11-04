@@ -16,6 +16,10 @@ The order follows dependencies: first make the public project healthy, safe and 
 
 **v0.4.1** (0.4.1): denied commands are reported (`permission_denials`, plus a `hint` naming up to five denied heads); prompt rule 5 forbids `cd`, `git -C` and `npx`; every tool rejects unknown parameters; `wingman_result` adds `pages_left` and a `next` line; `wingman_cleanup accept` returns the run branch and a capped `diff_stat`; default `max_turns` per preset.
 
+**v0.5.5**: weighted account selection (`weight`, `wingman accounts set-weight`; share shown in `accounts list`).
+
+**v0.5.6**: failure circuit breaker: 3 failed runs in a row limit an account for 30 minutes (`limited_reason: consecutive_failures`).
+
 **v0.5** (0.5.0 to 0.5.4): providers other than Claude Code. The adapter registry picks the adapter from the account's `provider`; accounts can set a model per tier (`--haiku`, `--sonnet`, `--opus`); Codex (`codex exec`, sandbox by preset, wingman commits for it) and OpenCode (`opencode run`, per-run permission config, XDG-isolated profile) run behind the same `wingman_*` tools and masked, paged report. Guardrails are weaker than for Claude (prompt-level plus the sandbox or permission config); see the README.
 
 **v0.1.x** (patch releases): CI actions pinned by SHA and Dependabot; code of conduct, issue and PR templates, release checklist (`docs/RELEASING.md`); timing-dependent tests replaced by polling; retention and deletion of `~/.wingman` documented.

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Event shapes captured from `codex exec --json` (codex-cli 0.163), text replaced.
-import { appendFileSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 
@@ -37,6 +37,11 @@ if (mode === 'edit_env') {
   const cwd = argv[argv.indexOf('-C') + 1];
   writeFileSync(join(cwd, 'edited.txt'), 'ok\n');
   writeFileSync(join(cwd, '.env'), 'PLACEHOLDER=1\n');
+}
+if (mode === 'edit_env_unicode') {
+  const cwd = argv[argv.indexOf('-C') + 1];
+  mkdirSync(join(cwd, 'é'));
+  writeFileSync(join(cwd, 'é', '.env'), 'PLACEHOLDER=1\n');
 }
 if (mode === 'edit_link') {
   const cwd = argv[argv.indexOf('-C') + 1];

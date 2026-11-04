@@ -66,6 +66,28 @@ describe('maskSecrets', () => {
     );
   });
 
+  it('masks Authorization values of any scheme, with or without one', () => {
+    expect(maskSecrets('Authorization: Token abc123def')).toBe('Authorization: Token [MASKED]');
+    expect(maskSecrets('authorization: ApiKey k-9f8e7d')).toBe('authorization: ApiKey [MASKED]');
+    expect(maskSecrets('Authorization: rawvalue123 next')).toBe('Authorization: [MASKED] next');
+    expect(maskSecrets('{"Authorization":"Token t0k3n"}')).toBe(
+      '{"Authorization":"Token [MASKED]"}',
+    );
+    expect(maskSecrets('Authorization: Bearer abc.def')).toBe('Authorization: Bearer [MASKED]');
+  });
+
+  it('masks Stripe live, Google, npm and Hugging Face key shapes', () => {
+    for (const key of [
+      `sk_live_${'a1B2c3D4'.repeat(3)}`,
+      `rk_live_${'a1B2c3D4'.repeat(3)}`,
+      `AIza${'a1B2c3D4'.repeat(5)}`,
+      `npm_${'a1B2c3D4'.repeat(5)}`,
+      `hf_${'a1B2c3D4'.repeat(5)}`,
+    ]) {
+      expect(maskSecrets(`key is ${key} done`)).toBe('key is [MASKED] done');
+    }
+  });
+
   it('masks auth, credential and private_key assignments, but not author', () => {
     expect(maskSecrets('auth=abc123')).toBe('auth=[MASKED]');
     expect(maskSecrets('x-auth: v1')).toBe('x-auth: [MASKED]');
