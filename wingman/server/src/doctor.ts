@@ -50,6 +50,7 @@ interface RegistryAccount {
   provider: string;
   status?: string;
   limited_until?: string;
+  limited_reason?: string;
 }
 
 const defaultExec: ExecFn = (file, args, { env, timeoutMs }) =>
