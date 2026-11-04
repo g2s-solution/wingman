@@ -29649,7 +29649,8 @@ function checkState(stateDir, results) {
       command: typeof a.command === "string" && a.command !== "" ? a.command : "claude",
       provider: typeof a.provider === "string" && a.provider !== "" ? a.provider : "claude",
       ...typeof a.status === "string" && a.status !== "" ? { status: a.status } : {},
-      ...typeof a.limited_until === "string" && a.limited_until !== "" ? { limited_until: a.limited_until } : {}
+      ...typeof a.limited_until === "string" && a.limited_until !== "" ? { limited_until: a.limited_until } : {},
+      ...typeof a.limited_reason === "string" && a.limited_reason !== "" ? { limited_reason: a.limited_reason } : {}
     });
   }
   const ids = accounts.map((a) => a.id);
@@ -29730,7 +29731,7 @@ function checkAccount(account, callerDir, defaultDir, deps, results) {
     results.push({
       id: `${p}.status`,
       level: "warn",
-      message: `${account.id}: rate limited${account.limited_until === void 0 ? " with no end time (fix: wingman accounts clear-limited)" : ` until ${account.limited_until}`}; skipped as a target until then`
+      message: `${account.id}: ${account.limited_reason === void 0 ? "rate limited" : `limited (${account.limited_reason})`}${account.limited_until === void 0 ? " with no end time (fix: wingman accounts clear-limited)" : ` until ${account.limited_until}`}; skipped as a target until then`
     });
   } else {
     results.push({
@@ -31258,18 +31259,26 @@ var DEFAULT_FAILURE_THRESHOLD = 3;
 var DEFAULT_COOLDOWN_MINUTES = 30;
 var FAILURES = /* @__PURE__ */ new Set(["failed", "failed_no_report"]);
 var SUCCESSES = /* @__PURE__ */ new Set(["done", "partial"]);
-function positiveInt(raw, fallback) {
+var MAX_COOLDOWN_MINUTES = 7 * 24 * 60;
+function wholeNumber(raw, fallback, min, max) {
   if (raw === void 0 || !/^\d+$/.test(raw)) return fallback;
-  return Number(raw);
+  return Math.min(Math.max(Number(raw), min), max);
 }
 function breakerConfig(env = process.env) {
   return {
-    threshold: positiveInt(env.WINGMAN_BREAKER_FAILURES, DEFAULT_FAILURE_THRESHOLD),
-    cooldownMs: positiveInt(env.WINGMAN_BREAKER_COOLDOWN_MINUTES, DEFAULT_COOLDOWN_MINUTES) * 6e4
+    threshold: wholeNumber(env.WINGMAN_BREAKER_FAILURES, DEFAULT_FAILURE_THRESHOLD, 0, 1e3),
+    cooldownMs: wholeNumber(
+      env.WINGMAN_BREAKER_COOLDOWN_MINUTES,
+      DEFAULT_COOLDOWN_MINUTES,
+      1,
+      MAX_COOLDOWN_MINUTES
+    ) * 6e4
   };
 }
 function consecutiveFailures(runs, account) {
-  const finished = runs.filter((r) => r.account === account && r.finished_at !== void 0).sort((a, b) => b.finished_at.localeCompare(a.finished_at));
+  const finished = runs.filter((r) => r.account === account && r.finished_at !== void 0).sort(
+    (a, b) => b.finished_at.localeCompare(a.finished_at) || b.created_at.localeCompare(a.created_at)
+  );
   let count = 0;
   for (const run of finished) {
     if (SUCCESSES.has(run.status)) break;
@@ -40326,7 +40335,7 @@ function buildServer(deps = {}) {
   server.registerTool(
     "wingman_accounts",
     {
-      description: "List the registered accounts: id, label, status (active, disabled or rate_limited, with limited_until while limited; a limited account is skipped until then), is_caller (your own profile, never a target), provider and runs (finished runs by status). Read-only on purpose: an account entry names a command the runner executes, so no tool adds, changes or removes accounts; the Human does that with `wingman accounts ...` in a terminal.",
+      description: "List the registered accounts: id, label, status (active, disabled or rate_limited, with limited_until and, for a failure breaker trip, limited_reason while limited; a limited account is skipped until then), is_caller (your own profile, never a target), provider and runs (finished runs by status). Read-only on purpose: an account entry names a command the runner executes, so no tool adds, changes or removes accounts; the Human does that with `wingman accounts ...` in a terminal.",
       inputSchema: strictInput("wingman_accounts", {})
     },
     wrap(h.accounts)

@@ -53,6 +53,7 @@ function run(status: RunStatus, minute: number, acct = 'a'): RunMeta {
     id: `r${minute}${acct}`,
     account: acct,
     status,
+    created_at: new Date(T0.getTime() + minute * 60_000).toISOString(),
     finished_at: new Date(T0.getTime() + minute * 60_000).toISOString(),
   } as RunMeta;
 }
@@ -79,6 +80,22 @@ describe('consecutiveFailures', () => {
     expect(consecutiveFailures([run('failed', 1, 'b'), run('failed', 2, 'b')], 'a')).toBe(0);
   });
 
+  it('breaks a finished_at tie by created_at, newest first', () => {
+    const t = new Date(T0).toISOString();
+    const done = {
+      ...run('done', 5),
+      finished_at: t,
+      created_at: '2026-11-01T00:00:01Z',
+    } as RunMeta;
+    const failed = {
+      ...run('failed', 5),
+      finished_at: t,
+      created_at: '2026-11-01T00:00:02Z',
+    } as RunMeta;
+    expect(consecutiveFailures([done, failed], 'a')).toBe(1);
+    expect(consecutiveFailures([failed, done], 'a')).toBe(1);
+  });
+
   it('skips needs_input, cancelled, blocked and rate_limited without counting or resetting', () => {
     const runs = [
       run('failed', 1),
@@ -103,6 +120,10 @@ describe('breakerConfig', () => {
       breakerConfig({ WINGMAN_BREAKER_FAILURES: 'x', WINGMAN_BREAKER_COOLDOWN_MINUTES: '-1' }),
     ).toEqual({ threshold: 3, cooldownMs: 30 * 60_000 });
     expect(breakerConfig({ WINGMAN_BREAKER_FAILURES: '0' }).threshold).toBe(0);
+    expect(breakerConfig({ WINGMAN_BREAKER_COOLDOWN_MINUTES: '0' }).cooldownMs).toBe(60_000);
+    expect(breakerConfig({ WINGMAN_BREAKER_COOLDOWN_MINUTES: '99999999' }).cooldownMs).toBe(
+      7 * 24 * 60 * 60_000,
+    );
   });
 });
 

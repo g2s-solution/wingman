@@ -16,17 +16,24 @@ export interface BreakerConfig {
   cooldownMs: number;
 }
 
-function positiveInt(raw: string | undefined, fallback: number): number {
+const MAX_COOLDOWN_MINUTES = 7 * 24 * 60;
+
+function wholeNumber(raw: string | undefined, fallback: number, min: number, max: number): number {
   if (raw === undefined || !/^\d+$/.test(raw)) return fallback;
-  return Number(raw);
+  return Math.min(Math.max(Number(raw), min), max);
 }
 
 /** `WINGMAN_BREAKER_FAILURES=0` turns the breaker off. */
 export function breakerConfig(env: NodeJS.ProcessEnv = process.env): BreakerConfig {
   return {
-    threshold: positiveInt(env.WINGMAN_BREAKER_FAILURES, DEFAULT_FAILURE_THRESHOLD),
+    threshold: wholeNumber(env.WINGMAN_BREAKER_FAILURES, DEFAULT_FAILURE_THRESHOLD, 0, 1000),
     cooldownMs:
-      positiveInt(env.WINGMAN_BREAKER_COOLDOWN_MINUTES, DEFAULT_COOLDOWN_MINUTES) * 60_000,
+      wholeNumber(
+        env.WINGMAN_BREAKER_COOLDOWN_MINUTES,
+        DEFAULT_COOLDOWN_MINUTES,
+        1,
+        MAX_COOLDOWN_MINUTES,
+      ) * 60_000,
   };
 }
 
@@ -34,7 +41,10 @@ export function breakerConfig(env: NodeJS.ProcessEnv = process.env): BreakerConf
 export function consecutiveFailures(runs: RunMeta[], account: string): number {
   const finished = runs
     .filter((r) => r.account === account && r.finished_at !== undefined)
-    .sort((a, b) => b.finished_at!.localeCompare(a.finished_at!));
+    .sort(
+      (a, b) =>
+        b.finished_at!.localeCompare(a.finished_at!) || b.created_at.localeCompare(a.created_at),
+    );
   let count = 0;
   for (const run of finished) {
     if (SUCCESSES.has(run.status)) break;

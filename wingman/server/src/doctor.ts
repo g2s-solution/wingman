@@ -190,6 +190,9 @@ function checkState(stateDir: string, results: CheckResult[]): RegistryAccount[]
       ...(typeof a.limited_until === 'string' && a.limited_until !== ''
         ? { limited_until: a.limited_until }
         : {}),
+      ...(typeof a.limited_reason === 'string' && a.limited_reason !== ''
+        ? { limited_reason: a.limited_reason }
+        : {}),
     });
   }
   const ids = accounts.map((a) => a.id);
@@ -290,7 +293,7 @@ function checkAccount(
     results.push({
       id: `${p}.status`,
       level: 'warn',
-      message: `${account.id}: rate limited${account.limited_until === undefined ? ' with no end time (fix: wingman accounts clear-limited)' : ` until ${account.limited_until}`}; skipped as a target until then`,
+      message: `${account.id}: ${account.limited_reason === undefined ? 'rate limited' : `limited (${account.limited_reason})`}${account.limited_until === undefined ? ' with no end time (fix: wingman accounts clear-limited)' : ` until ${account.limited_until}`}; skipped as a target until then`,
     });
   } else {
     results.push({

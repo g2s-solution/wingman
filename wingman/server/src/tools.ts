@@ -472,7 +472,7 @@ export function buildServer(deps: ServerDeps = {}): McpServer {
     'wingman_accounts',
     {
       description:
-        'List the registered accounts: id, label, status (active, disabled or rate_limited, with limited_until while limited; a limited account is skipped until then), is_caller (your own profile, never a target), provider and runs (finished runs by status). Read-only on purpose: an account entry names a command the runner executes, so no tool adds, changes or removes accounts; the Human does that with `wingman accounts ...` in a terminal.',
+        'List the registered accounts: id, label, status (active, disabled or rate_limited, with limited_until and, for a failure breaker trip, limited_reason while limited; a limited account is skipped until then), is_caller (your own profile, never a target), provider and runs (finished runs by status). Read-only on purpose: an account entry names a command the runner executes, so no tool adds, changes or removes accounts; the Human does that with `wingman accounts ...` in a terminal.',
       inputSchema: strictInput('wingman_accounts', {}),
     },
     wrap(h.accounts),
