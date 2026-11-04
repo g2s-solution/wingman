@@ -340,7 +340,7 @@ describe('result hints and paging', () => {
 
   it('adds no denial hint when partial has none or the run is done', async () => {
     const client = await connect();
-    const mk = (status: 'partial' | 'done', permission_denials: string[]) => {
+    const mk = (status: 'partial' | 'no_status' | 'done', permission_denials: string[]) => {
       const meta = createRun({
         account: 'target',
         cwd: '/x',
@@ -351,7 +351,7 @@ describe('result hints and paging', () => {
       updateStatus(meta.id, status, { permission_denials });
       return meta.id;
     };
-    for (const id of [mk('partial', []), mk('done', ['Bash(cd /w)'])]) {
+    for (const id of [mk('partial', []), mk('no_status', []), mk('done', ['Bash(cd /w)'])]) {
       expect((await call(client, 'wingman_result', { run_id: id })).data).not.toHaveProperty(
         'hint',
       );
