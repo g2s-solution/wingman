@@ -15,7 +15,7 @@ Swapping roles needs no feature: start `claude` under another profile and that p
 
 ## Account registry
 
-`~/.wingman/accounts.json`. It never holds credentials; login stays in each profile's own config dir. It lists the profiles; the caller names one by `id` or omits it and the server picks one at random among eligible targets (see Account selection). Selection policy, tags and scope arrive in v0.5 (see ROADMAP).
+`~/.wingman/accounts.json`. It never holds credentials; login stays in each profile's own config dir. It lists the profiles; the caller names one by `id` or omits it and the server picks one at random among eligible targets (see Account selection). Tags, priority and scope arrive in v0.6 (see ROADMAP).
 
 The CLI `wingman accounts list|add|disable|enable|remove` is the normal way to change it (`another-login.sh` calls `accounts add --upsert`); every write goes through the atomic `saveAccounts` (directory 0700, file 0600) and never touches credentials or profile directories. Status values are `active` (also when the field is absent) and `disabled`. The MCP tool `wingman_accounts` is read-only (id, label, status, `is_caller`, provider; no command, no paths) and no tool mutates the registry: an entry's `command` is executed by the runner, so a prompt-injected session must not be able to add one. Mutations stay in the CLI, run by the Human in a terminal.
 
@@ -26,6 +26,7 @@ The CLI `wingman accounts list|add|disable|enable|remove` is the normal way to c
 | `provider` | agent backend, default `claude` |
 | `command` | executable that starts the agent for this profile, default `claude`; for a profile made by `another-login.sh` it is the launcher (for example `~/.local/bin/claude-second`), which sets `CLAUDE_CONFIG_DIR` and loads that profile's credential |
 | `scope` | data boundary (for example `company`); a run only goes to an account whose scope matches the work (v0.6) |
+| `weight` | relative chance in the random pick, default 1, 0 = only when named |
 | `tags`, `priority` | selection hints (v0.6) |
 | `status` | `active` (or absent), `disabled`, `rate_limited` (written back automatically when a run ends `rate_limited`, or by `wingman accounts mark-limited`) |
 | `limited_until` | ISO time (UTC) when `rate_limited` ends; optional, so entries written before v0.4 stay valid |
@@ -41,7 +42,7 @@ Limit state (v0.4):
 
 ## Account selection
 
-`account` is optional in `wingman_start`. When omitted, the server picks one at random among the registry targets that are not the caller's profile and are active (not `disabled`, not currently limited). When given, it must be a target that is active: a limited account is refused with an error naming `limited_until`. When a start is refused for a limit, or a run ends `rate_limited`, the tool response lists the other active accounts (`other_active_accounts` and a `hint` on `wingman_status` and `wingman_result`; the refusal message for a start); nothing is rerouted.
+`account` is optional in `wingman_start`. When omitted, the server picks one at random among the registry targets that are not the caller's profile and are active (not `disabled`, not currently limited), with probability `weight / total weight` (`weight` defaults to 1; 0 is never picked automatically, and a start is refused when every candidate has weight 0). Limited and disabled accounts leave the pool, so their share goes to the others. When given, it must be a target that is active: a limited account is refused with an error naming `limited_until`. When a start is refused for a limit, or a run ends `rate_limited`, the tool response lists the other active accounts (`other_active_accounts` and a `hint` on `wingman_status` and `wingman_result`; the refusal message for a start); nothing is rerouted.
 
 v0.6 (skill `pick-account`) replaces the random pick with a smarter one:
 

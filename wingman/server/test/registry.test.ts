@@ -4,7 +4,16 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { accountsFile } from '../src/paths.js';
 import { callerProfile } from '../src/self.js';
-import { getAccount, loadAccounts, saveAccounts, targetsFor } from '../src/registry.js';
+import {
+  getAccount,
+  loadAccounts,
+  pickWeighted,
+  saveAccounts,
+  setWeight,
+  targetsFor,
+  weightOf,
+} from '../src/registry.js';
+import type { Account } from '../src/types.js';
 
 let root: string;
 const prevHome = process.env.WINGMAN_HOME;
@@ -91,5 +100,69 @@ describe('registry', () => {
       ['them'],
     );
     expect((await targetsFor(join(root, 'unrelated'))).map((a) => a.id)).toEqual(['me', 'them']);
+  });
+});
+
+describe('weighted selection', () => {
+  const acct = (id: string, weight?: number): Account => ({
+    id,
+    label: id,
+    config_dir: join(root, id),
+    provider: 'claude',
+    command: 'claude',
+    ...(weight !== undefined ? { weight } : {}),
+  });
+
+  it('defaults the weight to 1', () => {
+    expect(weightOf(acct('a'))).toBe(1);
+    expect(weightOf(acct('a', 70))).toBe(70);
+  });
+
+  it('splits the unit interval in proportion to the weights', () => {
+    const pool = [acct('a', 70), acct('b', 30)];
+    expect(pickWeighted(pool, () => 0)?.id).toBe('a');
+    expect(pickWeighted(pool, () => 0.6999)?.id).toBe('a');
+    expect(pickWeighted(pool, () => 0.7)?.id).toBe('b');
+    expect(pickWeighted(pool, () => 0.9999)?.id).toBe('b');
+  });
+
+  it('treats an unset weight as 1 next to explicit weights', () => {
+    const pool = [acct('a'), acct('b', 3)];
+    expect(pickWeighted(pool, () => 0.24)?.id).toBe('a');
+    expect(pickWeighted(pool, () => 0.26)?.id).toBe('b');
+  });
+
+  it('never picks weight 0 and returns undefined when nothing can be picked', () => {
+    expect(pickWeighted([acct('a', 0), acct('b', 1)], () => 0)?.id).toBe('b');
+    expect(pickWeighted([acct('a', 0)], () => 0)).toBeUndefined();
+    expect(pickWeighted([], () => 0)).toBeUndefined();
+  });
+
+  it('approaches the requested ratio over many draws', () => {
+    const pool = [acct('a', 70), acct('b', 30)];
+    let a = 0;
+    const n = 10000;
+    for (let i = 0; i < n; i++) if (pickWeighted(pool, () => (i + 0.5) / n)?.id === 'a') a++;
+    expect(a / n).toBeCloseTo(0.7, 2);
+  });
+
+  it('rejects weights that are negative, non-numeric or large enough to overflow the total', async () => {
+    for (const weight of [-1, '5', 1e308, 1000001]) {
+      await expect(
+        saveAccounts({ accounts: [{ ...acct('a'), weight } as unknown as Account] }),
+      ).rejects.toThrow();
+    }
+    await saveAccounts({ accounts: [acct('a', 1e6), acct('b', 1e6)] });
+    expect(pickWeighted((await loadAccounts()).accounts, () => 0.99)?.id).toBe('b');
+  });
+
+  it('persists a weight, removes it again and rejects a negative one', async () => {
+    await saveAccounts({ accounts: [acct('a')] });
+    await setWeight('a', 5);
+    expect((await getAccount('a')).weight).toBe(5);
+    await setWeight('a', undefined);
+    expect((await getAccount('a')).weight).toBeUndefined();
+    await expect(setWeight('a', -1)).rejects.toThrow();
+    await expect(setWeight('nope', 1)).rejects.toThrow(/nope/);
   });
 });

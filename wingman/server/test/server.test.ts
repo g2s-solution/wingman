@@ -428,6 +428,41 @@ describe('account selection', () => {
     }
   });
 
+  it('honours weights and refuses when every candidate has weight 0', async () => {
+    const ok = launcher('ok');
+    const a = (id: string, dir: string, weight: number) => ({
+      ...acct(id, dir),
+      command: ok.command,
+      weight,
+    });
+    await saveAccounts({
+      accounts: [
+        a('own', callerDir, 1),
+        a('one', join(home, 'c1'), 70),
+        a('two', join(home, 'c3'), 30),
+      ],
+    });
+    expect(await pick(() => 0.69)).toBe('one');
+    expect(await pick(() => 0.71)).toBe('two');
+    await saveAccounts({
+      accounts: [
+        a('own', callerDir, 1),
+        a('one', join(home, 'c1'), 0),
+        a('two', join(home, 'c3'), 30),
+      ],
+    });
+    expect(await pick(() => 0)).toBe('two');
+    await saveAccounts({
+      accounts: [
+        a('own', callerDir, 1),
+        a('one', join(home, 'c1'), 0),
+        a('two', join(home, 'c3'), 0),
+      ],
+    });
+    const h = createHandlers({ env: callerEnv(), supervisorEntry: entry, random: () => 0 });
+    await expect(h.start({ prompt: 'x', cwd: tmp('cwd') })).rejects.toThrow(/weight 0/);
+  });
+
   it('errors when nobody else is available', async () => {
     const h = createHandlers({ env: callerEnv(), supervisorEntry: entry, random: () => 0 });
     await saveAccounts({ accounts: [] });

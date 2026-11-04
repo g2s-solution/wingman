@@ -28652,6 +28652,7 @@ var accountSchema = external_exports.object({
   command: external_exports.string().min(1).default("claude"),
   status: external_exports.string().min(1).optional(),
   limited_until: external_exports.string().min(1).optional(),
+  weight: external_exports.number().min(0).max(1e6).optional(),
   models: external_exports.object({
     haiku: external_exports.string().regex(MODEL_NAME).optional(),
     sonnet: external_exports.string().regex(MODEL_NAME).optional(),
@@ -28786,6 +28787,31 @@ function resolveModel(account, model) {
   if (model === void 0) return void 0;
   const tier = MODEL_TIERS.find((t) => t === model);
   return tier && account.models?.[tier] || model;
+}
+var DEFAULT_WEIGHT = 1;
+var MAX_WEIGHT = 1e6;
+function weightOf(account) {
+  return account.weight ?? DEFAULT_WEIGHT;
+}
+function pickWeighted(pool, random) {
+  const candidates = pool.filter((a) => weightOf(a) > 0);
+  const total = candidates.reduce((sum, a) => sum + weightOf(a), 0);
+  if (candidates.length === 0 || !(total > 0)) return void 0;
+  let point = random() * total;
+  for (const a of candidates) {
+    point -= weightOf(a);
+    if (point < 0) return a;
+  }
+  return candidates[candidates.length - 1];
+}
+async function setWeight(id, weight2) {
+  const registry2 = await loadAccounts();
+  const i = indexOfAccount(registry2, id);
+  const entry = { ...registry2.accounts[i] };
+  if (weight2 === void 0) delete entry.weight;
+  else entry.weight = weight2;
+  registry2.accounts[i] = entry;
+  await saveAccounts(registry2);
 }
 
 // src/runs.ts
@@ -29125,16 +29151,21 @@ var USAGE = `usage: wingman accounts list [--json]
        wingman accounts enable ID
        wingman accounts mark-limited ID --until <ISO time with Z or offset, or epoch seconds>
        wingman accounts clear-limited ID
+       wingman accounts set-weight ID <number >= 0, or default>
        wingman accounts remove ID --yes`;
 var AccountsUsageError = class extends Error {
 };
 function accountRows(accounts, caller, now = /* @__PURE__ */ new Date(), counts = runCountsByAccount()) {
+  const eligible = (a) => canonical2(a.config_dir) !== caller && effectiveStatus(a, now) === "active" && weightOf(a) > 0;
+  const total = accounts.filter(eligible).reduce((sum, a) => sum + weightOf(a), 0);
   return accounts.map((a) => ({
     id: a.id,
     label: a.label,
     status: effectiveStatus(a, now),
     ...isLimited(a, now) && a.limited_until !== void 0 ? { limited_until: a.limited_until } : {},
     provider: a.provider,
+    weight: weightOf(a),
+    ...eligible(a) ? { share: Math.round(weightOf(a) / total * 1e3) / 10 } : {},
     ...a.models !== void 0 && Object.keys(a.models).length > 0 ? { models: a.models } : {},
     config_dir: a.config_dir,
     command: a.command,
@@ -29150,6 +29181,8 @@ function publicAccounts(accounts, caller, now = /* @__PURE__ */ new Date(), coun
     ...r.limited_until !== void 0 ? { limited_until: r.limited_until } : {},
     is_caller: r.is_caller,
     provider: r.provider,
+    weight: r.weight,
+    ...r.share !== void 0 ? { share: r.share } : {},
     ...r.models !== void 0 ? { models: r.models } : {},
     runs: r.runs
   }));
@@ -29244,6 +29277,7 @@ ${USAGE}`);
           "LABEL",
           "PROVIDER",
           "MODELS",
+          "WEIGHT",
           "STATUS",
           "LIMITED_UNTIL",
           "RUNS",
@@ -29256,6 +29290,7 @@ ${USAGE}`);
           r.label,
           r.provider,
           modelsCell(r.models),
+          r.share === void 0 ? String(r.weight) : `${r.weight} (${r.share}%)`,
           r.status,
           r.limited_until ?? "-",
           runsCell(r.runs),
@@ -29300,6 +29335,33 @@ ${USAGE}`);
     throw new AccountsUsageError(err.message);
   }
   write(`marked ${id} limited until ${until.toISOString()}`);
+  return 0;
+}
+async function weight(args) {
+  const p = parse3(args, [], []);
+  const [id, raw] = p.positional;
+  if (id === void 0 || raw === void 0 || p.positional.length > 2) {
+    throw new AccountsUsageError(`set-weight needs an account id and a weight
+${USAGE}`);
+  }
+  const registry2 = await loadAccounts();
+  if (!registry2.accounts.some((a) => a.id === id)) {
+    const known = registry2.accounts.map((a) => a.id).join(", ") || "none";
+    throw new AccountsUsageError(`unknown account "${id}". Registered accounts: ${known}`);
+  }
+  if (raw === "default") {
+    await setWeight(id, void 0);
+    write(`${id} weight reset to the default (1)`);
+    return 0;
+  }
+  const value = Number(raw);
+  if (!/^\d+(\.\d+)?$/.test(raw) || value > MAX_WEIGHT) {
+    throw new AccountsUsageError(
+      `the weight must be a plain number from 0 to ${MAX_WEIGHT}, or the word default`
+    );
+  }
+  await setWeight(id, value);
+  write(`${id} weight set to ${value}${value === 0 ? " (never picked unless named)" : ""}`);
   return 0;
 }
 async function add(args) {
@@ -29421,6 +29483,8 @@ async function accountsCommand(args, now = () => /* @__PURE__ */ new Date()) {
       case "mark-limited":
       case "clear-limited":
         return await limit(sub, rest, now);
+      case "set-weight":
+        return await weight(rest);
       case "add":
         return await add(rest);
       case "disable":
@@ -29448,7 +29512,7 @@ import { homedir as homedir4 } from "node:os";
 import { delimiter, isAbsolute as isAbsolute2, join as join5, resolve as resolve5 } from "node:path";
 
 // package.json
-var package_default = { version: "0.5.4" };
+var package_default = { version: "0.5.5" };
 
 // src/doctor.ts
 var SHARED_ITEMS = [
@@ -39977,11 +40041,17 @@ async function chooseAccount(env, accountId, random, now) {
       `No other active account is registered to run on${note}; see \`wingman accounts list\``
     );
   }
-  return pool[Math.min(Math.floor(random() * pool.length), pool.length - 1)];
+  const picked = pickWeighted(pool, random);
+  if (picked === void 0) {
+    throw new Error(
+      `Every other active account has weight 0 (${pool.map((a) => a.id).join(", ")}); pass one as "account" or raise a weight with \`wingman accounts set-weight\``
+    );
+  }
+  return picked;
 }
 var startInput = {
   account: external_exports.string().min(1).optional().describe(
-    "Registry id of the account to run on (never your own); omitted: a random active one."
+    "Registry id of the account to run on (never your own); omitted: a random active one, weighted by the per-account weight."
   ),
   prompt: external_exports.string().min(1).max(2e5).describe("The full task brief for the run."),
   cwd: external_exports.string().min(1).describe("Absolute path of the project directory."),

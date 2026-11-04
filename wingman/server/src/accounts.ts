@@ -8,7 +8,10 @@ import {
   isLimited,
   loadAccounts,
   markLimited,
+  MAX_WEIGHT,
   saveAccounts,
+  setWeight,
+  weightOf,
 } from './registry.js';
 import { runCountsByAccount, type AccountRunCounts } from './runs.js';
 import { callerProfile, canonical } from './self.js';
@@ -24,6 +27,7 @@ const USAGE = `usage: wingman accounts list [--json]
        wingman accounts enable ID
        wingman accounts mark-limited ID --until <ISO time with Z or offset, or epoch seconds>
        wingman accounts clear-limited ID
+       wingman accounts set-weight ID <number >= 0, or default>
        wingman accounts remove ID --yes`;
 
 class AccountsUsageError extends Error {}
@@ -37,6 +41,9 @@ export interface AccountRow {
   /** Present only while the account is limited. */
   limited_until?: string;
   provider: string;
+  weight: number;
+  /** Percent chance of being picked when the caller omits the account; absent when not eligible. */
+  share?: number;
   models?: Account['models'];
   config_dir: string;
   command: string;
@@ -52,6 +59,8 @@ export interface PublicAccount {
   limited_until?: string;
   is_caller: boolean;
   provider: string;
+  weight: number;
+  share?: number;
   models?: Account['models'];
   runs: AccountRunCounts;
 }
@@ -62,6 +71,9 @@ export function accountRows(
   now: Date = new Date(),
   counts: Record<string, AccountRunCounts> = runCountsByAccount(),
 ): AccountRow[] {
+  const eligible = (a: Account): boolean =>
+    canonical(a.config_dir) !== caller && effectiveStatus(a, now) === 'active' && weightOf(a) > 0;
+  const total = accounts.filter(eligible).reduce((sum, a) => sum + weightOf(a), 0);
   return accounts.map((a) => ({
     id: a.id,
     label: a.label,
@@ -70,6 +82,8 @@ export function accountRows(
       ? { limited_until: a.limited_until }
       : {}),
     provider: a.provider,
+    weight: weightOf(a),
+    ...(eligible(a) ? { share: Math.round((weightOf(a) / total) * 1000) / 10 } : {}),
     ...(a.models !== undefined && Object.keys(a.models).length > 0 ? { models: a.models } : {}),
     config_dir: a.config_dir,
     command: a.command,
@@ -91,6 +105,8 @@ export function publicAccounts(
     ...(r.limited_until !== undefined ? { limited_until: r.limited_until } : {}),
     is_caller: r.is_caller,
     provider: r.provider,
+    weight: r.weight,
+    ...(r.share !== undefined ? { share: r.share } : {}),
     ...(r.models !== undefined ? { models: r.models } : {}),
     runs: r.runs,
   }));
@@ -214,6 +230,7 @@ async function list(args: string[], now: Clock): Promise<number> {
           'LABEL',
           'PROVIDER',
           'MODELS',
+          'WEIGHT',
           'STATUS',
           'LIMITED_UNTIL',
           'RUNS',
@@ -226,6 +243,7 @@ async function list(args: string[], now: Clock): Promise<number> {
           r.label,
           r.provider,
           modelsCell(r.models),
+          r.share === undefined ? String(r.weight) : `${r.weight} (${r.share}%)`,
           r.status,
           r.limited_until ?? '-',
           runsCell(r.runs),
@@ -274,6 +292,33 @@ async function limit(
     throw new AccountsUsageError((err as Error).message);
   }
   write(`marked ${id} limited until ${until.toISOString()}`);
+  return 0;
+}
+
+async function weight(args: string[]): Promise<number> {
+  const p = parse(args, [], []);
+  const [id, raw] = p.positional;
+  if (id === undefined || raw === undefined || p.positional.length > 2) {
+    throw new AccountsUsageError(`set-weight needs an account id and a weight\n${USAGE}`);
+  }
+  const registry = await loadAccounts();
+  if (!registry.accounts.some((a) => a.id === id)) {
+    const known = registry.accounts.map((a) => a.id).join(', ') || 'none';
+    throw new AccountsUsageError(`unknown account "${id}". Registered accounts: ${known}`);
+  }
+  if (raw === 'default') {
+    await setWeight(id, undefined);
+    write(`${id} weight reset to the default (1)`);
+    return 0;
+  }
+  const value = Number(raw);
+  if (!/^\d+(\.\d+)?$/.test(raw) || value > MAX_WEIGHT) {
+    throw new AccountsUsageError(
+      `the weight must be a plain number from 0 to ${MAX_WEIGHT}, or the word default`,
+    );
+  }
+  await setWeight(id, value);
+  write(`${id} weight set to ${value}${value === 0 ? ' (never picked unless named)' : ''}`);
   return 0;
 }
 
@@ -399,6 +444,8 @@ export async function accountsCommand(
       case 'mark-limited':
       case 'clear-limited':
         return await limit(sub, rest, now);
+      case 'set-weight':
+        return await weight(rest);
       case 'add':
         return await add(rest);
       case 'disable':

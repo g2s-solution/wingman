@@ -104,9 +104,10 @@ The registry is a plain file (directory mode 0700, file mode 0600). `another-log
 Run these in a terminal: `node <plugin dir>/wingman/bin/wingman accounts <command>`.
 
 ```sh
-wingman accounts list [--json]            # id, label, provider, models, status, limited_until, runs by status, config_dir, command; marks your own profile
+wingman accounts list [--json]            # id, label, provider, models, weight and share, status, limited_until, runs by status, config_dir, command; marks your own profile
 wingman accounts add --id ID --config-dir DIR [--label L] [--command CMD] [--provider P]
                      [--haiku M] [--sonnet M] [--opus M] [--upsert]
+wingman accounts set-weight ID N          # selection weight (0 to 1000000, default 1) used when Claude does not name an account; 0 = only when named; `default` resets
 wingman accounts disable ID               # status disabled: never picked, and refused when named
 wingman accounts enable ID                # back to active
 wingman accounts mark-limited ID --until T   # T: ISO time with Z or an offset, a date (UTC) or epoch seconds
@@ -219,7 +220,7 @@ The skill drives these; you can also call them directly.
 
 | Tool | Purpose |
 |---|---|
-| `wingman_start` | start a run: `prompt` and `cwd` are required; `account`, `preset`, `model`, `max_turns`, `worktree`, `branch`, `lock_key`, `setup`, `allowed_tools` are optional. Omit `account` to get a random active target. `max_turns` defaults by preset (`readonly` 40, `edit-files` 100, `edit` 200); an explicit value wins, up to 1000. Unknown parameters are rejected with the key named. Then run `bin/wingman-wait <run id>` and call `wingman_result` |
+| `wingman_start` | start a run: `prompt` and `cwd` are required; `account`, `preset`, `model`, `max_turns`, `worktree`, `branch`, `lock_key`, `setup`, `allowed_tools` are optional. Omit `account` to get a random active target, chosen in proportion to each account's `weight`. `max_turns` defaults by preset (`readonly` 40, `edit-files` 100, `edit` 200); an explicit value wins, up to 1000. Unknown parameters are rejected with the key named. Then run `bin/wingman-wait <run id>` and call `wingman_result` |
 | `wingman_status` | state of a run, no report text; a `partial` run with denied commands gets a `hint` naming them (the tool, and for `Bash` the first two masked words of the command) |
 | `wingman_result` | the final report, masked, in pages (`offset`, `limit`; default 4000, max 8000 characters): keep calling with `result_next_offset` (see `pages_left` and `next`) until it is absent. On a running run it says `still running` and hints to wait with `bin/wingman-wait` |
 | `wingman_cancel` | stop a run |

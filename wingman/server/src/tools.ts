@@ -8,7 +8,14 @@ import { publicAccounts } from './accounts.js';
 import type { Account } from './types.js';
 import { DEFAULT_MAX_TURNS, TOOL_ITEM } from './guard.js';
 import { maskSecrets, safeSummary } from './mask.js';
-import { getAccount, isActive, isLimited, loadAccounts, targetsFor } from './registry.js';
+import {
+  getAccount,
+  isActive,
+  isLimited,
+  loadAccounts,
+  pickWeighted,
+  targetsFor,
+} from './registry.js';
 import { reconcile } from './reconcile.js';
 import {
   listRuns,
@@ -158,7 +165,13 @@ async function chooseAccount(
       `No other active account is registered to run on${note}; see \`wingman accounts list\``,
     );
   }
-  return pool[Math.min(Math.floor(random() * pool.length), pool.length - 1)]!;
+  const picked = pickWeighted(pool, random);
+  if (picked === undefined) {
+    throw new Error(
+      `Every other active account has weight 0 (${pool.map((a) => a.id).join(', ')}); pass one as "account" or raise a weight with \`wingman accounts set-weight\``,
+    );
+  }
+  return picked;
 }
 
 const startInput = {
@@ -167,7 +180,7 @@ const startInput = {
     .min(1)
     .optional()
     .describe(
-      'Registry id of the account to run on (never your own); omitted: a random active one.',
+      'Registry id of the account to run on (never your own); omitted: a random active one, weighted by the per-account weight.',
     ),
   prompt: z.string().min(1).max(200_000).describe('The full task brief for the run.'),
   cwd: z.string().min(1).describe('Absolute path of the project directory.'),

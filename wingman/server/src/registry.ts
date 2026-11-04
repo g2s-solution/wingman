@@ -26,6 +26,7 @@ const accountSchema = z
     command: z.string().min(1).default('claude'),
     status: z.string().min(1).optional(),
     limited_until: z.string().min(1).optional(),
+    weight: z.number().min(0).max(1e6).optional(),
     models: z
       .object({
         haiku: z.string().regex(MODEL_NAME).optional(),
@@ -206,4 +207,35 @@ export function resolveModel(account: Account, model: string | undefined): strin
   if (model === undefined) return undefined;
   const tier = MODEL_TIERS.find((t) => t === model);
   return (tier && account.models?.[tier]) || model;
+}
+
+export const DEFAULT_WEIGHT = 1;
+export const MAX_WEIGHT = 1e6;
+
+export function weightOf(account: Account): number {
+  return account.weight ?? DEFAULT_WEIGHT;
+}
+
+/** Picks one account with probability weight / total weight; accounts of weight 0 are never picked. `random` returns [0, 1). */
+export function pickWeighted(pool: Account[], random: () => number): Account | undefined {
+  const candidates = pool.filter((a) => weightOf(a) > 0);
+  const total = candidates.reduce((sum, a) => sum + weightOf(a), 0);
+  if (candidates.length === 0 || !(total > 0)) return undefined;
+  let point = random() * total;
+  for (const a of candidates) {
+    point -= weightOf(a);
+    if (point < 0) return a;
+  }
+  return candidates[candidates.length - 1];
+}
+
+/** Sets the weight; `undefined` removes it so the default applies. */
+export async function setWeight(id: string, weight: number | undefined): Promise<void> {
+  const registry = await loadAccounts();
+  const i = indexOfAccount(registry, id);
+  const entry = { ...registry.accounts[i]! };
+  if (weight === undefined) delete entry.weight;
+  else entry.weight = weight;
+  registry.accounts[i] = entry;
+  await saveAccounts(registry);
 }
