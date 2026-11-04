@@ -227,9 +227,7 @@ describe('codex run through the supervisor', () => {
     expect((await settle((await startRun(runOpts('ratelimit').opts)).id)).status).toBe(
       'rate_limited',
     );
-    expect((await settle((await startRun(runOpts('nomessage').opts)).id)).status).toBe(
-      'needs_input',
-    );
+    expect((await settle((await startRun(runOpts('nomessage').opts)).id)).status).toBe('no_status');
   });
 
   it('refuses max_turns and allowed_tools for codex before starting', async () => {
