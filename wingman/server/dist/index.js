@@ -28652,7 +28652,7 @@ var accountSchema = external_exports.object({
   command: external_exports.string().min(1).default("claude"),
   status: external_exports.string().min(1).optional(),
   limited_until: external_exports.string().min(1).optional(),
-  weight: external_exports.number().finite().nonnegative().optional(),
+  weight: external_exports.number().min(0).max(1e6).optional(),
   models: external_exports.object({
     haiku: external_exports.string().regex(MODEL_NAME).optional(),
     sonnet: external_exports.string().regex(MODEL_NAME).optional(),
@@ -28789,6 +28789,7 @@ function resolveModel(account, model) {
   return tier && account.models?.[tier] || model;
 }
 var DEFAULT_WEIGHT = 1;
+var MAX_WEIGHT = 1e6;
 function weightOf(account) {
   return account.weight ?? DEFAULT_WEIGHT;
 }
@@ -29354,8 +29355,10 @@ ${USAGE}`);
     return 0;
   }
   const value = Number(raw);
-  if (raw.trim() === "" || !Number.isFinite(value) || value < 0) {
-    throw new AccountsUsageError("the weight must be a number >= 0, or the word default");
+  if (!/^\d+(\.\d+)?$/.test(raw) || value > MAX_WEIGHT) {
+    throw new AccountsUsageError(
+      `the weight must be a plain number from 0 to ${MAX_WEIGHT}, or the word default`
+    );
   }
   await setWeight(id, value);
   write(`${id} weight set to ${value}${value === 0 ? " (never picked unless named)" : ""}`);

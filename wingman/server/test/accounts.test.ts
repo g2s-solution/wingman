@@ -418,6 +418,10 @@ describe('wingman accounts set-weight', () => {
       ['set-weight', 'a', '-2'],
       ['set-weight', 'a', ''],
       ['set-weight', 'a', 'Infinity'],
+      ['set-weight', 'a', '1e3'],
+      ['set-weight', 'a', '0x10'],
+      ['set-weight', 'a', '.5'],
+      ['set-weight', 'a', '1000001'],
       ['set-weight', 'a', '1', '2'],
       ['set-weight', 'nope', '1'],
     ]) {

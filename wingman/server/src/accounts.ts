@@ -8,6 +8,7 @@ import {
   isLimited,
   loadAccounts,
   markLimited,
+  MAX_WEIGHT,
   saveAccounts,
   setWeight,
   weightOf,
@@ -311,8 +312,10 @@ async function weight(args: string[]): Promise<number> {
     return 0;
   }
   const value = Number(raw);
-  if (raw.trim() === '' || !Number.isFinite(value) || value < 0) {
-    throw new AccountsUsageError('the weight must be a number >= 0, or the word default');
+  if (!/^\d+(\.\d+)?$/.test(raw) || value > MAX_WEIGHT) {
+    throw new AccountsUsageError(
+      `the weight must be a plain number from 0 to ${MAX_WEIGHT}, or the word default`,
+    );
   }
   await setWeight(id, value);
   write(`${id} weight set to ${value}${value === 0 ? ' (never picked unless named)' : ''}`);

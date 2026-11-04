@@ -146,6 +146,16 @@ describe('weighted selection', () => {
     expect(a / n).toBeCloseTo(0.7, 2);
   });
 
+  it('rejects weights that are negative, non-numeric or large enough to overflow the total', async () => {
+    for (const weight of [-1, '5', 1e308, 1000001]) {
+      await expect(
+        saveAccounts({ accounts: [{ ...acct('a'), weight } as unknown as Account] }),
+      ).rejects.toThrow();
+    }
+    await saveAccounts({ accounts: [acct('a', 1e6), acct('b', 1e6)] });
+    expect(pickWeighted((await loadAccounts()).accounts, () => 0.99)?.id).toBe('b');
+  });
+
   it('persists a weight, removes it again and rejects a negative one', async () => {
     await saveAccounts({ accounts: [acct('a')] });
     await setWeight('a', 5);

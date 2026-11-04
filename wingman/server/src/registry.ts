@@ -26,7 +26,7 @@ const accountSchema = z
     command: z.string().min(1).default('claude'),
     status: z.string().min(1).optional(),
     limited_until: z.string().min(1).optional(),
-    weight: z.number().finite().nonnegative().optional(),
+    weight: z.number().min(0).max(1e6).optional(),
     models: z
       .object({
         haiku: z.string().regex(MODEL_NAME).optional(),
@@ -210,6 +210,7 @@ export function resolveModel(account: Account, model: string | undefined): strin
 }
 
 export const DEFAULT_WEIGHT = 1;
+export const MAX_WEIGHT = 1e6;
 
 export function weightOf(account: Account): number {
   return account.weight ?? DEFAULT_WEIGHT;

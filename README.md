@@ -107,7 +107,7 @@ Run these in a terminal: `node <plugin dir>/wingman/bin/wingman accounts <comman
 wingman accounts list [--json]            # id, label, provider, models, weight and share, status, limited_until, runs by status, config_dir, command; marks your own profile
 wingman accounts add --id ID --config-dir DIR [--label L] [--command CMD] [--provider P]
                      [--haiku M] [--sonnet M] [--opus M] [--upsert]
-wingman accounts set-weight ID N          # selection weight (>= 0, default 1) used when Claude does not name an account; 0 = only when named; `default` resets
+wingman accounts set-weight ID N          # selection weight (0 to 1000000, default 1) used when Claude does not name an account; 0 = only when named; `default` resets
 wingman accounts disable ID               # status disabled: never picked, and refused when named
 wingman accounts enable ID                # back to active
 wingman accounts mark-limited ID --until T   # T: ISO time with Z or an offset, a date (UTC) or epoch seconds
