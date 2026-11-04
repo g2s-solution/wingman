@@ -31445,6 +31445,12 @@ var SAFE_GIT = [
   "-c",
   "core.sshCommand=false"
 ];
+function recordEvent(runId, line) {
+  try {
+    appendEvent(runId, line);
+  } catch {
+  }
+}
 async function commitForAgent(cwd, runId) {
   const exec = defaultExec2;
   const env = {
@@ -31526,10 +31532,7 @@ async function runSupervisor(runId) {
   }
   if (child.stdout) {
     createInterface({ input: child.stdout }).on("line", (line) => {
-      try {
-        appendEvent(runId, line);
-      } catch {
-      }
+      recordEvent(runId, line);
       for (const event of parseLine(line)) {
         if (event.kind === "rate_limited") {
           sessionRateLimit = event.info;
@@ -31544,7 +31547,7 @@ async function runSupervisor(runId) {
     });
   }
   child.stderr?.on("data", (chunk) => {
-    appendEvent(
+    recordEvent(
       runId,
       JSON.stringify({ type: "stderr", text: chunk.toString("utf8").slice(0, 2e3) })
     );

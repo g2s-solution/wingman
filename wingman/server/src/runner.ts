@@ -220,6 +220,15 @@ const SAFE_GIT = [
 ];
 
 /** Commits what a provider that cannot commit left in the worktree; returns a note for the report. */
+/** A full disk or a run directory removed under us must not kill the supervisor and lose the result. */
+export function recordEvent(runId: string, line: string): void {
+  try {
+    appendEvent(runId, line);
+  } catch {
+    // the event is dropped; the run goes on
+  }
+}
+
 async function commitForAgent(cwd: string, runId: string): Promise<string> {
   const exec = defaultExec;
   const env = {
@@ -327,11 +336,7 @@ export async function runSupervisor(runId: string): Promise<void> {
 
   if (child.stdout) {
     createInterface({ input: child.stdout }).on('line', (line) => {
-      try {
-        appendEvent(runId, line);
-      } catch {
-        // a full disk or a run directory removed under us must not kill the supervisor and lose the result
-      }
+      recordEvent(runId, line);
       for (const event of parseLine(line)) {
         if (event.kind === 'rate_limited') {
           sessionRateLimit = event.info;
@@ -346,7 +351,7 @@ export async function runSupervisor(runId: string): Promise<void> {
     });
   }
   child.stderr?.on('data', (chunk: Buffer) => {
-    appendEvent(
+    recordEvent(
       runId,
       JSON.stringify({ type: 'stderr', text: chunk.toString('utf8').slice(0, 2000) }),
     );
