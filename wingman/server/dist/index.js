@@ -29471,10 +29471,10 @@ var package_default = {
   },
   devDependencies: {
     "@eslint/js": "10.0.1",
-    "@types/node": "26.6.5",
+    "@types/node": "26.6.6",
     "@vitest/coverage-v8": "5.0.5",
     esbuild: "0.28.2",
-    eslint: "10.13.0",
+    eslint: "10.14.0",
     prettier: "3.9.10",
     typescript: "6.0.3",
     "typescript-eslint": "8.72.1",
