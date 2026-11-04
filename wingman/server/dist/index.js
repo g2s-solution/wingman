@@ -29448,40 +29448,7 @@ import { homedir as homedir4 } from "node:os";
 import { delimiter, isAbsolute as isAbsolute2, join as join5, resolve as resolve5 } from "node:path";
 
 // package.json
-var package_default = {
-  name: "wingman-server",
-  version: "0.5.4",
-  private: true,
-  type: "module",
-  engines: {
-    node: ">=22"
-  },
-  scripts: {
-    build: "node esbuild.config.mjs",
-    test: "vitest run",
-    coverage: "vitest run --coverage",
-    lint: "eslint .",
-    format: "prettier --check .",
-    typecheck: "tsc --noEmit",
-    check: "npm run typecheck && npm run lint && npm run format && npm run build && npm test"
-  },
-  dependencies: {
-    "@modelcontextprotocol/sdk": "1.32.2",
-    zod: "4.6.7"
-  },
-  devDependencies: {
-    "@eslint/js": "10.0.1",
-    "@types/node": "26.6.6",
-    "@vitest/coverage-v8": "5.0.5",
-    esbuild: "0.28.2",
-    eslint: "10.14.0",
-    prettier: "3.9.10",
-    typescript: "6.0.3",
-    "typescript-eslint": "8.72.1",
-    vitest: "5.0.5"
-  },
-  license: "MIT"
-};
+var package_default = { version: "0.5.4" };
 
 // src/doctor.ts
 var SHARED_ITEMS = [

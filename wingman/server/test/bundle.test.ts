@@ -10,20 +10,11 @@ describe('committed bundle', () => {
   it('equals a fresh build', () => {
     const out = mkdtempSync(join(tmpdir(), 'wm-bundle-'));
     try {
-      execFileSync(
-        join(root, 'node_modules/.bin/esbuild'),
-        [
-          'src/index.ts',
-          '--bundle',
-          '--platform=node',
-          '--format=esm',
-          '--target=node22',
-          '--legal-comments=none',
-          `--outfile=${join(out, 'index.js')}`,
-          `--banner:js=${readBanner()}`,
-        ],
-        { cwd: root, stdio: 'ignore' },
-      );
+      execFileSync(process.execPath, ['esbuild.config.mjs'], {
+        cwd: root,
+        stdio: 'ignore',
+        env: { ...process.env, WINGMAN_BUNDLE_OUT: join(out, 'index.js') },
+      });
       expect(readFileSync(join(out, 'index.js'), 'utf8')).toBe(
         readFileSync(join(root, 'dist/index.js'), 'utf8'),
       );
@@ -32,10 +23,3 @@ describe('committed bundle', () => {
     }
   });
 });
-
-function readBanner(): string {
-  const cfg = readFileSync(join(root, 'esbuild.config.mjs'), 'utf8');
-  const m = /js: ("(?:[^"\\]|\\.)*")/.exec(cfg);
-  if (!m?.[1]) throw new Error('banner not found in esbuild.config.mjs');
-  return JSON.parse(m[1]) as string;
-}
