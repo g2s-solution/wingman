@@ -172,13 +172,13 @@ describe('wingman accounts list', () => {
     expect(await cli('list')).toBe(0);
     const lines = stdout().trimEnd().split('\n');
     expect(lines[0]).toMatch(
-      /^ID\s+LABEL\s+PROVIDER\s+MODELS\s+STATUS\s+LIMITED_UNTIL\s+RUNS\s+CONFIG_DIR\s+COMMAND/,
+      /^ID\s+LABEL\s+PROVIDER\s+MODELS\s+WEIGHT\s+STATUS\s+LIMITED_UNTIL\s+RUNS\s+CONFIG_DIR\s+COMMAND/,
     );
     expect(lines[1]).toMatch(
-      /^other\s+claude-other\s+claude\s+-\s+active\s+-\s+-\s+\S+\s+\/bin\/o$/,
+      /^other\s+claude-other\s+claude\s+-\s+1 \(100%\)\s+active\s+-\s+-\s+\S+\s+\/bin\/o$/,
     );
     expect(lines[2]).toMatch(
-      /^me\s+me\s+claude\s+-\s+disabled\s+-\s+-\s+\S+\s+claude\s+this profile$/,
+      /^me\s+me\s+claude\s+-\s+1\s+disabled\s+-\s+-\s+\S+\s+claude\s+this profile$/,
     );
   });
 
@@ -192,6 +192,8 @@ describe('wingman accounts list', () => {
         label: 'other',
         status: 'active',
         provider: 'claude',
+        weight: 1,
+        share: 100,
         config_dir: join(home, 'o'),
         command: 'claude',
         is_caller: false,
@@ -304,6 +306,7 @@ describe('wingman_accounts tool', () => {
           status: 'disabled',
           is_caller: false,
           provider: 'claude',
+          weight: 1,
           runs: { total: 0, by_status: {} },
         },
       ],
@@ -368,5 +371,58 @@ describe('model name validation', () => {
       expect(stderr()).toContain('--haiku');
     }
     expect(await cli('add', '--id', 'v', '--config-dir', dir, '--haiku', 'ok/model:1.5@x')).toBe(0);
+  });
+});
+
+describe('wingman accounts set-weight', () => {
+  it('sets, lists with the share and resets a weight', async () => {
+    await addAccount('a');
+    await addAccount('b');
+    expect(await cli('set-weight', 'a', '70')).toBe(0);
+    expect(await cli('set-weight', 'b', '30')).toBe(0);
+    expect(registry().accounts.map((x) => x.weight)).toEqual([70, 30]);
+    out.length = 0;
+    expect(await cli('list', '--json')).toBe(0);
+    const rows = JSON.parse(stdout()) as { id: string; weight: number; share?: number }[];
+    expect(rows.map((r) => [r.id, r.weight, r.share])).toEqual([
+      ['a', 70, 70],
+      ['b', 30, 30],
+    ]);
+    out.length = 0;
+    expect(await cli('list')).toBe(0);
+    expect(stdout()).toContain('70 (70%)');
+    expect(await cli('set-weight', 'a', 'default')).toBe(0);
+    expect(registry().accounts[0]).not.toHaveProperty('weight');
+  });
+
+  it('gives weight 0 no share and renormalises the others', async () => {
+    await addAccount('a');
+    await addAccount('b');
+    await addAccount('c');
+    expect(await cli('set-weight', 'a', '0')).toBe(0);
+    expect(stdout()).toContain('never picked unless named');
+    expect(await cli('set-weight', 'b', '1')).toBe(0);
+    expect(await cli('set-weight', 'c', '3')).toBe(0);
+    out.length = 0;
+    expect(await cli('list', '--json')).toBe(0);
+    const rows = JSON.parse(stdout()) as { id: string; share?: number }[];
+    expect(rows.map((r) => r.share)).toEqual([undefined, 25, 75]);
+  });
+
+  it('rejects bad input', async () => {
+    await addAccount('a');
+    for (const args of [
+      ['set-weight'],
+      ['set-weight', 'a'],
+      ['set-weight', 'a', 'x'],
+      ['set-weight', 'a', '-2'],
+      ['set-weight', 'a', ''],
+      ['set-weight', 'a', 'Infinity'],
+      ['set-weight', 'a', '1', '2'],
+      ['set-weight', 'nope', '1'],
+    ]) {
+      expect(await cli(...args)).toBe(2);
+    }
+    expect(registry().accounts[0]).not.toHaveProperty('weight');
   });
 });

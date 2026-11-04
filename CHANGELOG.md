@@ -2,6 +2,10 @@
 
 Versions are the plugin version in `wingman/.claude-plugin/plugin.json`. Claude Code only updates an installed plugin when this number changes.
 
+## 0.5.5
+
+- Weighted selection: an account can carry a `weight` (default 1). When `wingman_start` omits `account`, the server picks among the active, non-caller accounts with probability `weight / total`; a weight of 0 means the account is only used when named. `wingman accounts set-weight ID N` sets it (`default` removes it); `accounts list` and `wingman_accounts` show the weight and the current share, which is recomputed without limited or disabled accounts, so a limited account's share moves to the others. If every candidate has weight 0 the start is refused and says so.
+
 ## 0.5.4
 
 - The hooks guardrail now hashes the directory from `git rev-parse --git-path hooks`, so a repository with `core.hooksPath` (for example husky) is covered; before, edits to the hooks that actually run went unnoticed.
