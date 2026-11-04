@@ -322,9 +322,25 @@ describe('result hints and paging', () => {
     }
   });
 
+  it('a no_status run with denials gets the same denied-commands hint', async () => {
+    const client = await connect();
+    const meta = createRun({
+      account: 'target',
+      cwd: '/x',
+      session_id: 's',
+      depth: 1,
+      prompt_chars: 1,
+    });
+    writeResult(meta.id, 'report without a status line');
+    updateStatus(meta.id, 'no_status', { permission_denials: ['Bash(find /)'] });
+    const res = await call(client, 'wingman_result', { run_id: meta.id });
+    expect(res.data.status).toBe('no_status');
+    expect(res.data.hint as string).toContain('Bash(find /)');
+  });
+
   it('adds no denial hint when partial has none or the run is done', async () => {
     const client = await connect();
-    const mk = (status: 'partial' | 'done', permission_denials: string[]) => {
+    const mk = (status: 'partial' | 'no_status' | 'done', permission_denials: string[]) => {
       const meta = createRun({
         account: 'target',
         cwd: '/x',
@@ -335,7 +351,7 @@ describe('result hints and paging', () => {
       updateStatus(meta.id, status, { permission_denials });
       return meta.id;
     };
-    for (const id of [mk('partial', []), mk('done', ['Bash(cd /w)'])]) {
+    for (const id of [mk('partial', []), mk('no_status', []), mk('done', ['Bash(cd /w)'])]) {
       expect((await call(client, 'wingman_result', { run_id: id })).data).not.toHaveProperty(
         'hint',
       );

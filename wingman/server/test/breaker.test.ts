@@ -96,10 +96,11 @@ describe('consecutiveFailures', () => {
     expect(consecutiveFailures([failed, done], 'a')).toBe(1);
   });
 
-  it('skips needs_input, cancelled, blocked and rate_limited without counting or resetting', () => {
+  it('skips needs_input, no_status, cancelled, blocked and rate_limited without counting or resetting', () => {
     const runs = [
       run('failed', 1),
       run('needs_input', 2),
+      run('no_status', 2.5),
       run('cancelled', 3),
       run('failed', 4),
       run('blocked', 5),

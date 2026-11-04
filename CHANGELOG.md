@@ -2,6 +2,11 @@
 
 Versions are the plugin version in `wingman/.claude-plugin/plugin.json`. Claude Code only updates an installed plugin when this number changes.
 
+## 0.5.8
+
+- New terminal status `no_status`: a run that finishes cleanly but whose last message has no `WINGMAN_STATUS:` line. It used to be reported as `needs_input`, which mixed formatting misses (for example after a denied command) with real questions. It gets the same denied-commands `hint` as `partial`, is neutral for the failure circuit breaker, and `wingman wait` exits 1 for it like for `needs_input`. Older runs keep their recorded status.
+- The guardrail prompt now says to put the report and the status line in the final message itself and to keep the status line when a command is denied. The `new-agent` skill documents `no_status`.
+
 ## 0.5.7
 
 - Review fixes. `commitForAgent` (Codex) reads the staged paths with `git diff -z`, so a credential-looking file under a non-ASCII directory is no longer committed to the run branch (git C-quoted such paths and the name check missed them). `maskSecrets` masks `Authorization:` values of any scheme (`Token`, `ApiKey`, a bare value, and the like) and the Stripe live, Google, npm and Hugging Face key shapes. A failure to append to `events.jsonl` (full disk, run directory removed), from the agent's stdout or stderr, no longer crashes the supervisor and loses the run's result.

@@ -177,10 +177,17 @@ export function mapOutcome(input: {
   }
   if ((input.provider ?? 'claude') === 'claude' && reportsPluginChange(text))
     return { status: 'needs_caller', text };
-  return { status: parseStatusLine(text) ?? 'needs_input', text };
+  // a clean finish without the status line is a formatting miss, not a question for the caller
+  return { status: parseStatusLine(text) ?? 'no_status', text };
 }
 
-const CLEAN_STATUSES: readonly RunStatus[] = ['done', 'partial', 'blocked', 'needs_input'];
+const CLEAN_STATUSES: readonly RunStatus[] = [
+  'done',
+  'partial',
+  'blocked',
+  'needs_input',
+  'no_status',
+];
 
 const CHANGE_NOTES: Record<GuardrailChange, string> = {
   refs: 'the base branch or caller branch ref',

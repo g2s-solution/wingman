@@ -156,9 +156,9 @@ describe('status mapping', () => {
     expect(meta.status).toBe('failed_no_report');
   });
 
-  it('missing status line maps to needs_input', async () => {
+  it('missing status line maps to no_status', async () => {
     const meta = await finish(await startRun(ctx('no_status_line').opts));
-    expect(meta.status).toBe('needs_input');
+    expect(meta.status).toBe('no_status');
   });
 
   it('a plugin update in the result maps to needs_caller', async () => {

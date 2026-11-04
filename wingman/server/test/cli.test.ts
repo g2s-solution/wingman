@@ -56,6 +56,7 @@ describe('maybeRunCli', () => {
     ['partial', 0],
     ['failed', 1],
     ['needs_input', 1],
+    ['no_status', 1],
   ])('wait on a %s run prints one line and exits %i', async (status, code) => {
     writeMeta('r1', { status });
     expect(await cli('wait', 'r1', '--poll-ms', '10')).toBe(code);

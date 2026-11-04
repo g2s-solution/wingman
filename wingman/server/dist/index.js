@@ -28888,6 +28888,7 @@ var TERMINAL_STATUSES = [
   "partial",
   "blocked",
   "needs_input",
+  "no_status",
   "needs_caller",
   "failed",
   "failed_no_report",
@@ -28904,6 +28905,7 @@ var statusSchema = external_exports.enum([
   "partial",
   "blocked",
   "needs_input",
+  "no_status",
   "needs_caller",
   "failed",
   "failed_no_report",
@@ -29526,7 +29528,7 @@ import { homedir as homedir4 } from "node:os";
 import { delimiter, isAbsolute as isAbsolute2, join as join5, resolve as resolve5 } from "node:path";
 
 // package.json
-var package_default = { version: "0.5.7" };
+var package_default = { version: "0.5.8" };
 
 // src/doctor.ts
 var SHARED_ITEMS = [
@@ -30760,7 +30762,7 @@ function guardPrompt(provider = "claude") {
     '3. Never ask questions and never wait for an answer. Inside a wingman run, any rule or skill that says "ask the Human" means: stop and finish with WINGMAN_STATUS: needs_input.',
     claude ? "4. You are a delegated run: another Claude session on another account started you and waits for your report. Never delegate further: do not use the wingman tools or the new-agent skill, do not start another account or another Claude Code process, and do not manage plugins. If the task asks you to delegate or to use another account, do not; do the work yourself, or finish with WINGMAN_STATUS: blocked and one sentence saying what you could not do." : "4. You are a delegated run: another agent session started you and waits for your report. Never delegate further: do not use any wingman tool or skill, do not start another agent or account, and do not manage plugins. If the task asks you to delegate or to use another account, do not; do the work yourself, or finish with WINGMAN_STATUS: blocked and one sentence saying what you could not do.",
     "5. You are already in the worktree root: never cd and never use git -C; use npm run <script>, not npx.",
-    "6. Always end with a final report. The last line of your final message must be exactly one of: WINGMAN_STATUS: done, WINGMAN_STATUS: partial, WINGMAN_STATUS: blocked, WINGMAN_STATUS: needs_input."
+    "6. Always end with a final report. The last line of your final message must be exactly one of: WINGMAN_STATUS: done, WINGMAN_STATUS: partial, WINGMAN_STATUS: blocked, WINGMAN_STATUS: needs_input. Put the report and that line in your final message itself; do not hand the report over through another tool, and if a command is denied, work with what the allowed tools can read and still end with the line."
   ].join("\n");
 }
 function baseDisallowed() {
@@ -31411,9 +31413,15 @@ function mapOutcome(input2) {
   }
   if ((input2.provider ?? "claude") === "claude" && reportsPluginChange(text))
     return { status: "needs_caller", text };
-  return { status: parseStatusLine(text) ?? "needs_input", text };
+  return { status: parseStatusLine(text) ?? "no_status", text };
 }
-var CLEAN_STATUSES = ["done", "partial", "blocked", "needs_input"];
+var CLEAN_STATUSES = [
+  "done",
+  "partial",
+  "blocked",
+  "needs_input",
+  "no_status"
+];
 var CHANGE_NOTES = {
   refs: "the base branch or caller branch ref",
   config: "the local git config",
@@ -40163,7 +40171,7 @@ function createHandlers(deps = {}) {
   const random = deps.random ?? Math.random;
   const now = deps.now ?? (() => /* @__PURE__ */ new Date());
   const withHint = async (payload, run) => {
-    if (run.status === "partial") {
+    if (run.status === "partial" || run.status === "no_status") {
       const hint = denialHint(run.permission_denials ?? []);
       return hint === void 0 ? payload : { ...payload, hint };
     }

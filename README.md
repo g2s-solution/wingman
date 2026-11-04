@@ -241,6 +241,7 @@ Run state lives in `~/.wingman/runs/<id>/`. Do not read `events.jsonl`: it holds
 | `Refusing to start a run on a detached HEAD` | HEAD is not on a branch | `git switch` to a branch |
 | `Refusing to start a run on the base branch ... without a worktree` | `worktree: false` on `main` | drop `worktree: false` |
 | status `rate_limited` | the target hit its usage limit | the account is marked limited until the reset time; the answer lists other active accounts: start a new run on one of them, or wait |
+| status `no_status` | the run finished but its last message had no `WINGMAN_STATUS:` line, often after a denied command | read the report and `permission_denials`; fix the prompt before a new run |
 | status `needs_caller` | the run changed your base branch, branch ref, repo config or git hooks, or needs a plugin change | inspect with `git log --oneline` and `git diff`; start a new run |
 | `wingman_cleanup` refuses | the run is still running, or the worktree has uncommitted changes | cancel it, or commit or discard the changes (`action: discard`) |
 

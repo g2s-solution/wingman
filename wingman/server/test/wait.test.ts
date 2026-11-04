@@ -99,6 +99,7 @@ describe('wingman-wait', () => {
     ['partial', 0],
     ['blocked', 1],
     ['needs_input', 1],
+    ['no_status', 1],
     ['needs_caller', 1],
     ['failed', 1],
     ['failed_no_report', 1],

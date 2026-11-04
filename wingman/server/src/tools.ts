@@ -247,7 +247,7 @@ export function createHandlers(deps: ServerDeps = {}) {
     payload: Json,
     run: { status: string; account: string; permission_denials?: string[] },
   ): Promise<Json> => {
-    if (run.status === 'partial') {
+    if (run.status === 'partial' || run.status === 'no_status') {
       const hint = denialHint(run.permission_denials ?? []);
       return hint === undefined ? payload : { ...payload, hint };
     }

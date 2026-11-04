@@ -113,6 +113,7 @@ describe('ref snapshot', () => {
   it('flagGuardrail keeps failure statuses and appends the note', () => {
     expect(flagGuardrail({ status: 'failed', text: 'x' }, ['refs']).status).toBe('failed');
     expect(flagGuardrail({ status: 'partial', text: 'x' }, ['config']).status).toBe('needs_caller');
+    expect(flagGuardrail({ status: 'no_status', text: 'x' }, ['refs']).status).toBe('needs_caller');
     expect(flagGuardrail({ status: 'done', text: 'x' }, ['refs', 'hooks']).text).toMatch(
       /base branch or caller branch ref and the git hooks directory/,
     );

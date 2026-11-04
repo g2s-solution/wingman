@@ -26,6 +26,7 @@ export type RunStatus =
   | 'partial'
   | 'blocked'
   | 'needs_input'
+  | 'no_status'
   | 'needs_caller'
   | 'failed'
   | 'failed_no_report'
@@ -37,6 +38,7 @@ export const TERMINAL_STATUSES: readonly RunStatus[] = [
   'partial',
   'blocked',
   'needs_input',
+  'no_status',
   'needs_caller',
   'failed',
   'failed_no_report',
