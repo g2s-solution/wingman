@@ -27,10 +27,12 @@ import {
   resolveTools,
 } from './guard.js';
 import { runDir, wingmanHome } from './paths.js';
+import { breakerConfig, tripBreaker } from './breaker.js';
 import { assertModelName, recordRateLimit, resolveModel } from './registry.js';
 import {
   appendEvent,
   createRun,
+  listRuns,
   pruneEvents,
   patchRunning,
   readMeta,
@@ -396,6 +398,14 @@ export async function runSupervisor(runId: string): Promise<void> {
   // before the status flips, so a caller that sees `rate_limited` also sees the account limited
   if (outcome.status === 'rate_limited') {
     await recordRateLimit(current.account, rejectedRateLimit);
+  } else if (outcome.status === 'failed' || outcome.status === 'failed_no_report') {
+    const ended: RunMeta = {
+      ...current,
+      status: outcome.status,
+      finished_at: new Date().toISOString(),
+    };
+    const others = listRuns().filter((r) => r.id !== runId);
+    await tripBreaker(current.account, breakerConfig(), [...others, ended]).catch(() => false);
   }
   try {
     updateStatus(runId, outcome.status, patch);

@@ -143,8 +143,9 @@ async function chooseAccount(
         account.limited_until === undefined
           ? 'no end time, until cleared'
           : `limited_until ${account.limited_until}`;
+      const why = account.limited_reason === undefined ? '' : `, ${account.limited_reason}`;
       throw new Error(
-        `Account "${accountId}" is rate limited (${until}); pick another account${alternativesHint(await alternativesTo(env, accountId, now))}`,
+        `Account "${accountId}" is rate limited (${until}${why}); pick another account${alternativesHint(await alternativesTo(env, accountId, now))}`,
       );
     }
     if (!isActive(account, now)) {
@@ -160,7 +161,7 @@ async function chooseAccount(
     const note =
       limited.length === 0
         ? ''
-        : `; rate limited: ${limited.map((a) => `${a.id} (limited_until ${a.limited_until ?? 'none'})`).join(', ')}`;
+        : `; rate limited: ${limited.map((a) => `${a.id} (limited_until ${a.limited_until ?? 'none'}${a.limited_reason === undefined ? '' : `, ${a.limited_reason}`})`).join(', ')}`;
     throw new Error(
       `No other active account is registered to run on${note}; see \`wingman accounts list\``,
     );

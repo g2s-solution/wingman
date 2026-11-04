@@ -2,6 +2,10 @@
 
 Versions are the plugin version in `wingman/.claude-plugin/plugin.json`. Claude Code only updates an installed plugin when this number changes.
 
+## 0.5.6
+
+- Failure circuit breaker: an account whose last 3 finished runs ended `failed` or `failed_no_report` (since its latest `done` or `partial`; `needs_input`, `blocked` and `cancelled` neither count nor reset) is limited for 30 minutes, the same state as a provider rate limit with `limited_reason: consecutive_failures`. The first failure after the cooldown trips it again at once; a `done` or `partial` run clears the streak. `accounts list`, `wingman_accounts` and the refusal messages show the reason; `clear-limited` lifts it early. `WINGMAN_BREAKER_FAILURES` (default 3, 0 = off) and `WINGMAN_BREAKER_COOLDOWN_MINUTES` (default 30) tune it. A run marked `failed_no_report` by `reconcile` after its supervisor died does not trip it.
+
 ## 0.5.5
 
 - Weighted selection: an account can carry a `weight` (default 1). When `wingman_start` omits `account`, the server picks among the active, non-caller accounts with probability `weight / total`; a weight of 0 means the account is only used when named. `wingman accounts set-weight ID N` sets it (`default` removes it); `accounts list` and `wingman_accounts` show the weight and the current share, which is recomputed without limited or disabled accounts, so a limited account's share moves to the others. If every candidate has weight 0 the start is refused and says so. Weights run from 0 to 1000000 (a larger value would overflow the total).

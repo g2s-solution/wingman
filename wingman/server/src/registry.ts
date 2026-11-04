@@ -26,6 +26,7 @@ const accountSchema = z
     command: z.string().min(1).default('claude'),
     status: z.string().min(1).optional(),
     limited_until: z.string().min(1).optional(),
+    limited_reason: z.string().min(1).optional(),
     weight: z.number().min(0).max(1e6).optional(),
     models: z
       .object({
@@ -151,7 +152,7 @@ function indexOfAccount(registry: Registry, id: string): number {
 }
 
 /** Marks an account limited until `until`; refuses a disabled (or unknown-status) account. */
-export async function markLimited(id: string, until: Date): Promise<void> {
+export async function markLimited(id: string, until: Date, reason?: string): Promise<void> {
   const registry = await loadAccounts();
   const i = indexOfAccount(registry, id);
   const account = registry.accounts[i]!;
@@ -162,7 +163,10 @@ export async function markLimited(id: string, until: Date): Promise<void> {
   ) {
     throw new Error(`Account "${id}" is ${account.status}; enable it before marking it limited`);
   }
-  registry.accounts[i] = { ...account, status: RATE_LIMITED, limited_until: until.toISOString() };
+  const entry: Account = { ...account, status: RATE_LIMITED, limited_until: until.toISOString() };
+  if (reason === undefined) delete entry.limited_reason;
+  else entry.limited_reason = reason;
+  registry.accounts[i] = entry;
   await saveAccounts(registry);
 }
 
@@ -174,6 +178,7 @@ export async function clearLimited(id: string): Promise<boolean> {
   if (entry.status !== RATE_LIMITED) return false;
   delete entry.status;
   delete entry.limited_until;
+  delete entry.limited_reason;
   registry.accounts[i] = entry;
   await saveAccounts(registry);
   return true;

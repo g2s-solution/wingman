@@ -10,6 +10,8 @@ export interface Account {
   status?: string;
   /** ISO time; with status 'rate_limited', the account is skipped until then. */
   limited_until?: string;
+  /** Why the account is limited when it was not a provider rate limit, e.g. 'consecutive_failures'. */
+  limited_reason?: string;
   /** Relative chance of being picked when the caller omits `account`; default 1, 0 means only by name. */
   weight?: number;
   /** Provider model name for each tier, so a caller can ask for haiku, sonnet or opus on any provider. */
