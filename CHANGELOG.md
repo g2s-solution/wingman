@@ -2,6 +2,11 @@
 
 Versions are the plugin version in `wingman/.claude-plugin/plugin.json`. Claude Code only updates an installed plugin when this number changes.
 
+## 0.5.7
+
+- Review fixes. `commitForAgent` (Codex) reads the staged paths with `git diff -z`, so a credential-looking file under a non-ASCII directory is no longer committed to the run branch (git C-quoted such paths and the name check missed them). `maskSecrets` masks `Authorization:` values of any scheme (`Token`, `ApiKey`, a bare value, and the like) and the Stripe live, Google, npm and Hugging Face key shapes. A failure to append to `events.jsonl` (full disk, run directory removed), from the agent's stdout or stderr, no longer crashes the supervisor and loses the run's result.
+- Docs: `CLAUDE.md` status and the `ROADMAP.md` list of released versions are current.
+
 ## 0.5.6
 
 - Failure circuit breaker: an account whose last 3 finished runs ended `failed` or `failed_no_report` (since its latest `done` or `partial`; `needs_input`, `blocked` and `cancelled` neither count nor reset) is limited for 30 minutes, the same state as a provider rate limit with `limited_reason: consecutive_failures`. The first failure after the cooldown trips it again at once; a `done` or `partial` run clears the streak. `accounts list`, `wingman_accounts` and the refusal messages show the reason; `clear-limited` lifts it early. `WINGMAN_BREAKER_FAILURES` (default 3, 0 = off) and `WINGMAN_BREAKER_COOLDOWN_MINUTES` (default 30) tune it. A run marked `failed_no_report` by `reconcile` after its supervisor died counts toward the streak but cannot trip the breaker itself. The cooldown is 1 minute to 7 days; `wingman doctor` reports a breaker limit with its reason.

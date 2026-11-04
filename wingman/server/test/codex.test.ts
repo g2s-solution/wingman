@@ -240,7 +240,7 @@ describe('codex run through the supervisor', () => {
   });
 
   it('does not commit credential-looking files or symlinks, and says so', async () => {
-    for (const mode of ['edit_env', 'edit_link']) {
+    for (const mode of ['edit_env', 'edit_env_unicode', 'edit_link']) {
       const repo = makeRepo('main');
       git(repo, 'switch', '-q', '-c', 'feat/c');
       const { opts } = runOpts(mode, { cwd: repo, worktree: true, preset: 'edit-files' });

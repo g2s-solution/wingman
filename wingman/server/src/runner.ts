@@ -220,6 +220,15 @@ const SAFE_GIT = [
 ];
 
 /** Commits what a provider that cannot commit left in the worktree; returns a note for the report. */
+/** A full disk or a run directory removed under us must not kill the supervisor and lose the result. */
+export function recordEvent(runId: string, line: string): void {
+  try {
+    appendEvent(runId, line);
+  } catch {
+    // the event is dropped; the run goes on
+  }
+}
+
 async function commitForAgent(cwd: string, runId: string): Promise<string> {
   const exec = defaultExec;
   const env = {
@@ -236,20 +245,22 @@ async function commitForAgent(cwd: string, runId: string): Promise<string> {
   if (status.code !== 0) return failed;
   if (status.stdout.trim() === '') return '';
   if ((await git('add', '-A')).code !== 0) return failed;
-  const staged = await git('diff', '--cached', '--raw', '--no-renames', '--no-ext-diff');
-  const risky = staged.stdout
-    .split('\n')
-    .filter((line) => line.trim() !== '')
-    .filter((line) => {
-      const [meta = '', path = ''] = line.split('\t');
-      const modes = meta.replace(/^:/, '').split(' ');
-      return (
-        modes[0] === '160000' ||
-        modes[1] === '160000' ||
-        modes[1] === '120000' ||
-        RISKY_STAGED_PATH.test(path)
-      );
-    });
+  // -z: without it git C-quotes a path with non-ASCII characters and the credential-name match misses it
+  const staged = await git('diff', '--cached', '--raw', '-z', '--no-renames', '--no-ext-diff');
+  const fields = staged.stdout.split('\0');
+  const entries: { meta: string; path: string }[] = [];
+  for (let i = 0; i + 1 < fields.length; i += 2) {
+    entries.push({ meta: fields[i]!, path: fields[i + 1]! });
+  }
+  const risky = entries.filter(({ meta, path }) => {
+    const modes = meta.replace(/^:/, '').split(' ');
+    return (
+      modes[0] === '160000' ||
+      modes[1] === '160000' ||
+      modes[1] === '120000' ||
+      RISKY_STAGED_PATH.test(path)
+    );
+  });
   if (staged.code !== 0 || risky.length > 0) {
     await git('reset', '-q');
     return risky.length > 0
@@ -325,7 +336,7 @@ export async function runSupervisor(runId: string): Promise<void> {
 
   if (child.stdout) {
     createInterface({ input: child.stdout }).on('line', (line) => {
-      appendEvent(runId, line);
+      recordEvent(runId, line);
       for (const event of parseLine(line)) {
         if (event.kind === 'rate_limited') {
           sessionRateLimit = event.info;
@@ -340,7 +351,7 @@ export async function runSupervisor(runId: string): Promise<void> {
     });
   }
   child.stderr?.on('data', (chunk: Buffer) => {
-    appendEvent(
+    recordEvent(
       runId,
       JSON.stringify({ type: 'stderr', text: chunk.toString('utf8').slice(0, 2000) }),
     );

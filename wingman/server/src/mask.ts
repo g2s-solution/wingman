@@ -5,14 +5,19 @@ const PEM =
 // Greedy up to the last "@" before a "/" so a password that itself contains "@" is covered, and a
 // token-only userinfo (https://<token>@host) is masked as well.
 const URL_CREDENTIALS = /\b([a-z][a-z0-9+.-]{0,39}:\/\/)[^\s/]+@/gi;
+// A known scheme word is kept and the credential after it is masked; anything else is treated as the
+// credential itself and masked whole, so an unknown scheme never leaves its token visible. Bearer is left to BEARER below so its output format stays as is.
 const AUTH_SCHEME =
-  /(\bAuthorization["']?\s*[:=]\s*["']?)(Basic|Digest|Negotiate|NTLM)\s+[^\s"',;]+/gi;
+  /(\bAuthorization["']?\s*[:=]\s*["']?)(?!Bearer\b)(?:(Basic|Digest|Negotiate|NTLM|Token|ApiKey|Api-Key|Key|OAuth|Hawk|HMAC|SSWS|Splunk|AWS4-HMAC-SHA256)\s+)?[^\s"',;]+/gi;
 // Starts only at the beginning of a base64url run (not at every "-" inside one), so a long run
 // without a dot is scanned once instead of once per "eyJ" in it.
 const JWT = /(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*/g;
 const BEARER = /\b(Bearer)\s+[A-Za-z0-9._~+/=-]+/gi;
 const KEY_SHAPES = [
+  /\b(?:sk|rk|pk)_live_[A-Za-z0-9]{16,}/g,
   /\bsk-[A-Za-z0-9_-]{16,}/g,
+  /\bAIza[A-Za-z0-9_-]{30,}/g,
+  /\b(?:npm|hf)_[A-Za-z0-9]{30,}/g,
   /\bgithub_pat_[A-Za-z0-9_]{16,}/g,
   /\bgh[pousr]_[A-Za-z0-9]{16,}/g,
   /\bglpat-[A-Za-z0-9_-]{16,}/g,
@@ -28,7 +33,9 @@ const ASSIGNMENT =
 export function maskSecrets(text: string): string {
   let out = text.replace(PEM, MASK);
   out = out.replace(URL_CREDENTIALS, `$1${MASK}@`);
-  out = out.replace(AUTH_SCHEME, `$1$2 ${MASK}`);
+  out = out.replace(AUTH_SCHEME, (_m, head: string, scheme: string | undefined) =>
+    scheme === undefined ? `${head}${MASK}` : `${head}${scheme} ${MASK}`,
+  );
   out = out.replace(JWT, MASK);
   out = out.replace(BEARER, `$1 ${MASK}`);
   for (const re of KEY_SHAPES) out = out.replace(re, MASK);

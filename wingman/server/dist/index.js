@@ -28843,11 +28843,14 @@ import { join as join2 } from "node:path";
 var MASK = "[MASKED]";
 var PEM = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?-----[\s\S]*?(?:-----END [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?-----|$)/g;
 var URL_CREDENTIALS = /\b([a-z][a-z0-9+.-]{0,39}:\/\/)[^\s/]+@/gi;
-var AUTH_SCHEME = /(\bAuthorization["']?\s*[:=]\s*["']?)(Basic|Digest|Negotiate|NTLM)\s+[^\s"',;]+/gi;
+var AUTH_SCHEME = /(\bAuthorization["']?\s*[:=]\s*["']?)(?!Bearer\b)(?:(Basic|Digest|Negotiate|NTLM|Token|ApiKey|Api-Key|Key|OAuth|Hawk|HMAC|SSWS|Splunk|AWS4-HMAC-SHA256)\s+)?[^\s"',;]+/gi;
 var JWT = /(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*/g;
 var BEARER = /\b(Bearer)\s+[A-Za-z0-9._~+/=-]+/gi;
 var KEY_SHAPES = [
+  /\b(?:sk|rk|pk)_live_[A-Za-z0-9]{16,}/g,
   /\bsk-[A-Za-z0-9_-]{16,}/g,
+  /\bAIza[A-Za-z0-9_-]{30,}/g,
+  /\b(?:npm|hf)_[A-Za-z0-9]{30,}/g,
   /\bgithub_pat_[A-Za-z0-9_]{16,}/g,
   /\bgh[pousr]_[A-Za-z0-9]{16,}/g,
   /\bglpat-[A-Za-z0-9_-]{16,}/g,
@@ -28858,7 +28861,10 @@ var ASSIGNMENT = /((?:password|passwd|secret|token|api[_-]?key|credentials?|priv
 function maskSecrets(text) {
   let out = text.replace(PEM, MASK);
   out = out.replace(URL_CREDENTIALS, `$1${MASK}@`);
-  out = out.replace(AUTH_SCHEME, `$1$2 ${MASK}`);
+  out = out.replace(
+    AUTH_SCHEME,
+    (_m, head, scheme) => scheme === void 0 ? `${head}${MASK}` : `${head}${scheme} ${MASK}`
+  );
   out = out.replace(JWT, MASK);
   out = out.replace(BEARER, `$1 ${MASK}`);
   for (const re of KEY_SHAPES) out = out.replace(re, MASK);
@@ -29520,7 +29526,7 @@ import { homedir as homedir4 } from "node:os";
 import { delimiter, isAbsolute as isAbsolute2, join as join5, resolve as resolve5 } from "node:path";
 
 // package.json
-var package_default = { version: "0.5.6" };
+var package_default = { version: "0.5.7" };
 
 // src/doctor.ts
 var SHARED_ITEMS = [
@@ -31439,6 +31445,12 @@ var SAFE_GIT = [
   "-c",
   "core.sshCommand=false"
 ];
+function recordEvent(runId, line) {
+  try {
+    appendEvent(runId, line);
+  } catch {
+  }
+}
 async function commitForAgent(cwd, runId) {
   const exec = defaultExec2;
   const env = {
@@ -31454,9 +31466,13 @@ async function commitForAgent(cwd, runId) {
   if (status.code !== 0) return failed;
   if (status.stdout.trim() === "") return "";
   if ((await git2("add", "-A")).code !== 0) return failed;
-  const staged = await git2("diff", "--cached", "--raw", "--no-renames", "--no-ext-diff");
-  const risky = staged.stdout.split("\n").filter((line) => line.trim() !== "").filter((line) => {
-    const [meta3 = "", path = ""] = line.split("	");
+  const staged = await git2("diff", "--cached", "--raw", "-z", "--no-renames", "--no-ext-diff");
+  const fields = staged.stdout.split("\0");
+  const entries = [];
+  for (let i = 0; i + 1 < fields.length; i += 2) {
+    entries.push({ meta: fields[i], path: fields[i + 1] });
+  }
+  const risky = entries.filter(({ meta: meta3, path }) => {
     const modes = meta3.replace(/^:/, "").split(" ");
     return modes[0] === "160000" || modes[1] === "160000" || modes[1] === "120000" || RISKY_STAGED_PATH.test(path);
   });
@@ -31516,7 +31532,7 @@ async function runSupervisor(runId) {
   }
   if (child.stdout) {
     createInterface({ input: child.stdout }).on("line", (line) => {
-      appendEvent(runId, line);
+      recordEvent(runId, line);
       for (const event of parseLine(line)) {
         if (event.kind === "rate_limited") {
           sessionRateLimit = event.info;
@@ -31531,7 +31547,7 @@ async function runSupervisor(runId) {
     });
   }
   child.stderr?.on("data", (chunk) => {
-    appendEvent(
+    recordEvent(
       runId,
       JSON.stringify({ type: "stderr", text: chunk.toString("utf8").slice(0, 2e3) })
     );

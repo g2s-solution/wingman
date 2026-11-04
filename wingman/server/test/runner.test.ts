@@ -1,7 +1,15 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, readdirSync, readlinkSync, rmSync, statSync } from 'node:fs';
+import {
+  existsSync,
+  readFileSync,
+  readdirSync,
+  readlinkSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { runDir, worktreesDir } from '../src/paths.js';
 import { readMeta, runSummary, writeMeta } from '../src/runs.js';
@@ -15,6 +23,7 @@ import {
 import { isAlive } from '../src/worktree.js';
 import { groupMembers } from '../src/proc.js';
 import { reconcile } from '../src/reconcile.js';
+import { recordEvent } from '../src/runner.js';
 import type { RunMeta } from '../src/types.js';
 import {
   bundleSupervisor,
@@ -476,4 +485,13 @@ describe('agent outliving a killed supervisor', () => {
       what: 'the orphaned group to be gone',
     });
   }, 90_000);
+});
+
+describe('recordEvent', () => {
+  it('drops the event instead of throwing when the run directory cannot be written', () => {
+    const blocker = join(home, 'not-a-directory');
+    writeFileSync(blocker, 'x');
+    process.env.WINGMAN_HOME = join(blocker, 'state');
+    expect(() => recordEvent('0123456789ab', '{"type":"x"}')).not.toThrow();
+  });
 });
