@@ -2,6 +2,10 @@
 
 Versions are the plugin version in `wingman/.claude-plugin/plugin.json`. Claude Code only updates an installed plugin when this number changes.
 
+## 0.5.9
+
+- New caller skill `progress` (`wingman:progress <run_id>`): follows a running run through one haiku reader run that reads its `events.jsonl` and returns a masked structural summary (elapsed time, tool calls by name, last file paths, a verdict `progressing`, `idle`, `stuck` or `finished`). The caller never reads the log itself. The reader session sees raw tool output, so a content-filter block ends it `failed_no_report`, and then the progress view is unavailable. The `new-agent` skill and the tool descriptions point to it.
+
 ## 0.5.8
 
 - New terminal status `no_status`: a run that finishes cleanly but whose last message has no `WINGMAN_STATUS:` line. It used to be reported as `needs_input`, which mixed formatting misses (for example after a denied command) with real questions. It gets the same denied-commands `hint` as `partial`, is neutral for the failure circuit breaker, and `wingman wait` exits 1 for it like for `needs_input`. Older runs keep their recorded status.
