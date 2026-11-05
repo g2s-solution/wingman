@@ -29528,7 +29528,7 @@ import { homedir as homedir4 } from "node:os";
 import { delimiter, isAbsolute as isAbsolute2, join as join5, resolve as resolve5 } from "node:path";
 
 // package.json
-var package_default = { version: "0.5.8" };
+var package_default = { version: "0.5.9" };
 
 // src/doctor.ts
 var SHARED_ITEMS = [
@@ -40297,7 +40297,7 @@ function createHandlers(deps = {}) {
     }
   };
 }
-var LOGS_WARNING = "Never read run logs or events.jsonl; use only the output of these tools.";
+var LOGS_WARNING = "Never read run logs or events.jsonl; use only the output of these tools (to follow a running run, use the wingman:progress skill).";
 function buildServer(deps = {}) {
   const server = new McpServer({ name: "wingman", version: package_default.version });
   const h = createHandlers(deps);

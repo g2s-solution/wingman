@@ -228,7 +228,7 @@ The skill drives these; you can also call them directly.
 | `wingman_accounts` | the registered accounts: id, label, status (with `limited_until` while limited), `is_caller`, provider, `runs` by status (read-only; no command or paths; accounts are changed only with the `wingman accounts` CLI) |
 | `wingman_cleanup` | remove a run's worktree (`accept` refuses uncommitted changes); the run branch, when there is one, is kept. `accept` on a run with a branch also returns `run_branch`, a `diff_stat` (never the diff) and a note to review before merging; on a readonly run `accept` and `discard` are the same |
 
-Run state lives in `~/.wingman/runs/<id>/`. Do not read `events.jsonl`: it holds raw tool output.
+Run state lives in `~/.wingman/runs/<id>/`. Do not read `events.jsonl`: it holds raw tool output. To follow a running run, use the `wingman:progress` skill, which has a separate haiku run read the log and return only a summary.
 
 ## Troubleshooting
 

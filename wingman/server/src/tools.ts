@@ -393,7 +393,8 @@ export function createHandlers(deps: ServerDeps = {}) {
   };
 }
 
-const LOGS_WARNING = 'Never read run logs or events.jsonl; use only the output of these tools.';
+const LOGS_WARNING =
+  'Never read run logs or events.jsonl; use only the output of these tools (to follow a running run, use the wingman:progress skill).';
 
 export function buildServer(deps: ServerDeps = {}): McpServer {
   const server = new McpServer({ name: 'wingman', version: pkg.version });
