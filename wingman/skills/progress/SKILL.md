@@ -9,6 +9,10 @@ Show how a running wingman run is going, without the main session reading its `e
 
 Use it sparingly. Each call starts a run that costs quota. To just wait for a run to finish, use `bin/wingman-wait` instead. Make at most one progress call per check.
 
+## Size
+
+Optional argument `[lines]` (`/wingman:progress <run_id> [lines]`): how many last lines of the log the reader reads. Default **60**, maximum **150**, only when the user asks for more history. A tool call is about 2 lines, so 60 lines is about 30 steps. Every line is cut to its first 600 characters (`cut -c1-600`): the start of a JSON line holds the event type and tool name, and the tail is where large, sensitive tool output sits. Substitute the number for `<LINES>` below.
+
 ## Tradeoff
 
 The reader run sees the raw tool output in its own session. If the content filter (DLP) blocks that session, the reader ends `failed_no_report`. Then do not retry and do not read the file yourself: tell the user the progress view is unavailable. The main session is not affected. The observed run and the reader run are two separate runs; the reader is cleaned up like any other run.
@@ -35,7 +39,7 @@ The reader run sees the raw tool output in its own session. If the content filte
    Do not pass `allowed_tools` on the first try. Keep the returned reader `run_id`.
 5. **Wait.** Start `${CLAUDE_PLUGIN_ROOT}/bin/wingman-wait <reader_run_id>` with Bash `run_in_background`. Do not poll.
 6. **Read the result to the end.** Call `wingman_result` for the reader run. While the answer has `result_next_offset`, call again with `offset` set to it. Use the summary only once the field is gone.
-   - If the result is `permission_denials` for reading the events path (Read, Grep or a Bash `tail`), retry ONCE: start the reader again with `allowed_tools` set to the minimal rules for that exact path, `["Read(<EVENTS_PATH>)", "Grep", "Bash(tail -n 300 <EVENTS_PATH>)"]`, and the same prompt. Passing `allowed_tools` makes the run create an empty run branch with no commits; `wingman_cleanup` keeps it, so say so to the user. If the retry is also denied, stop and tell the user the progress view is unavailable.
+   - If the result is `permission_denials` for reading the events path (Read, Grep or a Bash `tail`), retry ONCE: start the reader again with `allowed_tools` set to the minimal rules for that exact path, `["Read(<EVENTS_PATH>)", "Grep", "Bash(tail -n <LINES> <EVENTS_PATH> | cut -c1-600)"]`, and the same prompt. Passing `allowed_tools` makes the run create an empty run branch with no commits; `wingman_cleanup` keeps it, so say so to the user. If the retry is also denied, stop and tell the user the progress view is unavailable.
    - If the reader ended `failed_no_report` or `failed`, follow the tradeoff section above and stop.
 7. **Relay.** Give the user the reader's summary, conclusion first (the verdict), in your own short wording. Keep the file paths as paths only.
 8. **Cleanup.** Call `wingman_cleanup` for the reader run with discard. Its worktree is removed; do not touch the observed run.
@@ -49,7 +53,7 @@ Task: a read-only progress check of one wingman run, <RUN_ID>. Edit nothing, run
 
 File: <EVENTS_PATH>. It is JSON lines of another agent run's raw events. It may hold sensitive values.
 
-1. Read only its last 300 lines. With a Bash `tail` allowance, run `tail -n 300 <EVENTS_PATH>`. Otherwise count the lines with Grep (pattern `^`, output_mode count) and Read with offset = total - 299 and limit 300. Never read the whole file, and do not read any other file.
+1. Read only its last <LINES> lines. With a Bash `tail` allowance, run `tail -n <LINES> <EVENTS_PATH> | cut -c1-600`, so a huge tool result line is cut. Otherwise count the lines with Grep (pattern `^`, output_mode count) and Read with offset = total - <LINES> + 1 and limit <LINES>. Never read the whole file, and do not read any other file.
 2. Get the current time with `date -u +%Y-%m-%dT%H:%M:%SZ`.
 3. From those lines use only structure: timestamp fields, event type fields, tool name fields and the file path fields of tool calls. Ignore everything else.
 4. Reply in at most 1500 characters, conclusion first, with exactly these lines:
