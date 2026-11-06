@@ -10,9 +10,11 @@ import {
   readSync,
   readdirSync,
   renameSync,
+  statSync,
   rmSync,
   unlinkSync,
   writeFileSync,
+  writeSync,
   appendFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
@@ -65,6 +67,7 @@ const metaSchema = z
     pid: z.number().optional(),
     pid_start_time: z.string().optional(),
     exit_code: z.number().nullable().optional(),
+    failure_scope: z.enum(['account', 'run']).optional(),
     permission_denials: z.array(z.string()),
     rate_limit: z
       .object({
@@ -174,13 +177,70 @@ export function writeMeta(meta: RunMeta): void {
  * in-memory copy can never bring a finished run back to `running`.
  */
 export function patchRunning(id: string, patch: Partial<Omit<RunMeta, 'id' | 'status'>>): RunMeta {
-  const current = readMeta(id);
-  if (TERMINAL_STATUSES.includes(current.status)) {
-    throw new Error(`run ${id} already ended as ${current.status} during start`);
+  return withMetaLock(id, () => {
+    const current = readMeta(id);
+    if (TERMINAL_STATUSES.includes(current.status)) {
+      throw new Error(`run ${id} already ended as ${current.status} during start`);
+    }
+    const next: RunMeta = { ...current, ...patch, id, status: current.status };
+    writeMeta(next);
+    return next;
+  });
+}
+
+export interface LockOptions {
+  waitMs?: number;
+  staleMs?: number;
+}
+
+/** A holder that crashed leaves the file behind; the critical section is a read and a rename, so 10 s is far past any live holder. */
+const LOCK_STALE_MS = 10_000;
+const LOCK_WAIT_MS = 5_000;
+
+function sleepSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+/**
+ * Serializes every read-modify-write of one run's meta.json across processes (supervisor, cancel,
+ * reconcile, wingman-wait, start patches): the lock file is taken with exclusive create, so the
+ * second writer re-reads the meta only after the first one has renamed its result into place.
+ */
+export function withMetaLock<T>(id: string, fn: () => T, options: LockOptions = {}): T {
+  const lock = join(dirOf(id), 'meta.lock');
+  const staleMs = options.staleMs ?? LOCK_STALE_MS;
+  const deadline = Date.now() + (options.waitMs ?? LOCK_WAIT_MS);
+  for (;;) {
+    try {
+      closeSync(openSync(lock, 'wx', FILE_MODE));
+      break;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
+      try {
+        if (Date.now() - statSync(lock).mtimeMs > staleMs) unlinkSync(lock);
+      } catch {
+        // released or broken by another waiter in the meantime
+      }
+      if (Date.now() >= deadline) {
+        throw new Error(`timed out waiting for the lock of run ${id}`, { cause: err });
+      }
+      sleepSync(5);
+    }
   }
-  const next: RunMeta = { ...current, ...patch, id, status: current.status };
-  writeMeta(next);
-  return next;
+  try {
+    return fn();
+  } finally {
+    rmSync(lock, { force: true });
+  }
+}
+
+/** Reads the meta under the lock, applies `change` and writes the result back. */
+export function modifyMeta(id: string, change: (current: RunMeta) => RunMeta): RunMeta {
+  return withMetaLock(id, () => {
+    const next = change(readMeta(id));
+    writeMeta(next);
+    return next;
+  });
 }
 
 export function readMeta(id: string): RunMeta {
@@ -192,16 +252,16 @@ export function updateStatus(
   status: RunStatus,
   patch: Partial<Omit<RunMeta, 'id' | 'status'>> = {},
 ): RunMeta {
-  const current = readMeta(id);
-  if (TERMINAL_STATUSES.includes(current.status) && current.status !== status) {
-    throw new Error(`run ${id} is already ${current.status}; cannot change to ${status}`);
-  }
-  const next: RunMeta = { ...current, ...patch, id, status };
-  if (TERMINAL_STATUSES.includes(status) && !next.finished_at) {
-    next.finished_at = new Date().toISOString();
-  }
-  writeMeta(next);
-  return next;
+  return modifyMeta(id, (current) => {
+    if (TERMINAL_STATUSES.includes(current.status) && current.status !== status) {
+      throw new Error(`run ${id} is already ${current.status}; cannot change to ${status}`);
+    }
+    const next: RunMeta = { ...current, ...patch, id, status };
+    if (TERMINAL_STATUSES.includes(status) && !next.finished_at) {
+      next.finished_at = new Date().toISOString();
+    }
+    return next;
+  });
 }
 
 export function appendEvent(id: string, rawLine: string): void {
@@ -210,6 +270,51 @@ export function appendEvent(id: string, rawLine: string): void {
   const path = join(dir, 'events.jsonl');
   appendFileSync(path, rawLine.endsWith('\n') ? rawLine : `${rawLine}\n`, { mode: FILE_MODE });
   chmodSync(path, FILE_MODE);
+}
+
+export const EVENTS_CAP_MARKER = JSON.stringify({
+  type: 'wingman',
+  text: 'events.jsonl reached its size cap; later events are not recorded',
+});
+
+export interface EventLog {
+  append(rawLine: string): void;
+  close(): void;
+}
+
+/**
+ * One append-only descriptor for a whole run (mode 0600 from creation). Past `maxBytes` it writes a
+ * single marker line and drops everything after. Only the file is capped: the supervisor parses
+ * each line for the result and the status before it is recorded, so a late result is never lost.
+ */
+export function openEventLog(id: string, maxBytes: number): EventLog {
+  const dir = dirOf(id);
+  ensureDir(dir);
+  const fd = openSync(join(dir, 'events.jsonl'), 'a', FILE_MODE);
+  let written = fstatSync(fd).size;
+  let stopped = false;
+  let closed = false;
+  const put = (line: string): void => {
+    const data = line.endsWith('\n') ? line : `${line}\n`;
+    writeSync(fd, data);
+    written += Buffer.byteLength(data);
+  };
+  return {
+    append(rawLine) {
+      if (stopped || closed) return;
+      if (written + Buffer.byteLength(rawLine) + 1 > maxBytes) {
+        stopped = true;
+        put(EVENTS_CAP_MARKER);
+        return;
+      }
+      put(rawLine);
+    },
+    close() {
+      if (closed) return;
+      closed = true;
+      closeSync(fd);
+    },
+  };
 }
 
 export function pruneEvents(id: string, maxBytes: number): void {

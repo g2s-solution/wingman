@@ -2,8 +2,21 @@ import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { accountRows } from '../src/accounts.js';
-import { breakerConfig, BREAKER_REASON, consecutiveFailures, tripBreaker } from '../src/breaker.js';
-import { clearLimited, loadAccounts, markLimited, saveAccounts } from '../src/registry.js';
+import {
+  breakerConfig,
+  BREAKER_REASON,
+  consecutiveFailures,
+  isAccountFailure,
+  tripBreaker,
+} from '../src/breaker.js';
+import {
+  clearLimited,
+  loadAccounts,
+  markLimited,
+  RATE_LIMIT_REASON,
+  recordRateLimit,
+  saveAccounts,
+} from '../src/registry.js';
 import { waitForRun } from '../src/runner.js';
 import { createHandlers } from '../src/tools.js';
 import type { Account, RunMeta, RunStatus } from '../src/types.js';
@@ -53,6 +66,9 @@ function run(status: RunStatus, minute: number, acct = 'a'): RunMeta {
     id: `r${minute}${acct}`,
     account: acct,
     status,
+    ...(status === 'failed' || status === 'failed_no_report'
+      ? { failure_scope: 'account' as const }
+      : {}),
     created_at: new Date(T0.getTime() + minute * 60_000).toISOString(),
     finished_at: new Date(T0.getTime() + minute * 60_000).toISOString(),
   } as RunMeta;
@@ -96,6 +112,15 @@ describe('consecutiveFailures', () => {
     expect(consecutiveFailures([failed, done], 'a')).toBe(1);
   });
 
+  it('does not count a failed run that is task-level or has no scope', () => {
+    const taskLevel = { ...run('failed', 2), failure_scope: 'run' } as RunMeta;
+    const legacy = { ...run('failed', 3) } as RunMeta;
+    delete legacy.failure_scope;
+    expect(consecutiveFailures([run('failed', 1), taskLevel, legacy, run('failed', 4)], 'a')).toBe(
+      2,
+    );
+  });
+
   it('skips needs_input, no_status, cancelled, blocked and rate_limited without counting or resetting', () => {
     const runs = [
       run('failed', 1),
@@ -108,6 +133,25 @@ describe('consecutiveFailures', () => {
       run('failed', 7),
     ];
     expect(consecutiveFailures(runs, 'a')).toBe(3);
+  });
+});
+
+describe('isAccountFailure', () => {
+  it('counts a spawn error and a login problem, not a timeout or a task error', () => {
+    expect(isAccountFailure({ timedOut: false, spawnError: 'spawn x ENOENT', text: '' })).toBe(
+      true,
+    );
+    expect(isAccountFailure({ timedOut: false, text: 'Not logged in · Please run /login' })).toBe(
+      true,
+    );
+    expect(isAccountFailure({ timedOut: false, text: 'API Error: 401 unauthorized' })).toBe(true);
+    expect(isAccountFailure({ timedOut: true, spawnError: 'x', text: 'Not logged in' })).toBe(
+      false,
+    );
+    expect(isAccountFailure({ timedOut: false, text: 'the tests failed' })).toBe(false);
+    expect(
+      isAccountFailure({ timedOut: false, text: '[wingman] agent ended without a result message' }),
+    ).toBe(false);
   });
 });
 
@@ -202,6 +246,14 @@ describe('tripBreaker', () => {
     await markLimited('a', new Date(T0.getTime() + 3600_000));
     expect((await loadAccounts()).accounts[0]!).not.toHaveProperty('limited_reason');
   });
+
+  it('a provider rate limit is recorded with its own reason', async () => {
+    await saveAccounts({ accounts: [account('a')] });
+    const resets = Math.floor(Date.now() / 1000) + 3600;
+    expect(await recordRateLimit('a', { resetsAt: resets })).toBe(true);
+    expect((await loadAccounts()).accounts[0]!.limited_reason).toBe(RATE_LIMIT_REASON);
+    expect(RATE_LIMIT_REASON).not.toBe(BREAKER_REASON);
+  });
 });
 
 describe('a real account that keeps failing', () => {
@@ -213,8 +265,23 @@ describe('a real account that keeps failing', () => {
   });
   afterAll(() => rmSync(work, { recursive: true, force: true }));
 
-  it('is taken out of rotation after three failed runs and named in the refusal', async () => {
-    const bad = makeLauncher(work, 'nonzero', join(work, 'log.jsonl'));
+  it('is not limited by three task-level failures', async () => {
+    const task = makeLauncher(work, 'nonzero', join(work, 'log-task.jsonl'));
+    await saveAccounts({
+      accounts: [account('a', { command: task }), account('self', { config_dir: callerDir })],
+    });
+    const env: NodeJS.ProcessEnv = { PATH: process.env.PATH, CLAUDE_CONFIG_DIR: callerDir };
+    const h = createHandlers({ env, supervisorEntry: entry, random: () => 0 });
+    for (let i = 0; i < 3; i++) {
+      const started = await h.start({ account: 'a', prompt: 'task', cwd: tmp('cwd') });
+      const done = await waitForRun(started.run_id as string, { timeoutMs: 20000, pollMs: 50 });
+      expect(done.status).toBe('failed');
+    }
+    expect((await loadAccounts()).accounts[0]!.status).toBeUndefined();
+  });
+
+  it('is taken out of rotation after three spawn failures and named in the refusal', async () => {
+    const bad = join(work, 'no-such-agent');
     await saveAccounts({
       accounts: [account('a', { command: bad }), account('self', { config_dir: callerDir })],
     });
@@ -223,7 +290,7 @@ describe('a real account that keeps failing', () => {
     for (let i = 0; i < 3; i++) {
       const started = await h.start({ account: 'a', prompt: 'task', cwd: tmp('cwd') });
       const done = await waitForRun(started.run_id as string, { timeoutMs: 20000, pollMs: 50 });
-      expect(done.status).toBe('failed');
+      expect(done.status).toBe('failed_no_report');
       const limited = (await loadAccounts()).accounts[0]!.status === 'rate_limited';
       expect(limited).toBe(i === 2);
     }

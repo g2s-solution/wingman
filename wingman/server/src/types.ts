@@ -83,6 +83,8 @@ export interface RunMeta {
   pid?: number;
   pid_start_time?: string;
   exit_code?: number | null;
+  /** Set on a failed run: 'account' for a spawn or login error, 'run' for anything else. Only 'account' feeds the failure breaker. */
+  failure_scope?: 'account' | 'run';
   permission_denials: string[];
   rate_limit?: RateLimitInfo;
   depth: number;

@@ -147,6 +147,7 @@ describe('tools end to end', () => {
     const start = (await client.listTools()).tools.find((t) => t.name === 'wingman_start');
     expect(start?.description).toMatch(/"edit" runs arbitrary code under the target account/);
     expect(start?.description).toMatch(/deny rules are advisory/);
+    expect(start?.description).toMatch(/enforced for Claude accounts only/);
     expect(start?.description).toMatch(/"setup" is an arbitrary shell command run as the caller/);
 
     const started = await call(client, 'wingman_start', {

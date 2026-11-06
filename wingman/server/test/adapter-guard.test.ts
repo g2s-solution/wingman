@@ -199,6 +199,13 @@ describe('guard', () => {
     expect(rule).toMatch(/WINGMAN_STATUS: blocked/);
   });
 
+  it('a readonly run denies the write tools by name, an edit run does not', () => {
+    const ro = resolveTools({ preset: 'readonly' });
+    expect(ro.disallowed).toEqual(expect.arrayContaining(['Edit', 'Write', 'NotebookEdit']));
+    expect(ro.allowed).not.toContain('Write');
+    expect(resolveTools({ preset: 'edit-files' }).disallowed).not.toContain('Write');
+  });
+
   it('presets resolve as specified and the base deny list holds', () => {
     expect(PRESETS.readonly.allowed).toEqual([
       'Read',

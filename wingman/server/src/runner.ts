@@ -23,21 +23,23 @@ import {
   defaultMaxTurns,
   guardPrompt,
   parseStatusLine,
-  presetMayCommit,
+  runMayCommit,
   resolveTools,
 } from './guard.js';
 import { runDir, wingmanHome } from './paths.js';
-import { breakerConfig, tripBreaker } from './breaker.js';
+import { breakerConfig, isAccountFailure, tripBreaker } from './breaker.js';
 import { assertModelName, recordRateLimit, resolveModel } from './registry.js';
 import {
   appendEvent,
   createRun,
+  type EventLog,
   listRuns,
   pruneEvents,
+  modifyMeta,
+  openEventLog,
   patchRunning,
   readMeta,
   updateStatus,
-  writeMeta,
   writeResult,
 } from './runs.js';
 import { isAlive, isSameProcess, readStartTime } from './proc.js';
@@ -228,9 +230,10 @@ const SAFE_GIT = [
 
 /** Commits what a provider that cannot commit left in the worktree; returns a note for the report. */
 /** A full disk or a run directory removed under us must not kill the supervisor and lose the result. */
-export function recordEvent(runId: string, line: string): void {
+export function recordEvent(runId: string, line: string, log?: EventLog): void {
   try {
-    appendEvent(runId, line);
+    if (log) log.append(line);
+    else appendEvent(runId, line);
   } catch {
     // the event is dropped; the run goes on
   }
@@ -310,6 +313,12 @@ export async function runSupervisor(runId: string): Promise<void> {
     | undefined;
   let timedOut = false;
   let spawnError: string | undefined;
+  let eventLog: EventLog | undefined;
+  try {
+    eventLog = openEventLog(runId, MAX_EVENTS_BYTES);
+  } catch {
+    // recordEvent falls back to one append per line
+  }
 
   const child: ChildProcess = spawn(payload.command, payload.args, {
     cwd: payload.cwd,
@@ -343,7 +352,7 @@ export async function runSupervisor(runId: string): Promise<void> {
 
   if (child.stdout) {
     createInterface({ input: child.stdout }).on('line', (line) => {
-      recordEvent(runId, line);
+      recordEvent(runId, line, eventLog);
       for (const event of parseLine(line)) {
         if (event.kind === 'rate_limited') {
           sessionRateLimit = event.info;
@@ -361,6 +370,7 @@ export async function runSupervisor(runId: string): Promise<void> {
     recordEvent(
       runId,
       JSON.stringify({ type: 'stderr', text: chunk.toString('utf8').slice(0, 2000) }),
+      eventLog,
     );
   });
   child.on('error', (err) => {
@@ -383,6 +393,11 @@ export async function runSupervisor(runId: string): Promise<void> {
     child.on('error', () => settle(null, null));
   });
   if (timer) clearTimeout(timer);
+  try {
+    eventLog?.close();
+  } catch {
+    // nothing left to flush
+  }
 
   const current = readMeta(runId);
   if (TERMINAL_STATUSES.includes(current.status)) return;
@@ -417,9 +432,14 @@ export async function runSupervisor(runId: string): Promise<void> {
   if (outcome.status === 'rate_limited') {
     await recordRateLimit(current.account, rejectedRateLimit);
   } else if (outcome.status === 'failed' || outcome.status === 'failed_no_report') {
+    const scope = isAccountFailure({ timedOut, spawnError, text: outcome.text })
+      ? 'account'
+      : 'run';
+    patch.failure_scope = scope;
     const ended: RunMeta = {
       ...current,
       status: outcome.status,
+      failure_scope: scope,
       finished_at: new Date().toISOString(),
     };
     const others = listRuns().filter((r) => r.id !== runId);
@@ -562,7 +582,8 @@ export async function startRun(opts: StartRunOptions): Promise<RunMeta> {
   const callerBranch = top
     ? await gitOut(exec, top, ['rev-parse', '--abbrev-ref', 'HEAD'])
     : undefined;
-  if (top && callerBranch !== undefined) {
+  const mayCommit = runMayCommit(opts.preset, opts.allowed_tools);
+  if (top && callerBranch !== undefined && mayCommit) {
     if (callerBranch === 'HEAD') throw new Error('Refusing to start a run on a detached HEAD');
     if (!opts.worktree && (await baseBranches(exec, top, parentEnv)).includes(callerBranch)) {
       throw new Error(
@@ -570,8 +591,6 @@ export async function startRun(opts: StartRunOptions): Promise<RunMeta> {
       );
     }
   }
-  const mayCommit =
-    opts.allowed_tools !== undefined || presetMayCommit(opts.preset ?? DEFAULT_PRESET);
   if (opts.create_branch === false && mayCommit && opts.worktree) {
     throw new Error(
       'branch:false is only for runs that cannot commit: commits in a detached worktree would be lost on cleanup',
@@ -582,7 +601,9 @@ export async function startRun(opts: StartRunOptions): Promise<RunMeta> {
     throw new Error('lock_key needs a worktree run inside a git repository');
   }
   if (opts.setup !== undefined && !repo) {
-    throw new Error('setup needs a worktree run inside a git repository');
+    throw new Error(
+      'setup needs a worktree run inside a git repository: pass worktree:true (the readonly preset runs in cwd by default)',
+    );
   }
   const offset = repo ? offsetInRepo(repo, opts.cwd) : '';
 
@@ -703,7 +724,7 @@ async function discardStart(meta: RunMeta, exec: ExecFn): Promise<void> {
   if (meta.worktree) {
     try {
       // the disk copy may predate the worktree when the start-phase patch was refused
-      writeMeta({ ...readMeta(meta.id), worktree: meta.worktree });
+      modifyMeta(meta.id, (current) => ({ ...current, worktree: meta.worktree }));
     } catch {
       // run dir gone
     }

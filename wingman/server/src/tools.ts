@@ -6,7 +6,7 @@ import { z } from 'zod';
 import pkg from '../package.json' with { type: 'json' };
 import { publicAccounts } from './accounts.js';
 import type { Account } from './types.js';
-import { DEFAULT_MAX_TURNS, TOOL_ITEM } from './guard.js';
+import { DEFAULT_MAX_TURNS, TOOL_ITEM, runMayCommit } from './guard.js';
 import { maskSecrets, safeSummary } from './mask.js';
 import {
   getAccount,
@@ -218,7 +218,7 @@ const startInput = {
     .boolean()
     .optional()
     .describe(
-      'Run in a fresh git worktree; default true in a repo, also when the caller is on the base branch.',
+      'Run in a fresh git worktree cut from the committed HEAD. Default: false for the readonly preset (runs in cwd, sees uncommitted changes, no branch, no cleanup needed; allowed on the base branch and a detached HEAD), true for runs that may commit (edit presets, explicit allowed_tools). Pass true for readonly when the run must see the committed HEAD while you keep editing, needs setup or installed dependencies, runs concurrently with others in the repo, or must not see your uncommitted changes. Refused with worktree:false for a run that may commit on the base branch or a detached HEAD.',
     ),
   branch: z
     .boolean()
@@ -234,7 +234,12 @@ const startInput = {
     .describe(
       'Stops two concurrent runs in the same repo with the same key. Needs a worktree run: refused with worktree:false or outside a git repo.',
     ),
-  setup: z.string().min(1).max(2000).optional().describe('Shell command run in a new worktree.'),
+  setup: z
+    .string()
+    .min(1)
+    .max(2000)
+    .optional()
+    .describe('Shell command run in a new worktree. Needs worktree:true for a readonly run.'),
 };
 const runIdInput = { run_id: z.string().min(1).max(64) };
 
@@ -275,7 +280,8 @@ export function createHandlers(deps: ServerDeps = {}) {
         throw new Error('cwd must be an absolute path of an existing directory');
       }
       const branch = await currentBranch(input.cwd);
-      const worktree = input.worktree ?? branch !== undefined;
+      const worktree =
+        input.worktree ?? (branch !== undefined && runMayCommit(input.preset, input.allowed_tools));
       if (worktree && branch === undefined) {
         throw new Error('worktree needs cwd to be inside a git repository with a commit');
       }
@@ -413,7 +419,7 @@ export function buildServer(deps: ServerDeps = {}): McpServer {
   server.registerTool(
     'wingman_start',
     {
-      description: `Start a one-shot detached run of Claude Code on another registered account (random active one when account is omitted); to give more work, start a new run. Returns run_id, account and status only. Presets: "readonly" (default), "edit-files" (edits files and commits; runs only git and date) and "edit" (also runs node and npm). The preset "edit" runs arbitrary code under the target account and the deny rules are advisory, not a sandbox; "setup" is an arbitrary shell command run as the caller's user, outside the presets. Then run bin/wingman-wait <run_id> in the background and call wingman_result. ${LOGS_WARNING}`,
+      description: `Start a one-shot detached run of Claude Code on another registered account (random active one when account is omitted); to give more work, start a new run. Returns run_id, account and status only. Presets: "readonly" (default), "edit-files" (edits files and commits; runs only git and date) and "edit" (also runs node and npm). The preset "edit" runs arbitrary code under the target account and the deny rules are advisory, not a sandbox. The deny rules, the push ban and the plugin ban are enforced for Claude accounts only; OpenCode gets a per-run permission config and Codex only a sandbox flag plus the prompt, so for non-Claude accounts prefer "readonly" or review the run branch more carefully; "setup" is an arbitrary shell command run as the caller's user, outside the presets. Worktree: a readonly run executes in cwd by default (sees uncommitted changes, no branch, no cleanup needed); edit presets get a fresh worktree and a run branch. Pass worktree:true for a readonly run that must read the committed HEAD while you keep editing, needs setup or installed dependencies, runs alongside others in the same repo, or must not see your uncommitted changes. Then run bin/wingman-wait <run_id> in the background and call wingman_result. ${LOGS_WARNING}`,
       inputSchema: strictInput('wingman_start', startInput),
     },
     wrap(h.start),

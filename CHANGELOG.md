@@ -2,6 +2,17 @@
 
 Versions are the plugin version in `wingman/.claude-plugin/plugin.json`. Claude Code only updates an installed plugin when this number changes.
 
+## 0.5.11
+
+- Guardrails per provider are now documented honestly (DESIGN.md, the `wingman_start` description, the `new-agent` skill): the deny list, push ban and plugin ban are enforced for Claude only; OpenCode has a per-run permission config; Codex has the sandbox flag and the prompt. For non-Claude accounts prefer `readonly` or review the run branch more carefully.
+- The failure circuit breaker counts only failures that concern the account (the command could not be started, or the report reads like a login problem). A timeout, a task error and a run killed by the caller no longer count. A provider rate limit now sets `limited_reason: rate_limit`, so it is told apart from `consecutive_failures`. Failed runs get a `failure_scope` field in `meta.json`; earlier failed runs without it no longer count.
+- Every read-modify-write of `meta.json` is serialized by a per-run lock file (exclusive create, 5 s wait, stale after 10 s), so concurrent writers cannot lose a field or undo a terminal status.
+- `events.jsonl` is written through one descriptor per run, created 0600, and stops at 20 MiB with one marker line while the run is still going. The result and status line are parsed from the live stream, so they are unaffected.
+
+## 0.5.10
+
+- The caller decides whether a run gets a worktree. In a git repo a `readonly` run (without `allowed_tools`) now runs in `cwd` by default: no `git worktree add`, no `setup`, no run branch, no lock, and it sees uncommitted changes. It is allowed on a base branch and on a detached HEAD, because the preset cannot commit; `Edit`, `Write` and `NotebookEdit` are also denied by name for readonly runs. Runs that may commit keep a worktree by default and keep the refusals of `worktree:false` on a base branch or detached HEAD. An explicit `worktree` always wins. `setup` and `lock_key` without a worktree are refused (the `setup` message says to pass `worktree:true`). The `worktree` and `wingman_start` descriptions and the `new-agent` skill (section "Worktree or not") say when to pass `worktree:true`. Behaviour change: callers that relied on a readonly run's detached worktree must pass `worktree:true`.
+
 ## 0.5.9
 
 - New caller skill `progress` (`wingman:progress <run_id>`): follows a running run through one haiku reader run that reads its `events.jsonl` and returns a masked structural summary (elapsed time, tool calls by name, last file paths, a verdict `progressing`, `idle`, `stuck` or `finished`). The caller never reads the log itself. The reader session sees raw tool output, so a content-filter block ends it `failed_no_report`, and then the progress view is unavailable. The `new-agent` skill and the tool descriptions point to it.
