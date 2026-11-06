@@ -14,6 +14,7 @@ import {
   rmSync,
   unlinkSync,
   writeFileSync,
+  writeSync,
   appendFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
@@ -267,6 +268,51 @@ export function appendEvent(id: string, rawLine: string): void {
   const path = join(dir, 'events.jsonl');
   appendFileSync(path, rawLine.endsWith('\n') ? rawLine : `${rawLine}\n`, { mode: FILE_MODE });
   chmodSync(path, FILE_MODE);
+}
+
+export const EVENTS_CAP_MARKER = JSON.stringify({
+  type: 'wingman',
+  text: 'events.jsonl reached its size cap; later events are not recorded',
+});
+
+export interface EventLog {
+  append(rawLine: string): void;
+  close(): void;
+}
+
+/**
+ * One append-only descriptor for a whole run (mode 0600 from creation). Past `maxBytes` it writes a
+ * single marker line and drops everything after. Only the file is capped: the supervisor parses
+ * each line for the result and the status before it is recorded, so a late result is never lost.
+ */
+export function openEventLog(id: string, maxBytes: number): EventLog {
+  const dir = dirOf(id);
+  ensureDir(dir);
+  const fd = openSync(join(dir, 'events.jsonl'), 'a', FILE_MODE);
+  let written = fstatSync(fd).size;
+  let stopped = false;
+  let closed = false;
+  const put = (line: string): void => {
+    const data = line.endsWith('\n') ? line : `${line}\n`;
+    writeSync(fd, data);
+    written += Buffer.byteLength(data);
+  };
+  return {
+    append(rawLine) {
+      if (stopped || closed) return;
+      if (written + Buffer.byteLength(rawLine) + 1 > maxBytes) {
+        stopped = true;
+        put(EVENTS_CAP_MARKER);
+        return;
+      }
+      put(rawLine);
+    },
+    close() {
+      if (closed) return;
+      closed = true;
+      closeSync(fd);
+    },
+  };
 }
 
 export function pruneEvents(id: string, maxBytes: number): void {

@@ -15,9 +15,11 @@ import { join } from 'node:path';
 import {
   appendEvent,
   createRun,
+  EVENTS_CAP_MARKER,
   listRuns,
   modifyMeta,
   newRunId,
+  openEventLog,
   patchRunning,
   pruneEvents,
   pruneOldEvents,
@@ -106,6 +108,22 @@ describe('runs', () => {
       }),
     ).toThrow('boom');
     expect(existsSync(lock)).toBe(false);
+  });
+
+  it('the event log keeps one fd, stops at the cap with one marker and is 0600', () => {
+    const { id } = createRun(base);
+    const log = openEventLog(id, 100);
+    const path = join(runDir(id), 'events.jsonl');
+    expect(statSync(path).mode & 0o777).toBe(0o600);
+    log.append('{"n":1}');
+    log.append(`{"big":"${'x'.repeat(200)}"}`);
+    log.append('{"n":3}');
+    log.append('{"n":4}');
+    log.close();
+    log.append('{"n":5}');
+    const lines = readFileSync(path, 'utf8').trim().split('\n');
+    expect(lines).toEqual(['{"n":1}', EVENTS_CAP_MARKER]);
+    expect(statSync(path).size).toBeLessThanOrEqual(100 + EVENTS_CAP_MARKER.length + 1);
   });
 
   it('creates a running run with 0700 dirs and 0600 files', () => {

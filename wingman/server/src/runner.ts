@@ -32,9 +32,11 @@ import { assertModelName, recordRateLimit, resolveModel } from './registry.js';
 import {
   appendEvent,
   createRun,
+  type EventLog,
   listRuns,
   pruneEvents,
   modifyMeta,
+  openEventLog,
   patchRunning,
   readMeta,
   updateStatus,
@@ -229,9 +231,10 @@ const SAFE_GIT = [
 
 /** Commits what a provider that cannot commit left in the worktree; returns a note for the report. */
 /** A full disk or a run directory removed under us must not kill the supervisor and lose the result. */
-export function recordEvent(runId: string, line: string): void {
+export function recordEvent(runId: string, line: string, log?: EventLog): void {
   try {
-    appendEvent(runId, line);
+    if (log) log.append(line);
+    else appendEvent(runId, line);
   } catch {
     // the event is dropped; the run goes on
   }
@@ -311,6 +314,12 @@ export async function runSupervisor(runId: string): Promise<void> {
     | undefined;
   let timedOut = false;
   let spawnError: string | undefined;
+  let eventLog: EventLog | undefined;
+  try {
+    eventLog = openEventLog(runId, MAX_EVENTS_BYTES);
+  } catch {
+    // recordEvent falls back to one append per line
+  }
 
   const child: ChildProcess = spawn(payload.command, payload.args, {
     cwd: payload.cwd,
@@ -344,7 +353,7 @@ export async function runSupervisor(runId: string): Promise<void> {
 
   if (child.stdout) {
     createInterface({ input: child.stdout }).on('line', (line) => {
-      recordEvent(runId, line);
+      recordEvent(runId, line, eventLog);
       for (const event of parseLine(line)) {
         if (event.kind === 'rate_limited') {
           sessionRateLimit = event.info;
@@ -362,6 +371,7 @@ export async function runSupervisor(runId: string): Promise<void> {
     recordEvent(
       runId,
       JSON.stringify({ type: 'stderr', text: chunk.toString('utf8').slice(0, 2000) }),
+      eventLog,
     );
   });
   child.on('error', (err) => {
@@ -384,6 +394,11 @@ export async function runSupervisor(runId: string): Promise<void> {
     child.on('error', () => settle(null, null));
   });
   if (timer) clearTimeout(timer);
+  try {
+    eventLog?.close();
+  } catch {
+    // nothing left to flush
+  }
 
   const current = readMeta(runId);
   if (TERMINAL_STATUSES.includes(current.status)) return;
