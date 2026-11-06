@@ -28750,6 +28750,7 @@ function indexOfAccount(registry2, id) {
   }
   return i;
 }
+var RATE_LIMIT_REASON = "rate_limit";
 async function markLimited(id, until, reason) {
   const registry2 = await loadAccounts();
   const i = indexOfAccount(registry2, id);
@@ -28781,7 +28782,7 @@ async function recordRateLimit(id, info, now = /* @__PURE__ */ new Date()) {
     return false;
   }
   try {
-    await markLimited(id, new Date(resets * 1e3));
+    await markLimited(id, new Date(resets * 1e3), RATE_LIMIT_REASON);
     return true;
   } catch {
     return false;
@@ -28832,9 +28833,11 @@ import {
   readSync,
   readdirSync,
   renameSync,
+  statSync,
   rmSync,
   unlinkSync,
   writeFileSync,
+  writeSync,
   appendFileSync
 } from "node:fs";
 import { join as join2 } from "node:path";
@@ -28935,6 +28938,7 @@ var metaSchema = external_exports.object({
   pid: external_exports.number().optional(),
   pid_start_time: external_exports.string().optional(),
   exit_code: external_exports.number().nullable().optional(),
+  failure_scope: external_exports.enum(["account", "run"]).optional(),
   permission_denials: external_exports.array(external_exports.string()),
   rate_limit: external_exports.object({
     status: external_exports.string().optional(),
@@ -28997,28 +29001,68 @@ function writeMeta(meta3) {
 `);
 }
 function patchRunning(id, patch) {
-  const current2 = readMeta(id);
-  if (TERMINAL_STATUSES.includes(current2.status)) {
-    throw new Error(`run ${id} already ended as ${current2.status} during start`);
+  return withMetaLock(id, () => {
+    const current2 = readMeta(id);
+    if (TERMINAL_STATUSES.includes(current2.status)) {
+      throw new Error(`run ${id} already ended as ${current2.status} during start`);
+    }
+    const next = { ...current2, ...patch, id, status: current2.status };
+    writeMeta(next);
+    return next;
+  });
+}
+var LOCK_STALE_MS = 1e4;
+var LOCK_WAIT_MS = 5e3;
+function sleepSync(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+function withMetaLock(id, fn, options = {}) {
+  const lock = join2(dirOf(id), "meta.lock");
+  const staleMs = options.staleMs ?? LOCK_STALE_MS;
+  const deadline = Date.now() + (options.waitMs ?? LOCK_WAIT_MS);
+  for (; ; ) {
+    try {
+      closeSync(openSync(lock, "wx", FILE_MODE));
+      break;
+    } catch (err) {
+      if (err.code !== "EEXIST") throw err;
+      try {
+        if (Date.now() - statSync(lock).mtimeMs > staleMs) unlinkSync(lock);
+      } catch {
+      }
+      if (Date.now() >= deadline) {
+        throw new Error(`timed out waiting for the lock of run ${id}`, { cause: err });
+      }
+      sleepSync(5);
+    }
   }
-  const next = { ...current2, ...patch, id, status: current2.status };
-  writeMeta(next);
-  return next;
+  try {
+    return fn();
+  } finally {
+    rmSync(lock, { force: true });
+  }
+}
+function modifyMeta(id, change2) {
+  return withMetaLock(id, () => {
+    const next = change2(readMeta(id));
+    writeMeta(next);
+    return next;
+  });
 }
 function readMeta(id) {
   return metaSchema.parse(JSON.parse(readFileSync(join2(dirOf(id), "meta.json"), "utf8")));
 }
 function updateStatus(id, status, patch = {}) {
-  const current2 = readMeta(id);
-  if (TERMINAL_STATUSES.includes(current2.status) && current2.status !== status) {
-    throw new Error(`run ${id} is already ${current2.status}; cannot change to ${status}`);
-  }
-  const next = { ...current2, ...patch, id, status };
-  if (TERMINAL_STATUSES.includes(status) && !next.finished_at) {
-    next.finished_at = (/* @__PURE__ */ new Date()).toISOString();
-  }
-  writeMeta(next);
-  return next;
+  return modifyMeta(id, (current2) => {
+    if (TERMINAL_STATUSES.includes(current2.status) && current2.status !== status) {
+      throw new Error(`run ${id} is already ${current2.status}; cannot change to ${status}`);
+    }
+    const next = { ...current2, ...patch, id, status };
+    if (TERMINAL_STATUSES.includes(status) && !next.finished_at) {
+      next.finished_at = (/* @__PURE__ */ new Date()).toISOString();
+    }
+    return next;
+  });
 }
 function appendEvent(id, rawLine) {
   const dir = dirOf(id);
@@ -29027,6 +29071,40 @@ function appendEvent(id, rawLine) {
   appendFileSync(path, rawLine.endsWith("\n") ? rawLine : `${rawLine}
 `, { mode: FILE_MODE });
   chmodSync(path, FILE_MODE);
+}
+var EVENTS_CAP_MARKER = JSON.stringify({
+  type: "wingman",
+  text: "events.jsonl reached its size cap; later events are not recorded"
+});
+function openEventLog(id, maxBytes) {
+  const dir = dirOf(id);
+  ensureDir(dir);
+  const fd = openSync(join2(dir, "events.jsonl"), "a", FILE_MODE);
+  let written = fstatSync(fd).size;
+  let stopped = false;
+  let closed = false;
+  const put = (line) => {
+    const data = line.endsWith("\n") ? line : `${line}
+`;
+    writeSync(fd, data);
+    written += Buffer.byteLength(data);
+  };
+  return {
+    append(rawLine) {
+      if (stopped || closed) return;
+      if (written + Buffer.byteLength(rawLine) + 1 > maxBytes) {
+        stopped = true;
+        put(EVENTS_CAP_MARKER);
+        return;
+      }
+      put(rawLine);
+    },
+    close() {
+      if (closed) return;
+      closed = true;
+      closeSync(fd);
+    }
+  };
 }
 function pruneEvents(id, maxBytes) {
   const path = join2(dirOf(id), "events.jsonl");
@@ -29523,12 +29601,12 @@ async function accountsCommand(args, now = () => /* @__PURE__ */ new Date()) {
 // src/doctor.ts
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { accessSync, constants, lstatSync, readFileSync as readFileSync2, realpathSync as realpathSync2, statSync } from "node:fs";
+import { accessSync, constants, lstatSync, readFileSync as readFileSync2, realpathSync as realpathSync2, statSync as statSync2 } from "node:fs";
 import { homedir as homedir4 } from "node:os";
 import { delimiter, isAbsolute as isAbsolute2, join as join5, resolve as resolve5 } from "node:path";
 
 // package.json
-var package_default = { version: "0.5.10" };
+var package_default = { version: "0.5.11" };
 
 // src/doctor.ts
 var SHARED_ITEMS = [
@@ -29564,7 +29642,7 @@ function canonical3(path) {
 }
 function isDir(path) {
   try {
-    return statSync(path).isDirectory();
+    return statSync2(path).isDirectory();
   } catch {
     return false;
   }
@@ -29578,7 +29656,7 @@ function exists(path) {
   }
 }
 function mode(path) {
-  return statSync(path).mode & 511;
+  return statSync2(path).mode & 511;
 }
 function octal(m) {
   return m.toString(8).padStart(4, "0");
@@ -29682,7 +29760,7 @@ function resolveCommand(command, pathVar, cwd) {
   const candidates = command.includes("/") ? [isAbsolute2(command) ? command : resolve5(cwd, command)] : pathVar.split(delimiter).filter((d) => d !== "").map((d) => join5(d, command));
   for (const c of candidates) {
     try {
-      if (statSync(c).isFile()) return c;
+      if (statSync2(c).isFile()) return c;
     } catch {
     }
   }
@@ -29969,7 +30047,7 @@ ${DOCTOR_USAGE}
 }
 
 // src/gc.ts
-import { existsSync as existsSync4, readdirSync as readdirSync4, rmSync as rmSync3, statSync as statSync2 } from "node:fs";
+import { existsSync as existsSync4, readdirSync as readdirSync4, rmSync as rmSync3, statSync as statSync3 } from "node:fs";
 import { join as join8 } from "node:path";
 
 // src/proc.ts
@@ -30490,7 +30568,7 @@ function removeStaleLocks(dryRun, removedRuns) {
       stale = !runExists(held.run_id, removedRuns) || !isSameProcess(held.pid, held.start_time);
     } else {
       try {
-        stale = Date.now() - statSync2(path).mtimeMs > UNPARSABLE_LOCK_MIN_AGE_MS;
+        stale = Date.now() - statSync3(path).mtimeMs > UNPARSABLE_LOCK_MIN_AGE_MS;
       } catch {
         continue;
       }
@@ -31271,6 +31349,11 @@ var DEFAULT_FAILURE_THRESHOLD = 3;
 var DEFAULT_COOLDOWN_MINUTES = 30;
 var FAILURES = /* @__PURE__ */ new Set(["failed", "failed_no_report"]);
 var SUCCESSES = /* @__PURE__ */ new Set(["done", "partial"]);
+var AUTH_ERROR = /not logged in|please run \/?login|login required|authentication|unauthori[sz]ed|invalid (?:api[ _-]?)?key|\b401\b|credentials|token (?:has )?expired|oauth/i;
+function isAccountFailure(input2) {
+  if (input2.timedOut) return false;
+  return input2.spawnError !== void 0 || AUTH_ERROR.test(input2.text);
+}
 var MAX_COOLDOWN_MINUTES = 7 * 24 * 60;
 function wholeNumber(raw, fallback, min, max) {
   if (raw === void 0 || !/^\d+$/.test(raw)) return fallback;
@@ -31294,7 +31377,7 @@ function consecutiveFailures(runs, account) {
   let count = 0;
   for (const run of finished) {
     if (SUCCESSES.has(run.status)) break;
-    if (FAILURES.has(run.status)) count += 1;
+    if (FAILURES.has(run.status) && run.failure_scope === "account") count += 1;
   }
   return count;
 }
@@ -31314,7 +31397,7 @@ async function tripBreaker(account, config2 = breakerConfig(), runs = listRuns()
 
 // src/snapshot.ts
 import { createHash as createHash3 } from "node:crypto";
-import { existsSync as existsSync6, readFileSync as readFileSync6, readdirSync as readdirSync5, statSync as statSync3 } from "node:fs";
+import { existsSync as existsSync6, readFileSync as readFileSync6, readdirSync as readdirSync5, statSync as statSync4 } from "node:fs";
 import { isAbsolute as isAbsolute4, join as join10, resolve as resolve6 } from "node:path";
 var SNAPSHOT_TIMEOUT_MS = 3e4;
 var sha = (text) => createHash3("sha256").update(text).digest("hex");
@@ -31333,7 +31416,7 @@ function hashHooks(hooksDir) {
     if (name.endsWith(".sample")) continue;
     try {
       const path = join10(hooksDir, name);
-      if (!statSync3(path).isFile()) continue;
+      if (!statSync4(path).isFile()) continue;
       const content = readFileSync6(path);
       lines.push(`${name} ${content.length} ${createHash3("sha256").update(content).digest("hex")}`);
     } catch {
@@ -31457,9 +31540,10 @@ var SAFE_GIT = [
   "-c",
   "core.sshCommand=false"
 ];
-function recordEvent(runId, line) {
+function recordEvent(runId, line, log) {
   try {
-    appendEvent(runId, line);
+    if (log) log.append(line);
+    else appendEvent(runId, line);
   } catch {
   }
 }
@@ -31517,6 +31601,11 @@ async function runSupervisor(runId) {
   let finished;
   let timedOut = false;
   let spawnError;
+  let eventLog;
+  try {
+    eventLog = openEventLog(runId, MAX_EVENTS_BYTES);
+  } catch {
+  }
   const child = spawn2(payload.command, payload.args, {
     cwd: payload.cwd,
     env: childEnv,
@@ -31544,7 +31633,7 @@ async function runSupervisor(runId) {
   }
   if (child.stdout) {
     createInterface({ input: child.stdout }).on("line", (line) => {
-      recordEvent(runId, line);
+      recordEvent(runId, line, eventLog);
       for (const event of parseLine(line)) {
         if (event.kind === "rate_limited") {
           sessionRateLimit = event.info;
@@ -31561,7 +31650,8 @@ async function runSupervisor(runId) {
   child.stderr?.on("data", (chunk) => {
     recordEvent(
       runId,
-      JSON.stringify({ type: "stderr", text: chunk.toString("utf8").slice(0, 2e3) })
+      JSON.stringify({ type: "stderr", text: chunk.toString("utf8").slice(0, 2e3) }),
+      eventLog
     );
   });
   child.on("error", (err) => {
@@ -31581,6 +31671,10 @@ async function runSupervisor(runId) {
     child.on("error", () => settle2(null, null));
   });
   if (timer) clearTimeout(timer);
+  try {
+    eventLog?.close();
+  } catch {
+  }
   const current2 = readMeta(runId);
   if (TERMINAL_STATUSES.includes(current2.status)) return;
   let commitNote = "";
@@ -31613,9 +31707,12 @@ ${commitNote}` };
   if (outcome.status === "rate_limited") {
     await recordRateLimit(current2.account, rejectedRateLimit);
   } else if (outcome.status === "failed" || outcome.status === "failed_no_report") {
+    const scope = isAccountFailure({ timedOut, spawnError, text: outcome.text }) ? "account" : "run";
+    patch.failure_scope = scope;
     const ended = {
       ...current2,
       status: outcome.status,
+      failure_scope: scope,
       finished_at: (/* @__PURE__ */ new Date()).toISOString()
     };
     const others = listRuns().filter((r) => r.id !== runId);
@@ -31859,7 +31956,7 @@ async function discardStart(meta3, exec) {
   }
   if (meta3.worktree) {
     try {
-      writeMeta({ ...readMeta(meta3.id), worktree: meta3.worktree });
+      modifyMeta(meta3.id, (current2) => ({ ...current2, worktree: meta3.worktree }));
     } catch {
     }
     await removeWorktree(meta3.id, exec).catch(() => void 0);
@@ -31950,7 +32047,7 @@ async function cancelRun(runId) {
 
 // src/tools.ts
 import { execFile as execFile2 } from "node:child_process";
-import { existsSync as existsSync7, statSync as statSync4 } from "node:fs";
+import { existsSync as existsSync7, statSync as statSync5 } from "node:fs";
 import { isAbsolute as isAbsolute6 } from "node:path";
 
 // node_modules/zod/v3/helpers/util.js
@@ -40197,7 +40294,7 @@ function createHandlers(deps = {}) {
   return {
     async start(input2) {
       const account = await chooseAccount(env, input2.account, random, now());
-      if (!isAbsolute6(input2.cwd) || !statSync4(input2.cwd, { throwIfNoEntry: false })?.isDirectory()) {
+      if (!isAbsolute6(input2.cwd) || !statSync5(input2.cwd, { throwIfNoEntry: false })?.isDirectory()) {
         throw new Error("cwd must be an absolute path of an existing directory");
       }
       const branch = await currentBranch(input2.cwd);
@@ -40317,7 +40414,7 @@ function buildServer(deps = {}) {
   server.registerTool(
     "wingman_start",
     {
-      description: `Start a one-shot detached run of Claude Code on another registered account (random active one when account is omitted); to give more work, start a new run. Returns run_id, account and status only. Presets: "readonly" (default), "edit-files" (edits files and commits; runs only git and date) and "edit" (also runs node and npm). The preset "edit" runs arbitrary code under the target account and the deny rules are advisory, not a sandbox; "setup" is an arbitrary shell command run as the caller's user, outside the presets. Worktree: a readonly run executes in cwd by default (sees uncommitted changes, no branch, no cleanup needed); edit presets get a fresh worktree and a run branch. Pass worktree:true for a readonly run that must read the committed HEAD while you keep editing, needs setup or installed dependencies, runs alongside others in the same repo, or must not see your uncommitted changes. Then run bin/wingman-wait <run_id> in the background and call wingman_result. ${LOGS_WARNING}`,
+      description: `Start a one-shot detached run of Claude Code on another registered account (random active one when account is omitted); to give more work, start a new run. Returns run_id, account and status only. Presets: "readonly" (default), "edit-files" (edits files and commits; runs only git and date) and "edit" (also runs node and npm). The preset "edit" runs arbitrary code under the target account and the deny rules are advisory, not a sandbox. The deny rules, the push ban and the plugin ban are enforced for Claude accounts only; OpenCode gets a per-run permission config and Codex only a sandbox flag plus the prompt, so for non-Claude accounts prefer "readonly" or review the run branch more carefully; "setup" is an arbitrary shell command run as the caller's user, outside the presets. Worktree: a readonly run executes in cwd by default (sees uncommitted changes, no branch, no cleanup needed); edit presets get a fresh worktree and a run branch. Pass worktree:true for a readonly run that must read the committed HEAD while you keep editing, needs setup or installed dependencies, runs alongside others in the same repo, or must not see your uncommitted changes. Then run bin/wingman-wait <run_id> in the background and call wingman_result. ${LOGS_WARNING}`,
       inputSchema: strictInput("wingman_start", startInput)
     },
     wrap(h.start)

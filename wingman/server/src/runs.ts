@@ -221,7 +221,9 @@ export function withMetaLock<T>(id: string, fn: () => T, options: LockOptions = 
       } catch {
         // released or broken by another waiter in the meantime
       }
-      if (Date.now() >= deadline) throw new Error(`timed out waiting for the lock of run ${id}`);
+      if (Date.now() >= deadline) {
+        throw new Error(`timed out waiting for the lock of run ${id}`, { cause: err });
+      }
       sleepSync(5);
     }
   }

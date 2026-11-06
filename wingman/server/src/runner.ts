@@ -40,7 +40,6 @@ import {
   patchRunning,
   readMeta,
   updateStatus,
-  writeMeta,
   writeResult,
 } from './runs.js';
 import { isAlive, isSameProcess, readStartTime } from './proc.js';
