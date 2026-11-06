@@ -150,6 +150,75 @@ describe('start on a base branch or detached HEAD (M4)', () => {
   });
 });
 
+describe('readonly run without a worktree', () => {
+  it('runs in cwd on a base branch and on a detached HEAD, with no worktree, branch or lock', async () => {
+    const repo = makeRepo('main');
+    const onBase = await startRun(opts('ok', { cwd: repo, preset: 'readonly' }));
+    expect(onBase.worktree).toBeUndefined();
+    expect(onBase.run_branch).toBeUndefined();
+    expect(onBase.run_cwd).toBe(repo);
+    expect(onBase.ref_snapshot?.refs).toContain('refs/heads/main');
+    expect((await settle(onBase.id)).status).toBe('done');
+    git(repo, 'checkout', '-q', '--detach');
+    const detached = await startRun(opts('ok', { cwd: repo, preset: 'readonly', worktree: false }));
+    expect(detached.worktree).toBeUndefined();
+    expect((await settle(detached.id)).status).toBe('done');
+  });
+
+  it('still maps a moved ref, edited config or added hook to needs_caller', async () => {
+    const { repo, callerHead } = featureRepo();
+    const moved = `export FAKE_REF_REPO=${repo} FAKE_REF_NAME=main FAKE_REF_TARGET=${callerHead}`;
+    const ro = { cwd: repo, preset: 'readonly' } as const;
+    expect((await settle((await startRun(opts('move_ref', ro, moved))).id)).status).toBe(
+      'needs_caller',
+    );
+    const exports = `export FAKE_REF_REPO=${repo}`;
+    expect((await settle((await startRun(opts('edit_config', ro, exports))).id)).status).toBe(
+      'needs_caller',
+    );
+    expect((await settle((await startRun(opts('edit_hook', ro, exports))).id)).status).toBe(
+      'needs_caller',
+    );
+  });
+
+  it('refuses setup and lock_key without a worktree, and worktree:false for a run that may commit', async () => {
+    const repo = makeRepo('main');
+    const ro = { cwd: repo, preset: 'readonly' } as const;
+    await expect(startRun(opts('ok', { ...ro, setup: 'true' }))).rejects.toThrow(
+      /setup needs a worktree.*worktree:true/,
+    );
+    await expect(startRun(opts('ok', { ...ro, lock_key: 'k' }))).rejects.toThrow(/lock_key needs/);
+    await expect(
+      startRun(opts('ok', { cwd: repo, preset: 'edit-files', worktree: false })),
+    ).rejects.toThrow(/base branch/);
+    await expect(
+      startRun(opts('ok', { cwd: repo, allowed_tools: ['Write'], worktree: false })),
+    ).rejects.toThrow(/base branch/);
+  });
+
+  it('the tool defaults worktree by what the run may commit, and an explicit value wins', async () => {
+    const repo = makeRepo('main');
+    const o = opts('ok', {});
+    await saveAccounts({ accounts: [o.account] });
+    const h = createHandlers({
+      env: { ...env(), CLAUDE_CONFIG_DIR: join(home, 'cfg-caller') },
+      supervisorEntry: entry,
+    });
+    const base = { account: 'target', prompt: 'x', cwd: repo };
+    const plain = await h.start(base);
+    await settle(plain.run_id as string);
+    expect(readMeta(plain.run_id as string).worktree).toBeUndefined();
+    const forced = await h.start({ ...base, worktree: true });
+    await settle(forced.run_id as string);
+    expect(readMeta(forced.run_id as string).worktree).toBeDefined();
+    await expect(h.start({ ...base, preset: 'edit-files' })).resolves.toHaveProperty('run_branch');
+    await expect(h.start({ ...base, preset: 'edit-files', worktree: false })).rejects.toThrow(
+      /base branch/,
+    );
+    await expect(h.start({ ...base, setup: 'true' })).rejects.toThrow(/pass worktree:true/);
+  });
+});
+
 describe('run branch rules', () => {
   it('a slashed caller branch gets <branch>-wm-<id> and a branch from a feature branch is not wingman/', async () => {
     const { repo } = featureRepo();

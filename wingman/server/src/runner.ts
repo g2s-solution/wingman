@@ -23,7 +23,7 @@ import {
   defaultMaxTurns,
   guardPrompt,
   parseStatusLine,
-  presetMayCommit,
+  runMayCommit,
   resolveTools,
 } from './guard.js';
 import { runDir, wingmanHome } from './paths.js';
@@ -562,7 +562,8 @@ export async function startRun(opts: StartRunOptions): Promise<RunMeta> {
   const callerBranch = top
     ? await gitOut(exec, top, ['rev-parse', '--abbrev-ref', 'HEAD'])
     : undefined;
-  if (top && callerBranch !== undefined) {
+  const mayCommit = runMayCommit(opts.preset, opts.allowed_tools);
+  if (top && callerBranch !== undefined && mayCommit) {
     if (callerBranch === 'HEAD') throw new Error('Refusing to start a run on a detached HEAD');
     if (!opts.worktree && (await baseBranches(exec, top, parentEnv)).includes(callerBranch)) {
       throw new Error(
@@ -570,8 +571,6 @@ export async function startRun(opts: StartRunOptions): Promise<RunMeta> {
       );
     }
   }
-  const mayCommit =
-    opts.allowed_tools !== undefined || presetMayCommit(opts.preset ?? DEFAULT_PRESET);
   if (opts.create_branch === false && mayCommit && opts.worktree) {
     throw new Error(
       'branch:false is only for runs that cannot commit: commits in a detached worktree would be lost on cleanup',
@@ -582,7 +581,9 @@ export async function startRun(opts: StartRunOptions): Promise<RunMeta> {
     throw new Error('lock_key needs a worktree run inside a git repository');
   }
   if (opts.setup !== undefined && !repo) {
-    throw new Error('setup needs a worktree run inside a git repository');
+    throw new Error(
+      'setup needs a worktree run inside a git repository: pass worktree:true (the readonly preset runs in cwd by default)',
+    );
   }
   const offset = repo ? offsetInRepo(repo, opts.cwd) : '';
 

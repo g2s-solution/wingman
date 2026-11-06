@@ -4,7 +4,7 @@ Hand a task from your Claude Code session to a **second Claude account** and get
 
 ```
 you:    /wingman:new-agent review the diff on this branch for bugs
-claude: starts a run on the second account (readonly, own worktree), waits, reads the report
+claude: starts a run on the second account (readonly, in your checkout; own worktree on request), waits, reads the report
 you:    get the findings; nothing in your checkout changed
 ```
 
@@ -177,7 +177,7 @@ Open a Claude Code session in a git repository (any branch, including `main`) an
 /wingman:new-agent summarize this repository in five bullets
 ```
 
-Claude picks the `readonly` preset, starts a run on a random eligible target, waits in the background and shows the report. You should see a run id, a status of `done` and the report text. A `readonly` run gets a detached worktree and cannot change your files; the skill calls `wingman_cleanup` afterwards to remove the worktree.
+Claude picks the `readonly` preset, starts a run on a random eligible target, waits in the background and shows the report. You should see a run id, a status of `done` and the report text. A `readonly` run executes in your checkout and cannot change your files; `wingman_cleanup` afterwards only closes the run (it removes a worktree when you asked for one with `worktree: true`).
 
 For a task that changes files, ask for it explicitly (for example "... and fix it"): the skill then uses the `edit` preset. The target commits on a run branch that you review and merge yourself; wingman never pushes or merges.
 
@@ -209,10 +209,10 @@ The `add-account` skill walks through adding a second account and reading this o
 |---|---|---|---|
 | Tools | Read, Glob, Grep, read-only git | plus Edit, Write, selected git commands; no `node`, `npm`, Agent or Skill | plus Skill, Agent, `node`, `npm` |
 | Runs commands | no | no (only git and `date`) | yes, arbitrary code |
-| Worktree | detached, no branch | run branch: `<your-branch>-wm-<run id>`, or `wingman/<run id>` when you are on `main` or another base branch | same as `edit-files` |
-| Your checkout | never touched | never touched | never touched |
+| Worktree | none by default: runs in your `cwd` (`worktree: true` gives a detached worktree, no branch) | run branch: `<your-branch>-wm-<run id>`, or `wingman/<run id>` when you are on `main` or another base branch | same as `edit-files` |
+| Your checkout | read only (no write tool is allowed) | never touched | never touched |
 
-Every run in a git repository gets its own worktree cut from your current HEAD, so commit what the run needs first. Starting from a base branch is fine because the run works elsewhere. A detached HEAD is refused. Outside a git repository the run uses the directory as it is.
+A `readonly` run executes in your `cwd`: it sees uncommitted changes, starts at once, needs no cleanup and works on a base branch or a detached HEAD. Pass `worktree: true` when it must read the committed HEAD while you keep editing, needs `setup` or installed dependencies, runs alongside other runs in the same repo (`lock_key`), or must not see your uncommitted changes. A run that may commit always gets its own worktree cut from your current HEAD, so commit what the run needs first; starting from a base branch is fine because the run works elsewhere, and a detached HEAD is refused. Outside a git repository the run uses the directory as it is.
 
 ## Tools
 
@@ -239,7 +239,8 @@ Run state lives in `~/.wingman/runs/<id>/`. Do not read `events.jsonl`: it holds
 | `... is the caller's own profile` | you named your own account as the target | pick another account |
 | the run ends `failed_no_report`, or the report says "Not logged in" | the target's login expired or its launcher cannot find its key | run `<launcher> auth status`; sign in again with `another-login.sh --force` |
 | `Refusing to start a run on a detached HEAD` | HEAD is not on a branch | `git switch` to a branch |
-| `Refusing to start a run on the base branch ... without a worktree` | `worktree: false` on `main` | drop `worktree: false` |
+| `Refusing to start a run on the base branch ... without a worktree` | `worktree: false` on `main` for a run that may commit | drop `worktree: false` (a `readonly` run does not need a worktree) |
+| `setup needs a worktree run` | `setup` on a `readonly` run, which has no worktree by default | pass `worktree: true` |
 | status `rate_limited` | the target hit its usage limit | the account is marked limited until the reset time; the answer lists other active accounts: start a new run on one of them, or wait |
 | status `no_status` | the run finished but its last message had no `WINGMAN_STATUS:` line, often after a denied command | read the report and `permission_denials`; fix the prompt before a new run |
 | status `needs_caller` | the run changed your base branch, branch ref, repo config or git hooks, or needs a plugin change | inspect with `git log --oneline` and `git diff`; start a new run |

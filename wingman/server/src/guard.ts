@@ -86,6 +86,11 @@ export function presetMayCommit(name: string): boolean {
   return Object.hasOwn(PRESETS, name) ? PRESETS[name as Preset].mayCommit : true;
 }
 
+/** Explicit allowed_tools are caller-chosen and may include writes, so they count as able to commit. */
+export function runMayCommit(preset: string | undefined, allowedTools?: readonly string[]): boolean {
+  return allowedTools !== undefined || presetMayCommit(preset ?? DEFAULT_PRESET);
+}
+
 export function guardPrompt(provider = 'claude'): string {
   const claude = provider === 'claude';
   return [
@@ -154,6 +159,8 @@ export function resolveTools(sel: ToolSelection): { allowed: string[]; disallowe
     const preset = Object.hasOwn(PRESETS, name) ? PRESETS[name as Preset] : undefined;
     if (!preset) throw new Error(`Unknown preset "${name}"`);
     allowed = [...preset.allowed];
+    // A readonly run may execute in the caller's checkout, so writes are denied by name too, not only by absence from the allow list.
+    if (!preset.mayCommit) disallowed.push('Edit', 'Write', 'NotebookEdit');
   }
   allowed = allowed.filter((name) => !disallowed.includes(name));
   return { allowed, disallowed };
