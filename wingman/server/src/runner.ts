@@ -27,7 +27,7 @@ import {
   resolveTools,
 } from './guard.js';
 import { runDir, wingmanHome } from './paths.js';
-import { breakerConfig, tripBreaker } from './breaker.js';
+import { breakerConfig, isAccountFailure, tripBreaker } from './breaker.js';
 import { assertModelName, recordRateLimit, resolveModel } from './registry.js';
 import {
   appendEvent,
@@ -417,9 +417,14 @@ export async function runSupervisor(runId: string): Promise<void> {
   if (outcome.status === 'rate_limited') {
     await recordRateLimit(current.account, rejectedRateLimit);
   } else if (outcome.status === 'failed' || outcome.status === 'failed_no_report') {
+    const scope = isAccountFailure({ timedOut, spawnError, text: outcome.text })
+      ? 'account'
+      : 'run';
+    patch.failure_scope = scope;
     const ended: RunMeta = {
       ...current,
       status: outcome.status,
+      failure_scope: scope,
       finished_at: new Date().toISOString(),
     };
     const others = listRuns().filter((r) => r.id !== runId);

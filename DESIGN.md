@@ -29,7 +29,7 @@ The CLI `wingman accounts list|add|disable|enable|remove` is the normal way to c
 | `weight` | relative chance in the random pick, default 1, 0 = only when named |
 | `tags`, `priority` | selection hints (v0.6) |
 | `status` | `active` (or absent), `disabled`, `rate_limited` (written back automatically when a run ends `rate_limited`, or by `wingman accounts mark-limited`) |
-| `limited_reason` | set with the failure circuit breaker (`consecutive_failures`); absent for a provider rate limit |
+| `limited_reason` | `consecutive_failures` when the failure circuit breaker limited the account (3 failed runs in a row that concern the account: a spawn error or a login problem; a timeout, a task error or a killed run does not count), `rate_limit` for a provider rate limit; absent for `mark-limited` by hand |
 | `limited_until` | ISO time (UTC) when `rate_limited` ends; optional, so entries written before v0.4 stay valid |
 
 Quota: every run records the `rate_limit_event` data the CLI emits (`status`, `resetsAt`, `rateLimitType`, `utilization`). That is per-run feedback, not a reliable pre-run gauge.

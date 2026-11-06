@@ -9,7 +9,25 @@ export const DEFAULT_COOLDOWN_MINUTES = 30;
 const FAILURES = new Set<string>(['failed', 'failed_no_report']);
 // A finished task proves the account works. Other endings (needs_input, blocked, cancelled, ...)
 // say more about the task or the caller than about the account, so they neither count nor reset.
+// The same holds for a failed run that is not marked `failure_scope: 'account'`.
 const SUCCESSES = new Set<string>(['done', 'partial']);
+
+const AUTH_ERROR =
+  /not logged in|please run \/?login|login required|authentication|unauthori[sz]ed|invalid (?:api[ _-]?)?key|\b401\b|credentials|token (?:has )?expired|oauth/i;
+
+/**
+ * True when a failed run ended for a reason that concerns the account: the command could not be
+ * spawned, or the report reads like a login problem. A timeout is never the account's fault, and
+ * any other error is the task's.
+ */
+export function isAccountFailure(input: {
+  timedOut: boolean;
+  spawnError?: string | undefined;
+  text: string;
+}): boolean {
+  if (input.timedOut) return false;
+  return input.spawnError !== undefined || AUTH_ERROR.test(input.text);
+}
 
 export interface BreakerConfig {
   threshold: number;
@@ -48,7 +66,7 @@ export function consecutiveFailures(runs: RunMeta[], account: string): number {
   let count = 0;
   for (const run of finished) {
     if (SUCCESSES.has(run.status)) break;
-    if (FAILURES.has(run.status)) count += 1;
+    if (FAILURES.has(run.status) && run.failure_scope === 'account') count += 1;
   }
   return count;
 }

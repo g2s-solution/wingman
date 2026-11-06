@@ -151,6 +151,8 @@ function indexOfAccount(registry: Registry, id: string): number {
   return i;
 }
 
+export const RATE_LIMIT_REASON = 'rate_limit';
+
 /** Marks an account limited until `until`; refuses a disabled (or unknown-status) account. */
 export async function markLimited(id: string, until: Date, reason?: string): Promise<void> {
   const registry = await loadAccounts();
@@ -198,7 +200,7 @@ export async function recordRateLimit(
     return false;
   }
   try {
-    await markLimited(id, new Date(resets * 1000));
+    await markLimited(id, new Date(resets * 1000), RATE_LIMIT_REASON);
     return true;
   } catch {
     return false;

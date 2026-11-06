@@ -65,6 +65,7 @@ const metaSchema = z
     pid: z.number().optional(),
     pid_start_time: z.string().optional(),
     exit_code: z.number().nullable().optional(),
+    failure_scope: z.enum(['account', 'run']).optional(),
     permission_denials: z.array(z.string()),
     rate_limit: z
       .object({
