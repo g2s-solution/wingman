@@ -281,8 +281,7 @@ export function createHandlers(deps: ServerDeps = {}) {
       }
       const branch = await currentBranch(input.cwd);
       const worktree =
-        input.worktree ??
-        (branch !== undefined && runMayCommit(input.preset, input.allowed_tools));
+        input.worktree ?? (branch !== undefined && runMayCommit(input.preset, input.allowed_tools));
       if (worktree && branch === undefined) {
         throw new Error('worktree needs cwd to be inside a git repository with a commit');
       }

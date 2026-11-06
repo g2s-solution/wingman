@@ -29528,7 +29528,7 @@ import { homedir as homedir4 } from "node:os";
 import { delimiter, isAbsolute as isAbsolute2, join as join5, resolve as resolve5 } from "node:path";
 
 // package.json
-var package_default = { version: "0.5.9" };
+var package_default = { version: "0.5.10" };
 
 // src/doctor.ts
 var SHARED_ITEMS = [
@@ -30753,6 +30753,9 @@ var PRESETS = {
 function presetMayCommit(name) {
   return Object.hasOwn(PRESETS, name) ? PRESETS[name].mayCommit : true;
 }
+function runMayCommit(preset, allowedTools) {
+  return allowedTools !== void 0 || presetMayCommit(preset ?? DEFAULT_PRESET);
+}
 function guardPrompt(provider = "claude") {
   const claude = provider === "claude";
   return [
@@ -30809,6 +30812,7 @@ function resolveTools(sel) {
     const preset = Object.hasOwn(PRESETS, name) ? PRESETS[name] : void 0;
     if (!preset) throw new Error(`Unknown preset "${name}"`);
     allowed = [...preset.allowed];
+    if (!preset.mayCommit) disallowed.push("Edit", "Write", "NotebookEdit");
   }
   allowed = allowed.filter((name) => !disallowed.includes(name));
   return { allowed, disallowed };
@@ -31731,7 +31735,8 @@ async function startRun(opts) {
   });
   const top = await gitOut(exec, opts.cwd, ["rev-parse", "--show-toplevel"]);
   const callerBranch = top ? await gitOut(exec, top, ["rev-parse", "--abbrev-ref", "HEAD"]) : void 0;
-  if (top && callerBranch !== void 0) {
+  const mayCommit = runMayCommit(opts.preset, opts.allowed_tools);
+  if (top && callerBranch !== void 0 && mayCommit) {
     if (callerBranch === "HEAD") throw new Error("Refusing to start a run on a detached HEAD");
     if (!opts.worktree && (await baseBranches(exec, top, parentEnv)).includes(callerBranch)) {
       throw new Error(
@@ -31739,7 +31744,6 @@ async function startRun(opts) {
       );
     }
   }
-  const mayCommit = opts.allowed_tools !== void 0 || presetMayCommit(opts.preset ?? DEFAULT_PRESET);
   if (opts.create_branch === false && mayCommit && opts.worktree) {
     throw new Error(
       "branch:false is only for runs that cannot commit: commits in a detached worktree would be lost on cleanup"
@@ -31750,7 +31754,9 @@ async function startRun(opts) {
     throw new Error("lock_key needs a worktree run inside a git repository");
   }
   if (opts.setup !== void 0 && !repo) {
-    throw new Error("setup needs a worktree run inside a git repository");
+    throw new Error(
+      "setup needs a worktree run inside a git repository: pass worktree:true (the readonly preset runs in cwd by default)"
+    );
   }
   const offset = repo ? offsetInRepo(repo, opts.cwd) : "";
   const sessionId = randomUUID();
@@ -40155,7 +40161,7 @@ var startInput = {
     `Turn limit; default by preset: ${Object.entries(DEFAULT_MAX_TURNS).map(([name, turns]) => `${name} ${turns}`).join(", ")}. An explicit value wins, up to 1000.`
   ),
   worktree: external_exports.boolean().optional().describe(
-    "Run in a fresh git worktree; default true in a repo, also when the caller is on the base branch."
+    "Run in a fresh git worktree cut from the committed HEAD. Default: false for the readonly preset (runs in cwd, sees uncommitted changes, no branch, no cleanup needed; allowed on the base branch and a detached HEAD), true for runs that may commit (edit presets, explicit allowed_tools). Pass true for readonly when the run must see the committed HEAD while you keep editing, needs setup or installed dependencies, runs concurrently with others in the repo, or must not see your uncommitted changes. Refused with worktree:false for a run that may commit on the base branch or a detached HEAD."
   ),
   branch: external_exports.boolean().optional().describe(
     "Create a run branch in the worktree. Default: yes for runs that may commit (edit presets or explicit allowed_tools), no (detached worktree) for readonly runs. branch:false is refused for runs that may commit."
@@ -40163,7 +40169,7 @@ var startInput = {
   lock_key: external_exports.string().min(1).max(200).optional().describe(
     "Stops two concurrent runs in the same repo with the same key. Needs a worktree run: refused with worktree:false or outside a git repo."
   ),
-  setup: external_exports.string().min(1).max(2e3).optional().describe("Shell command run in a new worktree.")
+  setup: external_exports.string().min(1).max(2e3).optional().describe("Shell command run in a new worktree. Needs worktree:true for a readonly run.")
 };
 var runIdInput = { run_id: external_exports.string().min(1).max(64) };
 function createHandlers(deps = {}) {
@@ -40195,7 +40201,7 @@ function createHandlers(deps = {}) {
         throw new Error("cwd must be an absolute path of an existing directory");
       }
       const branch = await currentBranch(input2.cwd);
-      const worktree = input2.worktree ?? branch !== void 0;
+      const worktree = input2.worktree ?? (branch !== void 0 && runMayCommit(input2.preset, input2.allowed_tools));
       if (worktree && branch === void 0) {
         throw new Error("worktree needs cwd to be inside a git repository with a commit");
       }
@@ -40311,7 +40317,7 @@ function buildServer(deps = {}) {
   server.registerTool(
     "wingman_start",
     {
-      description: `Start a one-shot detached run of Claude Code on another registered account (random active one when account is omitted); to give more work, start a new run. Returns run_id, account and status only. Presets: "readonly" (default), "edit-files" (edits files and commits; runs only git and date) and "edit" (also runs node and npm). The preset "edit" runs arbitrary code under the target account and the deny rules are advisory, not a sandbox; "setup" is an arbitrary shell command run as the caller's user, outside the presets. Then run bin/wingman-wait <run_id> in the background and call wingman_result. ${LOGS_WARNING}`,
+      description: `Start a one-shot detached run of Claude Code on another registered account (random active one when account is omitted); to give more work, start a new run. Returns run_id, account and status only. Presets: "readonly" (default), "edit-files" (edits files and commits; runs only git and date) and "edit" (also runs node and npm). The preset "edit" runs arbitrary code under the target account and the deny rules are advisory, not a sandbox; "setup" is an arbitrary shell command run as the caller's user, outside the presets. Worktree: a readonly run executes in cwd by default (sees uncommitted changes, no branch, no cleanup needed); edit presets get a fresh worktree and a run branch. Pass worktree:true for a readonly run that must read the committed HEAD while you keep editing, needs setup or installed dependencies, runs alongside others in the same repo, or must not see your uncommitted changes. Then run bin/wingman-wait <run_id> in the background and call wingman_result. ${LOGS_WARNING}`,
       inputSchema: strictInput("wingman_start", startInput)
     },
     wrap(h.start)

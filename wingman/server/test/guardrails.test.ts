@@ -145,7 +145,7 @@ describe('start on a base branch or detached HEAD (M4)', () => {
     await saveAccounts({ accounts: [o.account] });
     const h = createHandlers({ env: { ...env(), CLAUDE_CONFIG_DIR: callerDir } });
     await expect(
-      h.start({ account: 'target', prompt: 'x', cwd: repo, worktree: false }),
+      h.start({ account: 'target', prompt: 'x', cwd: repo, preset: 'edit', worktree: false }),
     ).rejects.toThrow(/base branch/);
   });
 });
@@ -306,6 +306,7 @@ describe('run branch rules', () => {
       prompt: 'x',
       cwd: repo,
       preset: 'readonly',
+      worktree: true,
     })) as { run_id: string; run_branch?: string };
     expect(started.run_branch).toBeUndefined();
     await settle(started.run_id);

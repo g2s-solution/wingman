@@ -87,7 +87,10 @@ export function presetMayCommit(name: string): boolean {
 }
 
 /** Explicit allowed_tools are caller-chosen and may include writes, so they count as able to commit. */
-export function runMayCommit(preset: string | undefined, allowedTools?: readonly string[]): boolean {
+export function runMayCommit(
+  preset: string | undefined,
+  allowedTools?: readonly string[],
+): boolean {
   return allowedTools !== undefined || presetMayCommit(preset ?? DEFAULT_PRESET);
 }
 
