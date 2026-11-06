@@ -1,11 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   appendFileSync,
+  existsSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
   rmSync,
   statSync,
+  utimesSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -14,12 +16,15 @@ import {
   appendEvent,
   createRun,
   listRuns,
+  modifyMeta,
   newRunId,
+  patchRunning,
   pruneEvents,
   pruneOldEvents,
   readMeta,
   runSummary,
   updateStatus,
+  withMetaLock,
   writeResult,
 } from '../src/runs.js';
 import { runDir, runsDir } from '../src/paths.js';
@@ -51,6 +56,56 @@ describe('runs', () => {
 
   it('generates 12 hex char ids', () => {
     expect(newRunId()).toMatch(/^[0-9a-f]{12}$/);
+  });
+
+  it('serializes meta writers: an interleaved writer waits and no field is lost', () => {
+    const { id } = createRun(base);
+    let inner: unknown;
+    // writer A holds the lock between its read and its write; writer B tries to enter meanwhile
+    modifyMeta(id, (current) => {
+      try {
+        withMetaLock(id, () => undefined, { waitMs: 30 });
+      } catch (err) {
+        inner = err;
+      }
+      return { ...current, permission_denials: ['Bash(cd /x)'], exit_code: 3 };
+    });
+    expect(String(inner)).toMatch(/timed out waiting for the lock/);
+    updateStatus(id, 'done', { rate_limit: { status: 'allowed' } });
+    const ended = readMeta(id);
+    expect(ended).toMatchObject({
+      status: 'done',
+      permission_denials: ['Bash(cd /x)'],
+      exit_code: 3,
+      rate_limit: { status: 'allowed' },
+    });
+    expect(ended.finished_at).toBeDefined();
+    expect(existsSync(join(runDir(id), 'meta.lock'))).toBe(false);
+  });
+
+  it('a later non-terminal write cannot undo a terminal status or bring back old fields', () => {
+    const { id } = createRun(base);
+    updateStatus(id, 'done', { permission_denials: ['Edit'] });
+    const finishedAt = readMeta(id).finished_at;
+    expect(() => patchRunning(id, { permission_denials: [], pid: 1 })).toThrow(/already ended/);
+    expect(() => updateStatus(id, 'running')).toThrow(/already done/);
+    expect(readMeta(id)).toMatchObject({ status: 'done', permission_denials: ['Edit'] });
+    expect(readMeta(id).finished_at).toBe(finishedAt);
+  });
+
+  it('breaks a stale lock and releases the lock when the callback throws', () => {
+    const { id } = createRun(base);
+    const lock = join(runDir(id), 'meta.lock');
+    writeFileSync(lock, '');
+    const old = new Date(Date.now() - 60_000);
+    utimesSync(lock, old, old);
+    expect(updateStatus(id, 'done').status).toBe('done');
+    expect(() =>
+      withMetaLock(id, () => {
+        throw new Error('boom');
+      }),
+    ).toThrow('boom');
+    expect(existsSync(lock)).toBe(false);
   });
 
   it('creates a running run with 0700 dirs and 0600 files', () => {

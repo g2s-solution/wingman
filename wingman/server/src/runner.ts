@@ -34,6 +34,7 @@ import {
   createRun,
   listRuns,
   pruneEvents,
+  modifyMeta,
   patchRunning,
   readMeta,
   updateStatus,
@@ -709,7 +710,7 @@ async function discardStart(meta: RunMeta, exec: ExecFn): Promise<void> {
   if (meta.worktree) {
     try {
       // the disk copy may predate the worktree when the start-phase patch was refused
-      writeMeta({ ...readMeta(meta.id), worktree: meta.worktree });
+      modifyMeta(meta.id, (current) => ({ ...current, worktree: meta.worktree }));
     } catch {
       // run dir gone
     }
